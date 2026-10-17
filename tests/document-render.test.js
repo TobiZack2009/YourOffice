@@ -62,6 +62,21 @@ describe("renderBlock", () => {
     expect(items[1].textContent).toBe("two");
   });
 
+  it("renders blocks nested under list items inside the item", () => {
+    const quote = createBlock("quote", { runs: [{ text: "deep" }] });
+    const list = createBlock("list", {
+      items: [{ id: "item_a", runs: [{ text: "one" }], children: [quote.id] }]
+    });
+    const article = renderDocument({
+      blockOrder: [list.id],
+      blocks: { [list.id]: list, [quote.id]: quote }
+    });
+    const li = article.querySelector("li");
+    expect(li?.querySelector(".item-children > blockquote")?.textContent).toBe("deep");
+    // Nested blocks are not rendered a second time at the root.
+    expect(article.querySelectorAll("blockquote")).toHaveLength(1);
+  });
+
   it("renders code with a language class and no markup injection", () => {
     const block = createBlock("code", { language: "js", text: "<script>alert(1)</script>" });
     const element = renderBlock(block);

@@ -324,6 +324,63 @@ function lineControls() {
   ];
 }
 
+const STYLE_OPTIONS = [
+  { value: "", label: "Style" },
+  { value: "paragraph", label: "Paragraph" },
+  { value: "heading-1", label: "Heading 1" },
+  { value: "heading-2", label: "Heading 2" },
+  { value: "heading-3", label: "Heading 3" }
+];
+
+/** @returns {Control} Paragraph / Heading 1-3 chooser for the active block (or selected blocks). */
+function styleSelect() {
+  return {
+    id: "style",
+    kind: "select",
+    label: "Style",
+    title: "Paragraph or heading style",
+    icon: "paragraph",
+    size: "large",
+    attrs: { "data-action": "block-style" },
+    options: STYLE_OPTIONS,
+    enabled: hasDoc,
+    value: (ctx) => {
+      const info = ctx.docEditor?.activeInfo?.();
+      if (info?.type === "paragraph") return "paragraph";
+      if (info?.type === "heading" && info.level) return `heading-${info.level}`;
+      return "";
+    },
+    onSelect: (ctx, value) => {
+      if (value === "paragraph") ctx.docEditor?.setActiveType({ type: "paragraph" });
+      else if (value.startsWith("heading-")) {
+        ctx.docEditor?.setActiveType({ type: "heading", level: Number(value.slice(8)) });
+      }
+    }
+  };
+}
+
+/**
+ * @param {{ key: string, label: string, icon: string }} item
+ * @returns {Control}
+ */
+function headingMenu(item) {
+  return button({
+    id: `insert-${item.key}`,
+    kind: "menu",
+    label: item.label,
+    icon: item.icon,
+    attrs: { "data-action": "insert-heading-menu" },
+    enabled: hasDoc,
+    items: (ctx) =>
+      [1, 2, 3].map((level) => ({
+        label: `Heading ${level}`,
+        icon: `h${level}`,
+        attrs: { "data-action": "insert-item", "data-insert": "heading", "data-level": level },
+        action: () => ctx.docEditor?.insertAfterActive({ type: "heading", level })
+      }))
+  });
+}
+
 const INSERT_BLOCKS = [
   { key: "paragraph", label: "Paragraph", icon: "paragraph", block: { type: "paragraph" } },
   { key: "heading", label: "Heading", icon: "h1", block: { type: "heading", level: 1 } },
@@ -466,10 +523,7 @@ function documentTabs() {
           id: "styles",
           label: "Styles",
           controls: [
-            blockType("paragraph", "Text", "paragraph", "paragraph", undefined, "Paragraph"),
-            blockType("heading-1", "H1", "h1", "heading", 1, "Heading 1"),
-            blockType("heading-2", "H2", "h2", "heading", 2, "Heading 2"),
-            blockType("heading-3", "H3", "h3", "heading", 3, "Heading 3"),
+            styleSelect(),
             blockType("quote", "Quote", "quote", "quote"),
             blockType("code", "Code", "code-block", "code", undefined, "Code block")
           ]
@@ -485,7 +539,31 @@ function documentTabs() {
             markToggle("code", "Inline code", "code")
           ]
         },
-        { id: "paragraph", label: "Paragraph", controls: [blockType("list", "List", "list", "list")] },
+        {
+          id: "paragraph",
+          label: "Paragraph",
+          controls: [
+            blockType("list", "List", "list", "list"),
+            button({
+              id: "outdent",
+              label: "Outdent",
+              title: "Outdent (Shift+Tab)",
+              icon: "outdent",
+              attrs: { "data-action": "outdent" },
+              enabled: (ctx) => Boolean(ctx.docEditor?.activeInfo?.().canOutdent),
+              action: (ctx) => ctx.docEditor?.outdent()
+            }),
+            button({
+              id: "indent",
+              label: "Indent",
+              title: "Indent (Tab)",
+              icon: "indent",
+              attrs: { "data-action": "indent" },
+              enabled: (ctx) => Boolean(ctx.docEditor?.activeInfo?.().canIndent),
+              action: (ctx) => ctx.docEditor?.indent()
+            })
+          ]
+        },
         { id: "links", label: "Links", controls: [linkControl("link")] },
         { id: "history", label: "History", controls: historyControls() }
       ]
@@ -498,7 +576,7 @@ function documentTabs() {
           id: "blocks",
           label: "Blocks",
           controls: INSERT_BLOCKS.map((item) =>
-            button({
+            item.key === "heading" ? headingMenu(item) : button({
               id: `insert-${item.key}`,
               label: item.label,
               icon: item.icon,

@@ -40,6 +40,8 @@ const ICONS = {
     ]
   },
   divider: { paths: ["M4 12h16", "M8 6h8", "M8 18h8"] },
+  indent: { paths: ["M4 5h16", "M12 10h8", "M12 15h8", "M4 20h16", "m4 9 3 3-3 3"] },
+  outdent: { paths: ["M4 5h16", "M12 10h8", "M12 15h8", "M4 20h16", "m7 9-3 3 3 3"] },
   "page-link": { paths: ["M7 3h8l4 4v14H7z", "M15 3v4h4", "M10 14h6", "M13 11l3 3-3 3"] },
 
   // embeds / sheet / slide objects

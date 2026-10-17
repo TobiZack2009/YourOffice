@@ -184,22 +184,49 @@ describe("Enter behaviour", () => {
     expect(block(ids[1]).runs).toEqual([{ text: "there", marks: { bold: true } }]);
   });
 
-  it("splits a code block into two code blocks", () => {
+  it("inserts a newline inside a code block instead of splitting it", () => {
     const { editor, order, block } = setup([{ type: "code", text: "abcdef" }]);
     const el = editable(editor.element.querySelector("code[contenteditable=true]"));
     setCaret(el, 3);
     key(el, "Enter");
+    expect(order()).toHaveLength(1);
+    expect(block(order()[0]).text).toBe("abc\ndef");
+    expect(el.textContent).toBe("abc\ndef");
+  });
+
+  it("leaves the code block on Enter at an empty last line", () => {
+    const { editor, order, block } = setup([{ type: "code", text: "abc\n" }]);
+    const el = editable(editor.element.querySelector("code[contenteditable=true]"));
+    setCaret(el, 4);
+    key(el, "Enter");
     const ids = order();
+    expect(ids).toHaveLength(2);
     expect(block(ids[0]).text).toBe("abc");
-    expect(block(ids[1]).text).toBe("def");
-    expect(block(ids[1]).type).toBe("code");
+    expect(block(ids[1]).type).toBe("paragraph");
+    expect(editor.getActiveBlockId()).toBe(ids[1]);
+  });
+
+  it("makes code blocks typeable: edits commit to the model", () => {
+    const { editor, order, block } = setup([{ type: "code", text: "" }]);
+    const el = editable(editor.element.querySelector("code[contenteditable=true]"));
+    el.textContent = "let x";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(block(order()[0]).text).toBe("let x");
+  });
+
+  it("indents with spaces in code on Tab", () => {
+    const { editor, order, block } = setup([{ type: "code", text: "x" }]);
+    const el = editable(editor.element.querySelector("code[contenteditable=true]"));
+    setCaret(el, 0);
+    key(el, "Tab");
+    expect(block(order()[0]).text).toBe("  x");
   });
 
   it("splits a list item into two items", () => {
     const { editor, order, block } = setup([
       { type: "list", ordered: false, items: [{ id: "item-1", runs: [{ text: "milk" }] }] }
     ]);
-    const el = editable(editor.element.querySelector("li[contenteditable=true]"));
+    const el = editable(editor.element.querySelector(".block-item[contenteditable=true]"));
     setCaret(el, 2);
     key(el, "Enter");
     const list = block(order()[0]);
@@ -208,21 +235,70 @@ describe("Enter behaviour", () => {
     expect(list.items[1].runs).toEqual([{ text: "lk" }]);
   });
 
-  it("removes an empty list item, exiting the list when it was the only one", () => {
+  it("ends the list on Enter in an empty last item, leaving a paragraph after it", () => {
     const { editor, order, block } = setup([
       { type: "list", ordered: false, items: [{ id: "item-1", runs: [{ text: "a" }] }, { id: "item-2", runs: [] }] }
     ]);
-    const items = editable(editor.element.querySelectorAll("li[contenteditable=true]"));
+    const items = editable(editor.element.querySelectorAll(".block-item[contenteditable=true]"));
     setCaret(items[1], 0);
     key(items[1], "Enter");
-    expect(block(order()[0]).items).toHaveLength(1);
+    const ids = order();
+    expect(ids).toHaveLength(2);
+    expect(block(ids[0]).type).toBe("list");
+    expect(block(ids[0]).items).toHaveLength(1);
+    expect(block(ids[1]).type).toBe("paragraph");
+    expect(editor.getActiveBlockId()).toBe(ids[1]);
+  });
 
-    // Now the only item, emptied, converts the whole list to a paragraph.
-    editor.refresh();
-    const single = editable(editor.element.querySelector("li[contenteditable=true]"));
-    single.textContent = "";
+  it("turns an emptied sole list item into a paragraph", () => {
+    const { editor, order, block } = setup([{ type: "list", ordered: false, items: [{ id: "item-1", runs: [] }] }]);
+    const single = editable(editor.element.querySelector(".block-item[contenteditable=true]"));
     setCaret(single, 0);
     key(single, "Enter");
+    expect(order()).toHaveLength(1);
+    expect(block(order()[0]).type).toBe("paragraph");
+  });
+
+  it("splits the list around an empty item in the middle", () => {
+    const { editor, order, block } = setup([
+      {
+        type: "list",
+        ordered: true,
+        items: [
+          { id: "i1", runs: [{ text: "one" }] },
+          { id: "i2", runs: [] },
+          { id: "i3", runs: [{ text: "three" }] }
+        ]
+      }
+    ]);
+    const items = editable(editor.element.querySelectorAll(".block-item[contenteditable=true]"));
+    setCaret(items[1], 0);
+    key(items[1], "Enter");
+    const ids = order();
+    expect(ids.map((id) => block(id).type)).toEqual(["list", "paragraph", "list"]);
+    expect(block(ids[0]).items.map((item) => item.id)).toEqual(["i1"]);
+    expect(block(ids[2]).items.map((item) => item.id)).toEqual(["i3"]);
+    expect(block(ids[2]).ordered).toBe(true);
+  });
+
+  it("starts a paragraph, not another quote, on Enter in a quote", () => {
+    const { editor, order, block } = setup([{ type: "quote", runs: [{ text: "QuoteMore" }] }]);
+    const el = editable(editor.element.querySelector("[contenteditable=true]"));
+    setCaret(el, 5);
+    key(el, "Enter");
+    const ids = order();
+    expect(block(ids[0]).type).toBe("quote");
+    expect(block(ids[0]).runs).toEqual([{ text: "Quote" }]);
+    expect(block(ids[1]).type).toBe("paragraph");
+    expect(block(ids[1]).runs).toEqual([{ text: "More" }]);
+  });
+
+  it("ends an empty quote by turning it into a paragraph", () => {
+    const { editor, order, block } = setup([{ type: "quote", runs: [] }]);
+    const el = editable(editor.element.querySelector("[contenteditable=true]"));
+    setCaret(el, 0);
+    key(el, "Enter");
+    expect(order()).toHaveLength(1);
     expect(block(order()[0]).type).toBe("paragraph");
   });
 });
@@ -342,6 +418,49 @@ describe("toolbar-driven structure", () => {
     expect(editor.element.querySelector("h1")?.textContent).toBe("T");
   });
 
+  it("changes only the list item under the caret, splitting the list around it", () => {
+    const { editor, order, block } = setup([
+      {
+        type: "list",
+        ordered: false,
+        items: [
+          { id: "i1", runs: [{ text: "one" }] },
+          { id: "i2", runs: [{ text: "two" }] },
+          { id: "i3", runs: [{ text: "three" }] }
+        ]
+      }
+    ]);
+    const items = [...editor.element.querySelectorAll(".block-item[contenteditable=true]")];
+    items[1].dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    editor.setActiveType({ type: "quote" });
+
+    const ids = order();
+    expect(ids.map((id) => block(id).type)).toEqual(["list", "quote", "list"]);
+    expect(block(ids[0]).items.map((item) => item.id)).toEqual(["i1"]);
+    expect(block(ids[1]).runs).toEqual([{ text: "two" }]);
+    expect(block(ids[2]).items.map((item) => item.id)).toEqual(["i3"]);
+    expect(editor.getActiveBlockId()).toBe(ids[1]);
+  });
+
+  it("puts a quote ahead of the list when the first item changes", () => {
+    const { editor, order, block } = setup([
+      {
+        type: "list",
+        ordered: false,
+        items: [
+          { id: "i1", runs: [{ text: "one" }] },
+          { id: "i2", runs: [{ text: "two" }] }
+        ]
+      }
+    ]);
+    const items = [...editor.element.querySelectorAll(".block-item[contenteditable=true]")];
+    items[0].dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    editor.setActiveType({ type: "quote" });
+    const ids = order();
+    expect(ids.map((id) => block(id).type)).toEqual(["quote", "list"]);
+    expect(block(ids[1]).items.map((item) => item.id)).toEqual(["i2"]);
+  });
+
   it("inserts a block at the end and focuses it", () => {
     const { editor, order } = setup([{ type: "paragraph", runs: [{ text: "one" }] }]);
     const id = editor.insertAtEnd({ type: "quote" });
@@ -380,5 +499,278 @@ describe("renderer reacts to model changes", () => {
     editor.destroy();
     ws.dispatch("changeBlockType", { pageId, blockId: order()[0], type: "heading", fields: { level: 2 } });
     expect(editor.element.querySelector("h2")).toBeNull();
+  });
+});
+
+/** @param {Element} el @param {string} type @param {MouseEventInit} [init] */
+function mouse(el, type, init = {}) {
+  el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }));
+}
+
+const THREE = [
+  { type: "paragraph", runs: [{ text: "one" }] },
+  { type: "paragraph", runs: [{ text: "two" }] },
+  { type: "paragraph", runs: [{ text: "three" }] }
+];
+
+describe("multi-block selection", () => {
+  it("selects every block between a mousedown and a drag", () => {
+    const { editor } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    mouse(els[0], "mousedown");
+    mouse(els[2], "mousemove", { buttons: 1 });
+    mouse(document.body, "mouseup");
+    expect(editor.getSelectedUnits()).toHaveLength(3);
+    expect(editor.element.querySelectorAll(".is-block-selected")).toHaveLength(3);
+    expect(editor.activeInfo().selectionSize).toBe(3);
+  });
+
+  it("does not select anything for a plain click or a drag inside one block", () => {
+    const { editor } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    mouse(els[0], "mousedown");
+    mouse(els[0], "mousemove", { buttons: 1 });
+    expect(editor.getSelectedUnits()).toHaveLength(0);
+  });
+
+  it("shift-click selects from the active block to the clicked one", () => {
+    const { editor } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    editor.focusBlock(editor.element.querySelector("[data-block-id]").getAttribute("data-block-id"), "end");
+    mouse(els[1], "mousedown", { shiftKey: true });
+    expect(editor.getSelectedUnits()).toHaveLength(2);
+  });
+
+  it("Escape selects the current block and Shift+ArrowDown extends the selection", () => {
+    const { editor } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    editor.focusBlock(editor.element.querySelector("[data-block-id]").getAttribute("data-block-id"), "end");
+    key(els[0], "Escape");
+    expect(editor.getSelectedUnits()).toHaveLength(1);
+    key(editor.element, "ArrowDown", { shiftKey: true });
+    expect(editor.getSelectedUnits()).toHaveLength(2);
+    key(editor.element, "ArrowDown", { shiftKey: true });
+    expect(editor.getSelectedUnits()).toHaveLength(3);
+  });
+
+  it("grows Select All from the unit text to every block", () => {
+    const { editor } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    setCaret(els[1], 0);
+    selectRange(els[1], 0, 3);
+    key(els[1], "a", { metaKey: true });
+    expect(editor.getSelectedUnits()).toHaveLength(3);
+  });
+
+  it("Escape/Enter returns to text editing and clears the selection", () => {
+    const { editor } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    editor.focusBlock(editor.element.querySelector("[data-block-id]").getAttribute("data-block-id"), "end");
+    key(els[0], "Escape");
+    key(editor.element, "Enter");
+    expect(editor.getSelectedUnits()).toHaveLength(0);
+  });
+
+  it("deletes the selected blocks with Backspace as one undoable step", () => {
+    const { editor, ws, order } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    mouse(els[0], "mousedown");
+    mouse(els[1], "mousemove", { buttons: 1 });
+    key(editor.element, "Backspace");
+    expect(order()).toHaveLength(1);
+    expect(editor.getSelectedUnits()).toHaveLength(0);
+    ws.undo();
+    expect(order()).toHaveLength(3);
+  });
+
+  it("keeps an empty paragraph when every block is deleted", () => {
+    const { editor, order, block } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    selectRange(els[0], 0, 3);
+    key(els[0], "a", { metaKey: true });
+    key(editor.element, "Delete");
+    expect(order()).toHaveLength(1);
+    expect(block(order()[0]).type).toBe("paragraph");
+  });
+
+  it("applies a block type to every selected block", () => {
+    const { editor, order, block } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    mouse(els[0], "mousedown");
+    mouse(els[2], "mousemove", { buttons: 1 });
+    editor.setActiveType({ type: "heading", level: 2 });
+    for (const id of order()) {
+      expect(block(id)).toMatchObject({ type: "heading", level: 2 });
+    }
+  });
+
+  it("applies a mark to every selected block", () => {
+    const { editor, order, block } = setup(THREE);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    mouse(els[0], "mousedown");
+    mouse(els[1], "mousemove", { buttons: 1 });
+    editor.toggleMark("bold");
+    expect(block(order()[0]).runs.every((run) => run.marks?.bold)).toBe(true);
+    expect(block(order()[1]).runs.every((run) => run.marks?.bold)).toBe(true);
+    expect(block(order()[2]).runs.some((run) => run.marks?.bold)).toBe(false);
+  });
+});
+
+describe("heading levels", () => {
+  it("switches between heading levels and back to a paragraph", () => {
+    const { editor, order, block } = setup([{ type: "heading", level: 1, runs: [{ text: "T" }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.setActiveType({ type: "heading", level: 3 });
+    expect(block(order()[0])).toMatchObject({ type: "heading", level: 3 });
+    expect(editor.element.querySelector("h3")?.textContent).toBe("T");
+    editor.setActiveType({ type: "paragraph" });
+    expect(block(order()[0]).type).toBe("paragraph");
+    expect(editor.element.querySelector("h3")).toBeNull();
+  });
+});
+
+describe("lists and nesting", () => {
+  const makeList = () => ({
+    type: "list",
+    ordered: false,
+    items: [
+      { id: "item-a", runs: [{ text: "a" }] },
+      { id: "item-b", runs: [{ text: "b" }] }
+    ]
+  });
+
+  it("inserts a usable list: one empty editable item that takes focus", () => {
+    const { editor, order, block } = setup([{ type: "paragraph", runs: [{ text: "x" }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.insertAfterActive({ type: "list" });
+    const list = block(order()[1]);
+    expect(list.type).toBe("list");
+    expect(list.items).toHaveLength(1);
+    expect(editor.element.querySelectorAll(".block-item[contenteditable=true]")).toHaveLength(1);
+    expect(editor.activeInfo()).toMatchObject({ type: "list", itemId: list.items[0].id });
+  });
+
+  it("indents a list item under the previous one on Tab and lifts it on Shift+Tab", () => {
+    const { editor, order, block } = setup([makeList()]);
+    const items = editor.element.querySelectorAll(".block-item[contenteditable=true]");
+    setCaret(items[1], 1);
+    key(items[1], "Tab");
+    const parent = block(order()[0]);
+    expect(parent.items).toHaveLength(1);
+    expect(parent.items[0].children).toHaveLength(1);
+    const nested = block(parent.items[0].children[0]);
+    expect(nested.type).toBe("list");
+    expect(nested.items[0].runs).toEqual([{ text: "b" }]);
+    expect(editor.element.querySelector(".item-children .block-item")?.textContent).toBe("b");
+
+    const moved = editable(editor.element.querySelector(".item-children .block-item[contenteditable=true]"));
+    setCaret(moved, 1);
+    key(moved, "Tab", { shiftKey: true });
+    expect(block(order()[0]).items).toHaveLength(2);
+    expect(editor.element.querySelector(".item-children")).toBeNull();
+  });
+
+  it("does not indent the first item", () => {
+    const { editor, order, block } = setup([makeList()]);
+    const items = editor.element.querySelectorAll(".block-item[contenteditable=true]");
+    setCaret(items[0], 0);
+    key(items[0], "Tab");
+    expect(block(order()[0]).items).toHaveLength(2);
+  });
+
+  it("nests a quote and a heading under a list item with Tab", () => {
+    const { editor, order, block } = setup([
+      makeList(),
+      { type: "quote", runs: [{ text: "q" }] },
+      { type: "heading", level: 2, runs: [{ text: "h" }] }
+    ]);
+    const quote = editable(editor.element.querySelector("blockquote[contenteditable=true]"));
+    setCaret(quote, 0);
+    key(quote, "Tab");
+    expect(order()).toHaveLength(2);
+    const lastItem = block(order()[0]).items[1];
+    expect(lastItem.children).toHaveLength(1);
+    expect(block(lastItem.children[0]).type).toBe("quote");
+    expect(editor.element.querySelector(".item-children blockquote")?.textContent).toBe("q");
+
+    const heading = editable(editor.element.querySelector("h2[contenteditable=true]"));
+    setCaret(heading, 0);
+    key(heading, "Tab");
+    expect(order()).toHaveLength(1);
+    expect(block(order()[0]).items[1].children).toHaveLength(2);
+  });
+
+  it("lifts a nested quote back out with Shift+Tab", () => {
+    const { editor, order, block } = setup([makeList(), { type: "quote", runs: [{ text: "q" }] }]);
+    const quote = editable(editor.element.querySelector("blockquote[contenteditable=true]"));
+    setCaret(quote, 0);
+    key(quote, "Tab");
+    const nested = editable(editor.element.querySelector(".item-children blockquote[contenteditable=true]"));
+    setCaret(nested, 0);
+    key(nested, "Tab", { shiftKey: true });
+    expect(order()).toHaveLength(2);
+    expect(block(order()[1]).type).toBe("quote");
+  });
+
+  it("ends a nested quote on Enter when it is empty", () => {
+    const { editor, order, block } = setup([makeList(), { type: "quote", runs: [] }]);
+    const quote = editable(editor.element.querySelector("blockquote[contenteditable=true]"));
+    setCaret(quote, 0);
+    key(quote, "Tab");
+    const nested = editable(editor.element.querySelector(".item-children blockquote[contenteditable=true]"));
+    setCaret(nested, 0);
+    key(nested, "Enter");
+    expect(order()).toHaveLength(2);
+    expect(block(order()[0]).items[1].children ?? []).toHaveLength(0);
+  });
+
+  it("merges a list item into the previous one on Backspace, keeping nested children", () => {
+    const { editor, order, block } = setup([makeList()]);
+    const items = editor.element.querySelectorAll(".block-item[contenteditable=true]");
+    setCaret(items[1], 0);
+    key(items[1], "Backspace");
+    const list = block(order()[0]);
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0].runs.map((run) => run.text).join("")).toBe("ab");
+  });
+
+  it("exposes indent and outdent on the handle", () => {
+    const { editor, order, block } = setup([makeList()]);
+    const items = editor.element.querySelectorAll(".block-item[contenteditable=true]");
+    setCaret(items[1], 0);
+    items[1].dispatchEvent(new Event("focusin", { bubbles: true }));
+    editor.indent();
+    expect(block(order()[0]).items).toHaveLength(1);
+    const nested = editable(editor.element.querySelector(".item-children .block-item[contenteditable=true]"));
+    nested.dispatchEvent(new Event("focusin", { bubbles: true }));
+    editor.outdent();
+    expect(block(order()[0]).items).toHaveLength(2);
+  });
+});
+
+describe("code blocks", () => {
+  it("inserts a newline on Enter instead of splitting the block", () => {
+    const { editor, order, block } = setup([{ type: "code", text: "ab" }]);
+    const el = editable(editor.element.querySelector("code[contenteditable=true]"));
+    setCaret(el, 1);
+    key(el, "Enter");
+    expect(order()).toHaveLength(1);
+    expect(block(order()[0]).text).toBe("a\nb");
+  });
+
+  it("pastes plain text into code", () => {
+    const { editor, order, block } = setup([{ type: "code", text: "" }]);
+    const el = editable(editor.element.querySelector("code[contenteditable=true]"));
+    setCaret(el, 0);
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { getData: () => "x = 1\r\ny = 2" } });
+    el.dispatchEvent(event);
+    expect(block(order()[0]).text).toBe("x = 1\ny = 2");
+  });
+
+  it("focuses the code when the padding of the block is clicked", () => {
+    const { editor, order } = setup([{ type: "code", text: "abc" }]);
+    mouse(editor.element.querySelector("pre.block-code"), "mousedown");
+    expect(editor.getActiveBlockId()).toBe(order()[0]);
   });
 });

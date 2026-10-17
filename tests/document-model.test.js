@@ -34,9 +34,10 @@ describe("createBlock", () => {
     expect(() => createBlock("pageLink")).toThrow(/pageId/);
   });
 
-  it("creates an empty list ready for items", () => {
+  it("creates a list with one empty item so there is somewhere to type", () => {
     const list = createBlock("list", { ordered: true });
-    expect(list.items).toEqual([]);
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0].runs).toEqual([]);
     expect(validateBlock(list)).toEqual([]);
   });
 

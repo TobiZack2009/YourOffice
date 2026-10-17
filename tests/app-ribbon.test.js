@@ -138,22 +138,24 @@ describe("createRibbon", () => {
     expect(bold.disabled).toBe(false);
   });
 
-  it("reflects the active block type and runs actions", () => {
+  it("reflects the active block type in the style select and runs actions", () => {
     const { ribbon, ctx, docEditor } = setup();
     ctx.docEditor = docEditor;
     ribbon.setPage("document");
-    const h2 = /** @type {HTMLButtonElement} */ (
-      ribbon.element.querySelector('[data-action="block-type"][data-type="heading"][data-level="2"]')
-    );
-    const h1 = /** @type {HTMLButtonElement} */ (
-      ribbon.element.querySelector('[data-action="block-type"][data-type="heading"][data-level="1"]')
-    );
-    expect(h2.classList.contains("is-active")).toBe(true);
-    expect(h2.getAttribute("aria-pressed")).toBe("true");
-    expect(h1.classList.contains("is-active")).toBe(false);
+    const style = /** @type {HTMLSelectElement} */ (ribbon.element.querySelector('[data-action="block-style"]'));
+    expect(style.value).toBe("heading-2");
 
-    h1.click();
+    style.value = "heading-1";
+    style.dispatchEvent(new Event("change"));
     expect(docEditor.setActiveType).toHaveBeenCalledWith({ type: "heading", level: 1 });
+
+    style.value = "paragraph";
+    style.dispatchEvent(new Event("change"));
+    expect(docEditor.setActiveType).toHaveBeenCalledWith({ type: "paragraph" });
+
+    const quote = /** @type {HTMLButtonElement} */ (ribbon.element.querySelector('[data-action="block-type"][data-type="quote"]'));
+    quote.click();
+    expect(docEditor.setActiveType).toHaveBeenCalledWith({ type: "quote", level: undefined });
   });
 
   it("keeps editor focus: pressing a ribbon button cancels mousedown", () => {

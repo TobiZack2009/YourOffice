@@ -262,13 +262,65 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     `renameSelectedTable`, `setSelectedRowHeight`/`setSelectedColumnWidth`).
     Row/column insert and delete act on every line the range spans.
   - `styles.css` rewritten around CSS variables with per-type accents.
+- **UI bug-fix pass:**
+  - Layout: `.app` now fills `#app` (`flex: 1`), and the page editor is the whole
+    canvas (no max-width card; `.page-body` / `.sheet-editor` flex to fill it).
+  - Enter never duplicates a block kind: a quote (or any non-list, non-code block)
+    splits into the same block plus a new **paragraph**; Enter on an empty quote
+    turns it into a paragraph. Code blocks still split into code blocks.
+  - Enter on an empty list item ends the list: the item leaves as a paragraph,
+    and a list with items on both sides is split into two lists around it.
+  - Changing the block type with the caret in a list item (e.g. Quote) now affects
+    only that item (`extractListItem`): the list is split around it, instead of
+    converting the whole list and concatenating its items. Choosing List again on a
+    list only flips ordered/bulleted.
+- **Nesting, multi-select, headings, lists, code:**
+  - **Nested blocks (model).** A list item may carry `children: string[]`: ids of
+    blocks that live in `content.blocks` but not in `blockOrder`. Any block (quote,
+    heading, paragraph, code, another list) can sit under a list item; a nested list
+    is how items nest. `validateDocumentContent` computes reachability from
+    `blockOrder` plus item children (duplicates, missing refs and orphans are
+    errors). `findContainer(content, id)` returns the live id array, the parent
+    `{blockId, itemId}` and index; `insertBlock` (`parent`, `newBlockId`),
+    `deleteBlock` (purges descendants) and `moveBlock` are container-aware.
+    New commands: `extractListItem`, `deleteListItem`, `indentListItem`,
+    `outdentListItem`, `indentBlock`, `outdentBlock` (Tab / Shift+Tab). The renderer
+    emits `div.item-children` inside the `li`.
+  - **Lists insert correctly.** `createBlock("list")` always seeds one empty item
+    (previously `items: []` left nothing to type in). `createBlock` deep-copies its
+    input so callers' arrays are never shared with the store.
+  - **Heading levels.** `changeBlockType` to the same type now applies the new
+    `level`/`ordered` (H1 to H2 did nothing before). The ribbon's Styles group has a
+    Style `select` (Paragraph / Heading 1-3, `data-action="block-style"`) plus
+    Quote / Code / List toggles; the Insert tab's Heading is a menu of levels; the
+    Paragraph group gains Indent / Outdent buttons.
+  - **Multi-block selection.** Each block/list item is its own `contenteditable`
+    host, so selection across blocks is explicit editor state (`sel = {anchor,
+    focus}` over unit keys `blockId` / `blockId:itemId`, in DOM order). Triggers:
+    drag across units, shift-click, Shift+Arrow at a text edge, Escape (select the
+    current unit), Cmd/Ctrl+A (unit text, then all units). With a selection:
+    Backspace/Delete removes the units (one transaction, keeps an empty paragraph),
+    the ribbon type/mark controls apply to every unit, arrows move/extend,
+    Escape/Enter return to editing. Styling: `.is-block-selected`.
+  - **Code blocks are editable.** `pre.block-code` wraps `code[contenteditable]`
+    (block-level, min-height, `pre-wrap`); clicking the padding focuses it. Enter
+    inserts a newline (an Enter on an empty last line exits to a paragraph), Tab
+    inserts two spaces, paste inserts plain text.
+  - Indent/Outdent rules: a list item indents under the previous item (never the
+    first); a block indents under the list directly above it; Outdent lifts a nested
+    unit one level, and a top-level list item leaves its list as a paragraph. Tab is
+    always swallowed in the page. `activeInfo()` exposes `canIndent`/`canOutdent`, and
+    the ribbon buttons are disabled when they would do nothing.
+  - Enter/Backspace respect nesting: Enter on an empty nested block or item lifts
+    it; Backspace at the start of a first nested item/block lifts it, otherwise
+    merges into the previous unit.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
   `sheet-commands`, `sheet-table-engine`, `sheet-render`, `app-inline`,
   `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`, `app-ribbon`,
-  `app-quick-find`. **414 tests green across 26 files**; the single-file build
-  inlines JS + CSS into one ~127 kB HTML.
+  `app-quick-find`. `document-nesting`. **471 tests green across 27 files**; the single-file
+  build inlines JS + CSS into one ~142 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 

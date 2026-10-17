@@ -169,10 +169,11 @@ describe("addListItem", () => {
     ws.dispatch("addListItem", { pageId, blockId: listId });
     ws.dispatch("addListItem", { pageId, blockId: listId, runs: [{ text: "milk" }] });
     const items = content(ws, pageId).blocks[listId].items;
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     expect(items[0].id).toMatch(/^item_/);
     expect(items[0].runs).toEqual([]);
-    expect(items[1].runs).toEqual([{ text: "milk" }]);
+    expect(items[1].runs).toEqual([]);
+    expect(items[2].runs).toEqual([{ text: "milk" }]);
   });
 });
 

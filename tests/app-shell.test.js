@@ -35,7 +35,7 @@ describe("mountApp layout", () => {
     expect(query(root, ".title-strip")).toBeTruthy();
     expect(query(root, ".ribbon")).toBeTruthy();
     expect(query(root, ".canvas")).toBeTruthy();
-    expect(root.querySelectorAll("[data-action=block-type]")).toHaveLength(7);
+    expect(root.querySelectorAll("[data-action=block-type]")).toHaveLength(3);
     expect(root.querySelectorAll("[data-action=mark]")).toHaveLength(5);
   });
 
@@ -175,8 +175,14 @@ describe("ribbon actions", () => {
   it("converts the active block to a heading", () => {
     const { root, app, ws, docPageId } = setup();
     app.getEditor()?.focusBlock(ws.getPage(docPageId).content.blockOrder[0], "end");
-    query(root, '[data-action="block-type"][data-type="heading"][data-level="1"]')?.click();
-    expect(root.querySelector(".document-editor h1")?.textContent).toBe("hello");
+    const style = /** @type {HTMLSelectElement} */ (query(root, '[data-action="block-style"]'));
+    style.value = "heading-2";
+    style.dispatchEvent(new Event("change"));
+    expect(root.querySelector(".document-editor h2")?.textContent).toBe("hello");
+    style.value = "paragraph";
+    style.dispatchEvent(new Event("change"));
+    expect(root.querySelector(".document-editor h2")).toBeNull();
+    expect(root.querySelector(".document-editor p")?.textContent).toBe("hello");
   });
 
   it("toggles bold over a selection and marks the model dirty", () => {
@@ -204,6 +210,19 @@ describe("ribbon actions", () => {
     const order = ws.getPage(docPageId).content.blockOrder;
     expect(order).toHaveLength(2);
     expect(ws.getPage(docPageId).content.blocks[order[1]].type).toBe("divider");
+  });
+
+  it("inserts a chosen heading level from the insert menu", () => {
+    const { root, app, ws, docPageId } = setup();
+    configEditor(app, root, ws, docPageId);
+    query(root, '.ribbon-tab[data-tab="insert"]')?.click();
+    query(root, '[data-action="insert-heading-menu"]')?.click();
+    const item = Array.from(root.ownerDocument.querySelectorAll('[data-action="insert-item"][data-insert="heading"]')).find(
+      (el) => el.getAttribute("data-level") === "3"
+    );
+    /** @type {HTMLElement} */ (item).click();
+    const { blockOrder, blocks } = ws.getPage(docPageId).content;
+    expect(blocks[blockOrder[1]]).toMatchObject({ type: "heading", level: 3 });
   });
 
   it("applies a link from the popover", () => {
@@ -371,5 +390,52 @@ describe("lifecycle", () => {
     deleteViaMenu(root, pageId);
     expect(confirm).toHaveBeenCalled();
     expect(ws.getPage(pageId)).toBeTruthy();
+  });
+});
+
+describe("indent / outdent buttons", () => {
+  it("nest and lift a list item through the ribbon", () => {
+    const { root, app, ws, docPageId } = setup();
+    ws.dispatch("insertBlock", {
+      pageId: docPageId,
+      block: {
+        type: "list",
+        items: [
+          { id: "item-a", runs: [{ text: "a" }] },
+          { id: "item-b", runs: [{ text: "b" }] }
+        ]
+      }
+    });
+    const listId = ws.getPage(docPageId).content.blockOrder[1];
+    const second = /** @type {HTMLElement} */ (root.querySelectorAll(".block-item[contenteditable=true]")[1]);
+    second.focus();
+    second.dispatchEvent(new Event("focusin", { bubbles: true }));
+    query(root, '[data-action="indent"]')?.click();
+    expect(ws.getPage(docPageId).content.blocks[listId].items).toHaveLength(1);
+    expect(root.querySelector(".item-children .block-item")?.textContent).toBe("b");
+    query(root, '[data-action="outdent"]')?.click();
+    expect(ws.getPage(docPageId).content.blocks[listId].items).toHaveLength(2);
+    expect(app.getEditor()?.activeInfo().itemId).toBeTruthy();
+  });
+
+  it("are disabled when there is nothing to nest under, and outdent leaves a top-level list", () => {
+    const { root, ws, docPageId } = setup();
+    ws.dispatch("insertBlock", {
+      pageId: docPageId,
+      block: { type: "list", items: [{ id: "item-a", runs: [{ text: "a" }] }, { id: "item-b", runs: [{ text: "b" }] }] }
+    });
+    const items = root.querySelectorAll(".block-item[contenteditable=true]");
+    const focus = (el) => {
+      el.focus();
+      el.dispatchEvent(new Event("focusin", { bubbles: true }));
+    };
+    focus(items[0]);
+    expect(/** @type {HTMLButtonElement} */ (query(root, '[data-action="indent"]')).disabled).toBe(true);
+    focus(items[1]);
+    expect(/** @type {HTMLButtonElement} */ (query(root, '[data-action="indent"]')).disabled).toBe(false);
+
+    query(root, '[data-action="outdent"]')?.click();
+    const { blockOrder, blocks } = ws.getPage(docPageId).content;
+    expect(blocks[blockOrder[2]]).toMatchObject({ type: "paragraph", runs: [{ text: "b" }] });
   });
 });

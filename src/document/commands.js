@@ -14,8 +14,13 @@ import { createId } from "../core/ids.js";
 import { touchPage } from "../workspace/commands.js";
 import {
   BLOCK_TYPES,
+  canIndentBlock,
+  canOutdentBlock,
+  collectDescendants,
+  collectItemDescendants,
   createBlock,
   ensureDocumentContent,
+  findContainer,
   validateBlock,
   validateRuns
 } from "./model.js";
@@ -106,6 +111,60 @@ function orderIndex(content, blockId) {
   return content.blockOrder.indexOf(blockId);
 }
 
+/**
+ * Resolve a list item inside a list block or throw.
+ * @param {Block} block
+ * @param {unknown} itemId
+ * @returns {number} Item index.
+ */
+function requireItemIndex(block, itemId) {
+  if (block.type !== "list" || !Array.isArray(block.items)) {
+    throw new CommandError("block is not a list", "invalidBlock");
+  }
+  const id = requireString(itemId, "itemId", "invalidItem");
+  const index = block.items.findIndex((item) => item.id === id);
+  if (index === -1) throw new CommandError(`list item does not exist: ${id}`, "unknownItem");
+  return index;
+}
+
+/**
+ * Resolve the live container of a block or throw.
+ * @param {import("./model.js").DocumentContent} content
+ * @param {string} blockId
+ * @param {string} [label]
+ * @returns {import("./model.js").BlockLocation}
+ */
+function requireContainer(content, blockId, label = "block") {
+  const at = findContainer(content, blockId);
+  if (!at) throw new CommandError(`${label} is not in this page`, "unknownBlock");
+  return at;
+}
+
+/**
+ * Resolve an optional new block id supplied by the caller (so UI code that
+ * cannot read dispatch results can still find what it created).
+ * @param {import("./model.js").DocumentContent} content
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function resolveNewBlockId(content, value) {
+  if (value === undefined) return undefined;
+  const id = requireString(value, "newBlockId", "invalidBlock");
+  if (content.blocks[id]) throw new CommandError(`block already exists: ${id}`, "duplicateBlock");
+  return id;
+}
+
+/**
+ * Remove a block and everything nested under it from the registry.
+ * @param {import("./model.js").DocumentContent} content
+ * @param {string} blockId
+ */
+function purgeBlock(content, blockId) {
+  for (const id of [blockId, ...collectDescendants(content, blockId)]) {
+    delete content.blocks[id];
+  }
+}
+
 /** Document commands keyed by command type. */
 export const documentCommands = {
   /**
@@ -124,29 +183,48 @@ export const documentCommands = {
     const spec = /** @type {Record<string, unknown>} */ ({ ...p.block });
     const type = requireString(spec.type, "block.type", "invalidBlock");
     delete spec.id;
+    const newId = resolveNewBlockId(content, p.newBlockId);
+    if (newId) spec.id = newId;
     const block = createBlock(type, spec);
 
-    let index = content.blockOrder.length;
+    /** @type {string[]} */
+    let ids = content.blockOrder;
+    let index = ids.length;
+    if (p.parent !== undefined) {
+      const parent = /** @type {Record<string, unknown>} */ (p.parent ?? {});
+      const list = requireBlock(content, parent.blockId);
+      const item = /** @type {NonNullable<Block["items"]>} */ (list.items)[
+        requireItemIndex(list, parent.itemId)
+      ];
+      item.children ??= [];
+      ids = item.children;
+      index = ids.length;
+    }
     if (p.afterBlockId !== undefined) {
-      const at = orderIndex(content, requireString(p.afterBlockId, "afterBlockId", "invalidBlock"));
-      if (at === -1) throw new CommandError("afterBlockId is not in this page", "unknownBlock");
-      index = at + 1;
-    } else if (p.beforeBlockId !== undefined) {
-      const at = orderIndex(
+      const at = requireContainer(
         content,
-        requireString(p.beforeBlockId, "beforeBlockId", "invalidBlock")
+        requireString(p.afterBlockId, "afterBlockId", "invalidBlock"),
+        "afterBlockId"
       );
-      if (at === -1) throw new CommandError("beforeBlockId is not in this page", "unknownBlock");
-      index = at;
+      ids = at.ids;
+      index = at.index + 1;
+    } else if (p.beforeBlockId !== undefined) {
+      const at = requireContainer(
+        content,
+        requireString(p.beforeBlockId, "beforeBlockId", "invalidBlock"),
+        "beforeBlockId"
+      );
+      ids = at.ids;
+      index = at.index;
     } else if (p.index !== undefined) {
-      if (!Number.isInteger(p.index) || p.index < 0 || p.index > content.blockOrder.length) {
+      if (!Number.isInteger(p.index) || p.index < 0 || p.index > ids.length) {
         throw new CommandError("index is out of range", "invalidIndex");
       }
       index = /** @type {number} */ (p.index);
     }
 
     content.blocks[block.id] = block;
-    content.blockOrder.splice(index, 0, block.id);
+    ids.splice(index, 0, block.id);
     touchPage(tx, page);
   },
 
@@ -192,12 +270,27 @@ export const documentCommands = {
     if (!BLOCK_TYPES.includes(type)) {
       throw new CommandError(`unknown block type: ${type}`, "invalidBlock");
     }
-    if (type === existing.type) return;
-
-    const runs = textRunsOf(existing);
     const fields = /** @type {Record<string, unknown>} */ (
       p.fields && typeof p.fields === "object" ? { ...p.fields } : {}
     );
+
+    if (type === existing.type) {
+      // Same type: only flavour fields (heading level, list ordering) may change.
+      const patch = {};
+      if (type === "heading" && fields.level !== undefined) patch.level = fields.level;
+      if (type === "list" && fields.ordered !== undefined) patch.ordered = fields.ordered;
+      if (Object.keys(patch).length === 0) return;
+      const candidate = { ...existing, ...patch };
+      const errors = validateBlock(candidate);
+      if (errors.length > 0) {
+        throw new CommandError(`invalid block update: ${errors.join("; ")}`, "invalidBlock");
+      }
+      content.blocks[existing.id] = candidate;
+      touchPage(tx, page);
+      return;
+    }
+
+    const runs = textRunsOf(existing);
 
     if (RUN_BLOCK_TYPES.has(type)) {
       if (fields.runs === undefined) fields.runs = runs;
@@ -207,10 +300,17 @@ export const documentCommands = {
         fields.ordered = typeof existing.ordered === "boolean" ? existing.ordered : false;
       }
       if (fields.items === undefined) {
-        fields.items = runs.length > 0 ? [{ id: createId("item"), runs }] : [];
+        fields.items = [{ id: createId("item"), runs }];
       }
     } else if (type === "code") {
       if (fields.text === undefined) fields.text = plainTextOf(existing);
+    }
+
+    // Leaving a list: nested blocks stay in the document as following siblings.
+    if (existing.type === "list") {
+      const at = requireContainer(content, existing.id);
+      const orphans = (existing.items ?? []).flatMap((item) => item.children ?? []);
+      at.ids.splice(at.index + 1, 0, ...orphans);
     }
 
     const created = createBlock(type, fields);
@@ -249,14 +349,15 @@ export const documentCommands = {
     const p = /** @type {Record<string, unknown>} */ (payload ?? {});
     const { page, content } = requireDocumentPage(store, p.pageId);
     const block = requireBlock(content, p.blockId);
-    delete content.blocks[block.id];
-    const at = orderIndex(content, block.id);
-    if (at !== -1) content.blockOrder.splice(at, 1);
+    const at = findContainer(content, block.id);
+    if (at) at.ids.splice(at.index, 1);
+    purgeBlock(content, block.id);
     touchPage(tx, page);
   },
 
   /**
-   * Move a block to a new position in the page order.
+   * Move a block to a new position within its container (the page order, or
+   * the children of the list item it is nested under).
    * @param {Workspace} store
    * @param {Transaction} tx
    * @param {{ pageId: string, blockId: string, index: number }} payload
@@ -265,13 +366,13 @@ export const documentCommands = {
     const p = /** @type {Record<string, unknown>} */ (payload ?? {});
     const { page, content } = requireDocumentPage(store, p.pageId);
     const block = requireBlock(content, p.blockId);
-    const from = orderIndex(content, block.id);
-    if (!Number.isInteger(p.index) || p.index < 0 || p.index >= content.blockOrder.length) {
+    const at = requireContainer(content, block.id);
+    if (!Number.isInteger(p.index) || p.index < 0 || p.index >= at.ids.length) {
       throw new CommandError("index is out of range", "invalidIndex");
     }
-    if (from === p.index) return;
-    content.blockOrder.splice(from, 1);
-    content.blockOrder.splice(/** @type {number} */ (p.index), 0, block.id);
+    if (at.index === p.index) return;
+    at.ids.splice(at.index, 1);
+    at.ids.splice(/** @type {number} */ (p.index), 0, block.id);
     touchPage(tx, page);
   },
 
@@ -299,6 +400,225 @@ export const documentCommands = {
       throw new CommandError("index is out of range", "invalidIndex");
     }
     block.items.splice(/** @type {number} */ (index), 0, item);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Pull one item out of a list and turn it into a block of another type. The
+   * list splits around it; the item's nested blocks follow it as siblings.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string, itemId: string, type: string, fields?: Record<string, unknown>, newBlockId?: string }} payload
+   */
+  extractListItem(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const list = requireBlock(content, p.blockId);
+    const itemIndex = requireItemIndex(list, p.itemId);
+    const items = /** @type {NonNullable<Block["items"]>} */ (list.items);
+    const item = items[itemIndex];
+    const type = requireString(p.type, "type", "invalidBlock");
+    if (!BLOCK_TYPES.includes(type) || type === "list") {
+      throw new CommandError(`cannot extract a list item as ${type}`, "invalidBlock");
+    }
+    const newId = resolveNewBlockId(content, p.newBlockId);
+
+    const fields = /** @type {Record<string, unknown>} */ (
+      p.fields && typeof p.fields === "object" ? { ...p.fields } : {}
+    );
+    if (RUN_BLOCK_TYPES.has(type)) {
+      if (fields.runs === undefined) fields.runs = structuredClone(item.runs);
+      if (type === "heading" && fields.level === undefined) fields.level = 1;
+    } else if (type === "code" && fields.text === undefined) {
+      fields.text = item.runs.map((run) => run.text).join("");
+    }
+    if (newId) fields.id = newId;
+    const created = createBlock(type, fields);
+
+    const before = items.slice(0, itemIndex);
+    const after = items.slice(itemIndex + 1);
+    const at = requireContainer(content, list.id);
+    content.blocks[created.id] = created;
+
+    /** @type {string[]} */
+    const replacement = [];
+    if (before.length > 0) {
+      list.items = before;
+      replacement.push(list.id);
+    }
+    replacement.push(created.id, ...(item.children ?? []));
+    if (after.length > 0) {
+      if (before.length > 0) {
+        const tail = createBlock("list", { ordered: list.ordered, items: after });
+        content.blocks[tail.id] = tail;
+        replacement.push(tail.id);
+      } else {
+        list.items = after;
+        replacement.push(list.id);
+      }
+    } else if (before.length === 0) {
+      delete content.blocks[list.id];
+    }
+    at.ids.splice(at.index, 1, ...replacement);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Delete one list item together with everything nested under it. A list
+   * left without items is removed.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string, itemId: string }} payload
+   */
+  deleteListItem(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const list = requireBlock(content, p.blockId);
+    const itemIndex = requireItemIndex(list, p.itemId);
+    const items = /** @type {NonNullable<Block["items"]>} */ (list.items);
+    const [item] = items.splice(itemIndex, 1);
+    for (const id of [...(item.children ?? []), ...collectItemDescendants(content, item)]) {
+      delete content.blocks[id];
+    }
+    if (items.length === 0) {
+      const at = findContainer(content, list.id);
+      if (at) at.ids.splice(at.index, 1);
+      delete content.blocks[list.id];
+    }
+    touchPage(tx, page);
+  },
+
+  /**
+   * Nest a list item under its previous sibling.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string, itemId: string }} payload
+   */
+  indentListItem(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const list = requireBlock(content, p.blockId);
+    const itemIndex = requireItemIndex(list, p.itemId);
+    if (itemIndex === 0) {
+      throw new CommandError("the first list item cannot be indented", "cannotIndent");
+    }
+    const items = /** @type {NonNullable<Block["items"]>} */ (list.items);
+    const [item] = items.splice(itemIndex, 1);
+    const previous = items[itemIndex - 1];
+    previous.children ??= [];
+    const lastId = previous.children[previous.children.length - 1];
+    const last = lastId ? content.blocks[lastId] : undefined;
+    if (last?.type === "list" && last.ordered === list.ordered) {
+      /** @type {NonNullable<Block["items"]>} */ (last.items).push(item);
+    } else {
+      const nested = createBlock("list", { ordered: list.ordered, items: [item] });
+      content.blocks[nested.id] = nested;
+      previous.children.push(nested.id);
+    }
+    touchPage(tx, page);
+  },
+
+  /**
+   * Lift a list item one level. A nested item moves into the parent list right
+   * after its parent item and adopts its later siblings; a top-level item
+   * becomes a paragraph.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string, itemId: string, newBlockId?: string }} payload
+   */
+  outdentListItem(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const list = requireBlock(content, p.blockId);
+    const itemIndex = requireItemIndex(list, p.itemId);
+    const items = /** @type {NonNullable<Block["items"]>} */ (list.items);
+    const at = requireContainer(content, list.id);
+
+    if (!at.parent) {
+      documentCommands.extractListItem(store, tx, {
+        pageId: p.pageId,
+        blockId: list.id,
+        itemId: items[itemIndex].id,
+        type: "paragraph",
+        newBlockId: p.newBlockId
+      });
+      return;
+    }
+
+    const parentList = requireBlock(content, at.parent.blockId);
+    const parentItems = /** @type {NonNullable<Block["items"]>} */ (parentList.items);
+    const parentIndex = requireItemIndex(parentList, at.parent.itemId);
+    const parentItem = parentItems[parentIndex];
+
+    const later = items.splice(itemIndex + 1);
+    const [item] = items.splice(itemIndex, 1);
+    if (later.length > 0) {
+      const adopted = createBlock("list", { ordered: list.ordered, items: later });
+      content.blocks[adopted.id] = adopted;
+      item.children = [...(item.children ?? []), adopted.id];
+    }
+    if (items.length === 0) {
+      parentItem.children = (parentItem.children ?? []).filter((id) => id !== list.id);
+      delete content.blocks[list.id];
+    }
+    parentItems.splice(parentIndex + 1, 0, item);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Nest a block under the last item of the list directly above it.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string }} payload
+   */
+  indentBlock(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const block = requireBlock(content, p.blockId);
+    if (!canIndentBlock(content, block.id)) {
+      throw new CommandError("block cannot be indented", "cannotIndent");
+    }
+    const at = requireContainer(content, block.id);
+    const previous = /** @type {Block} */ (content.blocks[at.ids[at.index - 1]]);
+    const items = /** @type {NonNullable<Block["items"]>} */ (previous.items);
+    const target = items[items.length - 1];
+    at.ids.splice(at.index, 1);
+    target.children ??= [];
+    target.children.push(block.id);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Lift a nested block out of its list item. The block and its later siblings
+   * land after the list (split at the parent item) so reading order is kept.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string }} payload
+   */
+  outdentBlock(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const block = requireBlock(content, p.blockId);
+    if (!canOutdentBlock(content, block.id)) {
+      throw new CommandError("block is not nested", "cannotOutdent");
+    }
+    const at = requireContainer(content, block.id);
+    const parent = /** @type {{ blockId: string, itemId: string }} */ (at.parent);
+    const list = requireBlock(content, parent.blockId);
+    const items = /** @type {NonNullable<Block["items"]>} */ (list.items);
+    const parentIndex = requireItemIndex(list, parent.itemId);
+    const moved = at.ids.splice(at.index);
+    const outer = requireContainer(content, list.id);
+
+    const replacement = [...moved];
+    const rest = items.slice(parentIndex + 1);
+    if (rest.length > 0) {
+      list.items = items.slice(0, parentIndex + 1);
+      const tail = createBlock("list", { ordered: list.ordered, items: rest });
+      content.blocks[tail.id] = tail;
+      replacement.push(tail.id);
+    }
+    outer.ids.splice(outer.index + 1, 0, ...replacement);
     touchPage(tx, page);
   }
 };

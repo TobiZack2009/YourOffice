@@ -50,7 +50,7 @@ const ALIGNMENTS = new Set(["left", "center", "right"]);
  * @property {InlineRun[]} [runs]
  * @property {number} [level]
  * @property {boolean} [ordered]
- * @property {{ id: string, runs: InlineRun[] }[]} [items]
+ * @property {{ id: string, runs: InlineRun[], children?: string[] }[]} [items]
  * @property {string} [language]
  * @property {string} [text]
  * @property {string} [assetId]
@@ -162,6 +162,14 @@ export function validateBlock(block) {
           errors.push(
             ...validateRuns(item.runs).map((e) => `${prefix}: list.items[${index}]: ${e}`)
           );
+          if (item.children !== undefined) {
+            if (
+              !Array.isArray(item.children) ||
+              item.children.some((child) => typeof child !== "string" || child.length === 0)
+            ) {
+              errors.push(`${prefix}: list.items[${index}].children must be an array of block ids`);
+            }
+          }
         });
       }
       break;
@@ -259,6 +267,30 @@ export function validateDocumentContent(content) {
     }
   }
 
+  // Blocks nested under list items are reachable through `item.children`.
+  const pending = [...order];
+  while (pending.length > 0) {
+    const id = /** @type {string} */ (pending.pop());
+    const block = blocks[id];
+    if (!isPlainObject(block) || !Array.isArray(block.items)) continue;
+    for (const item of block.items) {
+      if (!isPlainObject(item) || !Array.isArray(item.children)) continue;
+      for (const childId of item.children) {
+        if (typeof childId !== "string") continue;
+        if (seen.has(childId)) {
+          errors.push(`block "${childId}" is referenced more than once`);
+          continue;
+        }
+        seen.add(childId);
+        if (!Object.prototype.hasOwnProperty.call(blocks, childId)) {
+          errors.push(`list item "${item.id}" references missing block "${childId}"`);
+          continue;
+        }
+        pending.push(childId);
+      }
+    }
+  }
+
   for (const [id, block] of Object.entries(blocks)) {
     if (!isPlainObject(block) || block.id !== id) {
       errors.push(`blocks["${id}"].id must match its key`);
@@ -291,7 +323,8 @@ export function createBlock(type, fields = {}) {
   const block = /** @type {Block} */ ({
     id: createId("block"),
     type,
-    ...fields
+    // Deep copy so the caller's arrays (runs, items) are never shared with the store.
+    ...structuredClone(fields)
   });
 
   if (type === "paragraph" || type === "quote" || type === "heading") {
@@ -304,8 +337,12 @@ export function createBlock(type, fields = {}) {
     if (block.width === undefined) block.width = null;
     if (block.align === undefined) block.align = "center";
   }
-  if (type === "list" && !Array.isArray(block.items)) {
-    block.items = [];
+  if (type === "list") {
+    if (typeof block.ordered !== "boolean") block.ordered = false;
+    // A list always has at least one item, otherwise there is nothing to type in.
+    if (!Array.isArray(block.items) || block.items.length === 0) {
+      block.items = [createListItem()];
+    }
   }
 
   const errors = validateBlock(block);
@@ -322,6 +359,113 @@ export function createBlock(type, fields = {}) {
  */
 export function createListItem(runs = []) {
   return { id: createId("item"), runs };
+}
+
+/**
+ * Where a block lives: the root order, or the children of a list item.
+ * @typedef {object} BlockLocation
+ * @property {string[]} ids The containing id array (live reference).
+ * @property {{ blockId: string, itemId: string } | null} parent null at the root.
+ * @property {number} index Position inside `ids`.
+ */
+
+/**
+ * Find the container array holding a block.
+ * @param {DocumentContent} content
+ * @param {string} blockId
+ * @returns {BlockLocation | null}
+ */
+export function findContainer(content, blockId) {
+  const rootIndex = content.blockOrder.indexOf(blockId);
+  if (rootIndex !== -1) return { ids: content.blockOrder, parent: null, index: rootIndex };
+  for (const block of Object.values(content.blocks)) {
+    if (block.type !== "list") continue;
+    for (const item of block.items ?? []) {
+      const index = item.children ? item.children.indexOf(blockId) : -1;
+      if (index !== -1) {
+        return {
+          ids: /** @type {string[]} */ (item.children),
+          parent: { blockId: block.id, itemId: item.id },
+          index
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Collect every block id nested (at any depth) under the given block.
+ * @param {DocumentContent} content
+ * @param {string} blockId
+ * @returns {string[]}
+ */
+export function collectDescendants(content, blockId) {
+  /** @type {string[]} */
+  const out = [];
+  const visit = (id) => {
+    const block = content.blocks[id];
+    if (!block || block.type !== "list") return;
+    for (const item of block.items ?? []) {
+      for (const childId of item.children ?? []) {
+        out.push(childId);
+        visit(childId);
+      }
+    }
+  };
+  visit(blockId);
+  return out;
+}
+
+/**
+ * Collect every block id nested under one list item.
+ * @param {DocumentContent} content
+ * @param {{ children?: string[] }} item
+ * @returns {string[]}
+ */
+export function collectItemDescendants(content, item) {
+  /** @type {string[]} */
+  const out = [];
+  for (const childId of item.children ?? []) {
+    out.push(childId, ...collectDescendants(content, childId));
+  }
+  return out;
+}
+
+/**
+ * Whether a block can be indented: its previous sibling must be a list.
+ * @param {DocumentContent} content
+ * @param {string} blockId
+ * @returns {boolean}
+ */
+export function canIndentBlock(content, blockId) {
+  const at = findContainer(content, blockId);
+  if (!at || at.index === 0) return false;
+  const previous = content.blocks[at.ids[at.index - 1]];
+  return previous?.type === "list" && (previous.items?.length ?? 0) > 0;
+}
+
+/**
+ * Whether a block can be outdented: it must live under a list item.
+ * @param {DocumentContent} content
+ * @param {string} blockId
+ * @returns {boolean}
+ */
+export function canOutdentBlock(content, blockId) {
+  return findContainer(content, blockId)?.parent != null;
+}
+
+/**
+ * Whether a list item can be indented (it needs a previous sibling item).
+ * @param {DocumentContent} content
+ * @param {string} blockId
+ * @param {string} itemId
+ * @returns {boolean}
+ */
+export function canIndentItem(content, blockId, itemId) {
+  const block = content.blocks[blockId];
+  if (block?.type !== "list") return false;
+  return (block.items ?? []).findIndex((item) => item.id === itemId) > 0;
 }
 
 /**

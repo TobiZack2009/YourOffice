@@ -16,6 +16,8 @@
  * @property {Document} [document] DOM implementation (defaults to global).
  * @property {(pageId: string) => string | undefined} [resolvePageTitle]
  * @property {(assetId: string) => string | undefined} [resolveAssetUrl]
+ * @property {Record<string, Block>} [blocks] Block registry, used to render
+ *   blocks nested under list items (set by `renderDocument`).
  */
 
 /**
@@ -101,6 +103,16 @@ export function renderBlock(block, options) {
         const li = doc.createElement("li");
         li.setAttribute("data-item-id", item.id);
         li.appendChild(renderRuns(item.runs, options));
+        if (item.children && item.children.length > 0 && options?.blocks) {
+          const nested = doc.createElement("div");
+          nested.className = "item-children";
+          for (const childId of item.children) {
+            const child = options.blocks[childId];
+            const rendered = child ? renderBlock(child, options) : null;
+            if (rendered) nested.appendChild(rendered);
+          }
+          li.appendChild(nested);
+        }
         element.appendChild(li);
       }
       return decorate(element, block);
@@ -197,10 +209,11 @@ export function renderDocument(content, options) {
   const article = doc.createElement("article");
   article.className = "document";
 
+  const withRegistry = { ...options, blocks: content.blocks };
   for (const id of content.blockOrder) {
     const block = content.blocks[id];
     if (!block) continue;
-    const element = renderBlock(block, options);
+    const element = renderBlock(block, withRegistry);
     if (element) article.appendChild(element);
   }
 
