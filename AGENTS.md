@@ -31,7 +31,7 @@ Full product/technical spec: `app.txt` (source of truth for requirements).
 - **Separate dependency graphs.** Data deps (formulas, variables) vs rendering deps
   (views to rerender) — spec §9.
 
-### Current phase: 4 — Sheet editor (Phases 1–3 complete)
+### Current phase: 4 — Sheet editor (Phases 1–3 complete; editable UI built)
 
 Directory layout (logical modules from spec §14; may split further as it grows):
 
@@ -41,8 +41,8 @@ src/
   workspace/   # schema v1, validation, migrations, store, commands, history
   sheet/       # formula engine: tokenizer, parser, evaluator, functions, recalc
   document/    # block model, block commands, DOM renderer
-  app/         # shell UI, editor glue (later phases)
-  main.js      # vite entry, placeholder shell wiring store + document render
+  app/         # shell UI, editor glue (editable documents UI built)
+  main.js      # vite entry, mounts the shell
 index.html     # dev/build shell; vite-plugin-singlefile bundles it into one HTML
 tests/         # vitest suites mirroring src structure
 ```
@@ -97,14 +97,16 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   - `src/workspace/store.js` — `Workspace` class: command dispatch inside
     transactions (nested `transact` joins outer), snapshot rollback on throw,
     per-transaction snapshot undo/redo, dirty state, `change` events carrying
-    `{kind, transactionId, label, commands, pages}`.
+    `{kind, transactionId, label, commands, pages}`, plus `canUndo` / `canRedo` /
+    `hasCommand` accessors used by the UI.
   - `src/workspace/commands.js` — built-in commands: `createPage`, `renamePage`,
     `deletePage` (cascade guard, refuses to orphan children), `movePage`
     (cycle-prevention: can't move under own descendant), `renameWorkspace`,
     `setPageContent` (deep-copied content on the page envelope).
   - `src/workspace/format.js` — `exportWorkspaceJSON` / `importWorkspaceJSON`,
     round-trip tested; rejects malformed/invalid input via `WorkspaceFormatError`.
-  - `src/main.js` — placeholder shell wired to a real `Workspace` instance.
+  - `src/main.js` — placeholder shell wired to a real `Workspace` instance
+    (replaced in the UI phase by `mountApp`).
 - **Phase 2 complete — formula engine (spec §6), pure and dependency-free:**
   - `src/sheet/errors.js` — `FormulaError` values and `ERR` singletons
     (`#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, `#NUM!`, `#N/A`, `#CIRC!`, `#ERROR!`).
@@ -131,15 +133,49 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     runs with marks, `createBlock`, `validateBlock`, `validateDocumentContent`,
     `ensureDocumentContent`. Content shape `{ blockOrder, blocks }` (order ≠ identity).
   - `src/document/commands.js` — `insertBlock` (index/after/before), `updateBlock`,
-    `setBlockRuns`, `deleteBlock`, `moveBlock`, `addListItem`; registered via
+    `setBlockRuns`, `deleteBlock`, `moveBlock`, `addListItem`, `changeBlockType`
+    (content-converting type switch that preserves block identity); registered via
     `registerDocumentCommands(store)`.
   - `src/document/render.js` — pure model → DOM: `renderDocument`, `renderBlock`,
     `renderRuns`; textContent only (no HTML injection); `data-block-id` for future
     editing glue; page-title/asset-url resolvers passed in as options.
-  - `src/main.js` — shell now seeds a document page and renders it.
+- **Editable UI (first half of the app layer, `src/app/`):**
+  - `dom.js` — `h` / `clear` / `fragment` element helpers (attributes, `on*`
+    handlers, dataset; text via textContent only).
+  - `inline.js` — the only place mapping HTML ↔ marks: `parseInlineRuns`,
+    `mergeRuns`, `runsEqual`, `runsToPlainText`, `normalizeText` (nbsp → space,
+    `<br>` → `"\n"`; b/strong→bold, i/em→italic, u→underline, s/strike/del→strike,
+    code, a[href]→link).
+  - `sidebar.js` — page tree with selection, inline rename (double-click), delete,
+    drag-to-nest. `planDrop(workspace, dragId, target)` is a pure function
+    (`{type: "onto" | "before" | "after" | "root"}` → `{newParentId, index}`) so
+    drop rules including cycle prevention are unit-tested without drag events.
+  - `block-editor.js` — `createDocumentEditor(workspace, pageId, options)`. Each
+    run-capable block is its own `contenteditable` element; structure changes
+    (Enter split, Backspace merge/delete, list item split/exit, arrow navigation)
+    are handled by dispatching commands and re-rendering, never by letting the
+    browser restructure the DOM. Typing commits on `input` via `setBlockRuns` /
+    `updateBlock`; the store `change` handler **skips re-rendering for inline-only
+    commits** (`setBlockRuns`/`updateBlock`), which is what keeps the caret stable.
+    Marks use `document.execCommand` when available, else a manual Range wrap/unwrap
+    (jsdom path). Exposes `activeInfo`, `setActiveType`, `insertAfterActive`,
+    `insertAtEnd`, `toggleMark`, `setLink`, `focusBlock`, `destroy`.
+  - `shell.js` — `mountApp(root, workspace, options)`: sidebar + toolbar (block
+    types, marks, link popover, insert menu with page links, undo/redo, dirty dot)
+    + canvas (page-title header, document editor, or Phase 4/5 stub for sheet and
+    presentation pages). Owns page selection, recreates the editor per page, and
+    maps sidebar actions to workspace commands (create seeds a starter paragraph).
+  - `styles.css` — Numbers/Pages-inspired light theme (accent `#007aff`, sidebar
+    `#f5f5f7`); imported by `src/main.js`.
+  - Deliberate gaps: no persistence yet (in-memory + dirty dot; Cmd/Ctrl+S just
+    calls `markSaved`), image insert is omitted because the asset registry lands in
+    Phase 7, and sheet/presentation pages render a stub.
+  - `src/main.js` — seeds a welcome document and calls `mountApp`.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
-  `document-commands`, `document-render`. **195 tests green across 14 files.**
+  `document-commands`, `document-render`, `app-inline`, `app-sidebar`,
+  `app-block-editor`, `app-shell`. **269 tests green across 18 files**; the
+  single-file build inlines JS + CSS into one ~57 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
