@@ -60,7 +60,7 @@ describe("mountApp layout", () => {
     expect(query(root, ".page-title-input")?.value).toBe("Doc");
   });
 
-  it("renders a sheet editor for sheet pages and a stub for presentations", () => {
+  it("renders a sheet editor for sheet pages and a presentation editor for presentations", () => {
     const { ws, root } = setup();
     ws.dispatch("createPage", { type: "sheet", title: "Sheet" });
     const sheetId = ws.getChildren(null).slice(-1)[0];
@@ -76,7 +76,7 @@ describe("mountApp layout", () => {
     /** @type {HTMLElement} */ (
       root.querySelector(`.page-row[data-page-id="${deckId}"] .page-title`)
     ).click();
-    expect(query(root, ".stub")?.textContent).toContain("Presentation");
+    expect(query(root, ".presentation-editor")).toBeTruthy();
     expect(query(root, ".sheet-editor")).toBeNull();
   });
 });
@@ -102,16 +102,18 @@ describe("contextual ribbon", () => {
     expect(query(root, '[data-action="block-type"]')).toBeNull();
   });
 
-  it("shows the presentation tab set with disabled controls", () => {
+  it("shows the presentation tab set", () => {
     const { ws, root } = setup();
     ws.dispatch("createPage", { type: "presentation", title: "Deck" });
     openPage(root, ws.getChildren(null).slice(-1)[0]);
     expect(tabLabels(root)).toEqual(
       ["File", "Home", "Insert", "Design", "Transitions", "Animations", "View"]
     );
-    const disabled = root.querySelectorAll(".ribbon-panel .ribbon-button:disabled");
-    expect(disabled.length).toBeGreaterThan(0);
-    expect(/** @type {HTMLElement} */ (disabled[0]).title).toContain("Phase 5");
+    expect(query(root, '[data-action="new-slide"]')).toBeTruthy();
+    query(root, '.ribbon-tab[data-tab="animations"]')?.click();
+    const seam = /** @type {HTMLButtonElement} */ (query(root, '[data-action="add-animation"]'));
+    expect(seam.disabled).toBe(true);
+    expect(seam.title).toContain("later pass");
   });
 
   it("shows disabled embed seams on the document Insert tab", () => {
@@ -437,5 +439,84 @@ describe("indent / outdent buttons", () => {
     query(root, '[data-action="outdent"]')?.click();
     const { blockOrder, blocks } = ws.getPage(docPageId).content;
     expect(blocks[blockOrder[2]]).toMatchObject({ type: "paragraph", runs: [{ text: "b" }] });
+  });
+});
+
+describe("presentation pages", () => {
+  /** Create a presentation through the sidebar picker and return its page id. */
+  function openDeck() {
+    const ctx = setup();
+    createViaPicker(ctx.root, "presentation");
+    const pageId = ctx.ws.getChildren(null).slice(-1)[0];
+    return { ...ctx, pageId, content: () => ctx.ws.getPage(pageId).content };
+  }
+
+  it("seeds a new presentation with a Title slide and opens the editor on it", () => {
+    const { root, content, app } = openDeck();
+    expect(query(root, ".presentation-editor")).toBeTruthy();
+    expect(content().slideOrder).toHaveLength(1);
+    expect(content().slides[content().slideOrder[0]].layout).toBe("title");
+    expect(app.getPresentationEditor()?.getSlideId()).toBe(content().slideOrder[0]);
+  });
+
+  it("drives the editor from the Home ribbon", () => {
+    const { root, content } = openDeck();
+    query(root, '[data-action="duplicate-slide"]')?.click();
+    expect(content().slideOrder).toHaveLength(2);
+    query(root, '[data-action="new-slide"]')?.click();
+    query(root, '[data-action="new-slide-layout"][data-layout="blank"]')?.click();
+    expect(content().slideOrder).toHaveLength(3);
+    query(root, '[data-action="delete-slide"]')?.click();
+    expect(content().slideOrder).toHaveLength(2);
+  });
+
+  it("arms a shape from Insert and draws it", () => {
+    const { root, app, content } = openDeck();
+    query(root, '.ribbon-tab[data-tab="insert"]')?.click();
+    query(root, '[data-action="insert-shape"]')?.click();
+    query(root, '[data-action="insert-shape-item"][data-shape="ellipse"]')?.click();
+    expect(app.getPresentationEditor()?.getTool()).toMatchObject({ type: "shape", shape: "ellipse" });
+    const stage = /** @type {HTMLElement} */ (query(root, ".stage"));
+    const fire = (type, target, x, y) =>
+      target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    fire("mousedown", stage, 40, 500);
+    fire("mousemove", document, 240, 600);
+    fire("mouseup", document, 240, 600);
+    const slide = content().slides[content().slideOrder[0]];
+    expect(slide.objects[slide.objectOrder.at(-1)]).toMatchObject({ type: "shape", shape: "ellipse" });
+  });
+
+  it("asks scale or keep from the Design tab", () => {
+    const { root, content } = openDeck();
+    query(root, '.ribbon-tab[data-tab="design"]')?.click();
+    query(root, '[data-action="slide-size"]')?.click();
+    query(root, '[data-action="slide-size-preset"][data-preset="4:3"]')?.click();
+    /** @type {HTMLElement | null} */ (document.querySelector('[data-action="size-keep"]'))?.click();
+    expect(content().size).toEqual({ width: 1024, height: 768 });
+  });
+
+  it("sets the slide transition from the Transitions tab", () => {
+    const { root, content } = openDeck();
+    query(root, '.ribbon-tab[data-tab="transitions"]')?.click();
+    const style = /** @type {HTMLSelectElement} */ (query(root, '[data-action="transition-style"]'));
+    style.value = "fade";
+    style.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(content().slides[content().slideOrder[0]].transition.style).toBe("fade");
+  });
+
+  it("toggles the inspector from the View tab, and keeps the current slide across undo", () => {
+    const { root, app, content, ws } = openDeck();
+    query(root, '.ribbon-tab[data-tab="view"]')?.click();
+    query(root, '[data-action="toggle-inspector"]')?.click();
+    expect(query(root, ".presentation-editor")?.classList.contains("hide-inspector")).toBe(true);
+
+    app.getPresentationEditor()?.newSlide("blank");
+    const second = content().slideOrder[1];
+    ws.undo();
+    ws.redo();
+    expect(content().slideOrder[1]).toBe(second);
+    expect(app.getPresentationEditor()?.getSlideId()).toBe(second);
+    // The view state outlives the remount.
+    expect(query(root, ".presentation-editor")?.classList.contains("hide-inspector")).toBe(true);
   });
 });

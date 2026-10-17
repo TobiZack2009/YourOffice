@@ -22,6 +22,8 @@ import {
 } from "../document/model.js";
 import { renderBlock, renderRuns } from "../document/render.js";
 import { h, clear } from "./dom.js";
+import { icon } from "./icons.js";
+import { buildMenu, createPopoverHost } from "./popover.js";
 import { mergeRuns, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
@@ -1500,6 +1502,151 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     return insertBlock(spec, { index: order().length });
   }
 
+  // -- context menu ------------------------------------------------------------
+
+  const popovers = createPopoverHost(element.ownerDocument.body);
+
+  /** Delete the selected units, or the unit under the caret. */
+  function deleteActive() {
+    if (!sel) {
+      if (!activeBlockId || !blockOf(activeBlockId)) return;
+      const key = unitKey(activeBlockId, activeItemId);
+      setBlockSelection(key, key);
+    }
+    deleteSelection();
+  }
+
+  /** @returns {boolean} Whether text (or whole blocks) are selected for formatting. */
+  function hasTextSelection() {
+    if (sel) return true;
+    const selection = element.ownerDocument.getSelection?.();
+    return Boolean(selection && selection.rangeCount > 0 && !selection.getRangeAt(0).collapsed);
+  }
+
+  /** @param {"copy" | "cut"} command */
+  function clipboardCommand(command) {
+    const doc = element.ownerDocument;
+    if (typeof doc.execCommand === "function") doc.execCommand(command);
+  }
+
+  /** Paste plain text from the system clipboard at the caret. */
+  async function pasteFromClipboard() {
+    const text = await element.ownerDocument.defaultView?.navigator?.clipboard?.readText?.();
+    const el = activeEditable();
+    if (!text || !el) return;
+    el.focus();
+    if (el.matches("code[data-block-id]")) insertTextInCode(el, text.replace(/\r\n?/g, "\n"));
+    else element.ownerDocument.execCommand?.("insertText", false, text.replace(/\s*\r?\n\s*/g, " "));
+  }
+
+  /** @param {{ x: number, y: number }} point */
+  function openContextMenu(point) {
+    const info = activeInfo();
+    const formatting = hasTextSelection() && info.type !== "code";
+    /** @param {string} label @param {string} iconName @param {string} action @param {() => void} run @param {Record<string, unknown>} [extra] */
+    const item = (label, iconName, action, run, extra = {}) => ({
+      label,
+      icon: iconName,
+      attrs: { "data-action": action },
+      action: run,
+      ...extra
+    });
+    /** @param {string} label @param {string} iconName @param {{ type: string, level?: number, ordered?: boolean }} spec @param {string} id */
+    const turnInto = (label, iconName, spec, id) =>
+      item(label, iconName, "ctx-block-type", () => setActiveType(spec), { attrs: { "data-action": "ctx-block-type", "data-type": id } });
+    /** @param {string} label @param {"bold" | "italic" | "underline" | "strike" | "code"} mark */
+    const markItem = (label, mark) =>
+      item(label, mark, "ctx-mark", () => toggleMark(mark), {
+        disabled: !formatting,
+        attrs: { "data-action": "ctx-mark", "data-mark": mark }
+      });
+
+    /** @type {import("./popover.js").MenuItem[]} */
+    const items = [
+      item("Cut", "cut", "ctx-cut", () => clipboardCommand("cut"), { disabled: !hasTextSelection() }),
+      item("Copy", "copy", "ctx-copy", () => clipboardCommand("copy"), { disabled: !hasTextSelection() }),
+      item("Paste", "paste", "ctx-paste", () => void pasteFromClipboard(), { disabled: !info.blockId || Boolean(sel) }),
+      { separator: true },
+      markItem("Bold", "bold"),
+      markItem("Italic", "italic"),
+      markItem("Underline", "underline"),
+      markItem("Strikethrough", "strike"),
+      markItem("Inline code", "code"),
+      { separator: true },
+      {
+        label: "Turn into",
+        icon: "paragraph",
+        attrs: { "data-action": "ctx-turn-into" },
+        submenu: [
+          turnInto("Paragraph", "paragraph", { type: "paragraph" }, "paragraph"),
+          turnInto("Heading 1", "h1", { type: "heading", level: 1 }, "heading-1"),
+          turnInto("Heading 2", "h2", { type: "heading", level: 2 }, "heading-2"),
+          turnInto("Heading 3", "h3", { type: "heading", level: 3 }, "heading-3"),
+          turnInto("List", "list", { type: "list" }, "list"),
+          turnInto("Quote", "quote", { type: "quote" }, "quote"),
+          turnInto("Code block", "code-block", { type: "code" }, "code")
+        ]
+      },
+      { separator: true },
+      item("Indent", "indent", "ctx-indent", () => indent(), { disabled: !info.canIndent }),
+      item("Outdent", "outdent", "ctx-outdent", () => outdent(), { disabled: !info.canOutdent }),
+      { separator: true },
+      item("Insert paragraph below", "paragraph", "ctx-insert-paragraph", () => insertAfterActive({ type: "paragraph" })),
+      item("Insert divider below", "divider", "ctx-insert-divider", () => insertAfterActive({ type: "divider" })),
+      { separator: true },
+      item(sel && selectedKeys().length > 1 ? "Delete blocks" : "Delete block", "clear", "ctx-delete", () => deleteActive(), {
+        danger: true,
+        disabled: !info.blockId
+      })
+    ];
+    popovers.showAt(point, buildMenu(items, popovers.close, (name) => icon(name, { size: 16 })), {
+      class: "context-menu"
+    });
+  }
+
+  /**
+   * Key of the unit closest to a vertical position, for right-clicks that land in
+   * the gaps and margins around the blocks. Without layout (no unit has a height)
+   * the active unit, else the last one, stands in.
+   * @param {number} clientY
+   * @returns {string | null}
+   */
+  function nearestUnitKey(clientY) {
+    const units = [...element.querySelectorAll("[data-unit]")];
+    if (units.length === 0) return null;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const unit of units) {
+      const rect = unit.getBoundingClientRect();
+      if (rect.height <= 0) continue;
+      const distance = clientY < rect.top ? rect.top - clientY : clientY > rect.bottom ? clientY - rect.bottom : 0;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = unit;
+      }
+    }
+    if (best) return best.getAttribute("data-unit");
+    if (activeBlockId && blockOf(activeBlockId)) {
+      const active = unitKey(activeBlockId, activeItemId);
+      if (unitElement(active)) return active;
+    }
+    return units[units.length - 1].getAttribute("data-unit");
+  }
+
+  element.addEventListener("contextmenu", (event) => {
+    const pointer = /** @type {MouseEvent} */ (event);
+    const key = unitKeyFrom(/** @type {Node} */ (pointer.target)) ?? nearestUnitKey(pointer.clientY);
+    // No blocks at all: nothing to act on, so leave the browser's menu alone.
+    if (!key) return;
+    pointer.preventDefault();
+    if (!(sel && selectedKeys().includes(key))) {
+      if (sel) clearBlockSelection();
+      const { blockId, itemId } = parseKey(key);
+      if (blockId !== activeBlockId || itemId !== activeItemId) setActive(blockId, itemId);
+    }
+    openContextMenu({ x: pointer.clientX, y: pointer.clientY });
+  });
+
   // Store subscription: skip re-render for inline-only commits so the caret stays.
   const unsubscribe = workspace.events.on("change", (event) => {
     const payload = /** @type {{ kind?: string, commands?: string[] }} */ (event ?? {});
@@ -1539,8 +1686,10 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     outdent,
     getSelectedUnits: selectedKeys,
     clearSelection: clearBlockSelection,
+    openContextMenu,
     destroy: () => {
       unsubscribe();
+      popovers.destroy();
       element.ownerDocument.removeEventListener("mouseup", onMouseUp);
     }
   };

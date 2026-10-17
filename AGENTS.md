@@ -31,7 +31,7 @@ Full product/technical spec: `app.txt` (source of truth for requirements).
 - **Separate dependency graphs.** Data deps (formulas, variables) vs rendering deps
   (views to rerender) — spec §9.
 
-### Current phase: 4 — Sheet editor (Phases 1–3 complete; editable UI + contextual ribbon built)
+### Current phase: 5 — Presentation editor (Phases 1–4 core done; Phase 5 landed, Phase 4 polish remaining)
 
 Directory layout (logical modules from spec §14; may split further as it grows):
 
@@ -41,6 +41,7 @@ src/
   workspace/   # schema v1, validation, migrations, store, commands, history
   sheet/       # formula engine: tokenizer, parser, evaluator, functions, recalc
   document/    # block model, block commands, DOM renderer
+  presentation/ # slide model, layouts, commands, geometry (pure), DOM renderer
   app/         # shell UI, ribbon, sidebar, quick find, editor glue
   main.js      # vite entry, mounts the shell
 index.html     # dev/build shell; vite-plugin-singlefile bundles it into one HTML
@@ -62,15 +63,16 @@ labelled groups) → canvas.
 ```
 
 - `ribbon-tabs.js` is pure data: `getTabs(pageType)` → tabs → groups → controls
-  (`button | toggle | select | menu | field`, each with `enabled(ctx)`, `active(ctx)`,
+  (`button | toggle | select | menu | field | color`, each with `enabled(ctx)`, `active(ctx)`,
   `disabledReason`). Adding a tab or control is a data change. `ctx` is
-  `{ workspace, page, docEditor, sheetEditor, shell }`; `shell` is the narrow
+  `{ workspace, page, docEditor, sheetEditor, presentationEditor, shell }`; `shell` is the narrow
   `ShellApi` the shell provides (undo/redo/save/export/import/zoom/sidebar).
 - `ribbon.js` renders that data and keeps `enabled`/`active` fresh via `update()`;
   the shell calls it wherever editor or workspace state changes. Buttons cancel
   `mousedown` so the editor selection survives.
 - Contextual tabs: document (Home, Insert), sheet (Home, Insert), presentation
-  (full set, disabled until Phase 5), File and View on everything. `data-page-type`
+  (Home, Insert, Design, Transitions, Animations, View; Animations and Theme stay disabled
+  seams), File and View on everything. `data-page-type`
   on `.app` drives the accent (document blue, sheet green, presentation orange).
 - `popover.js` (positioned popovers + `buildMenu`) is shared by the ribbon and the
   sidebar. `icons.js` builds inline SVG icons. `quick-find.js` is the Cmd/Ctrl+K
@@ -314,13 +316,162 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   - Enter/Backspace respect nesting: Enter on an empty nested block or item lifts
     it; Backspace at the start of a first nested item/block lifts it, otherwise
     merges into the previous unit.
+- **Sheet: table placement, multiple ranges, fill and move (Phase 4):**
+  - **Placement.** `createTable` defaults to `{x: gap, y: bottom of the lowest table + gap}`,
+    so new tables no longer land on top of existing ones. The sizing helpers
+    (`HEADER_*`, `columnWidthOf`, `rowHeightOf`, `tableExtent`) moved into
+    `sheet/model.js`; `render.js` re-exports them.
+  - **`sheet/fill.js`.** `offsetFormulaReferences(text, dCol, dRow)` moves *relative*
+    references (`$` pins an axis; off-sheet becomes `#REF!`; token-level, so spacing
+    and strings survive), `offsetCell`, and `tileSourceFor` (positive-modulo tiling
+    anchored at the source's top-left).
+  - **Commands.** `fillCells {source, targets[]}` tiles the source over every target
+    (identity cells skipped, blank source clears, relative refs shift by the distance
+    from the source cell each target copies, table grows to fit). `moveCells {source,
+    to}` clears the source, overwrites the whole destination block and shifts the
+    moved formulas' own relative refs. References *elsewhere* that point at moved
+    cells are not retargeted. Merges are ignored by both. Both accept `sourceTableId`.
+  - **Editor.** Selection is `{tableId, anchor, focus, others[]}`: Ctrl/Cmd+click (and
+    drag) adds a range, all within one table; `getRanges()` lists them (active last),
+    `getRange()` is the active one. Ctrl/Cmd+Enter (`fillSelection`) writes the
+    formula-bar content into the active cell and repeats it in every range, relative
+    to the active cell. Delete and row-height/column-width act on every range.
+    Cell clipboard (editor-internal): copy then paste tiles into a selected range
+    that is a whole multiple of the copied block, else pastes once at its start; cut
+    then paste moves (`moveCells`). Ctrl/Cmd+D / +R fill down / right from the top
+    row / left column (a one-line range copies from the line above / left). The
+    formula bar keeps native cut/copy/paste while it has typed text or a text
+    selection (`inputDirty`). The formula bar now refreshes on selection change even
+    when focused, unless it holds an uncommitted edit.
+  - **Ribbon.** Sheet Home has Clipboard (Paste, Cut, Copy), Cells (Merge, Unmerge),
+    Size and History; Insert has Tables. Fill and row/column insert/delete were
+    deliberately taken off the ribbon (see the next entry). The shell re-evaluates
+    the ribbon on `onSelectionChange`, which also fires when the clipboard changes.
+  - Not done: a system-clipboard (TSV) bridge, marching-ants marker on the copied range.
+- **Sheet: fill handle, drag-to-move, right-click menu; document right-click menu:**
+  - **Fill handle.** `render.js` puts `span.sheet-fill-handle[data-role=fill-handle]` in
+    the cell holding the *active* range's end (interactive renders only; a merged
+    anchor counts for its whole block). Dragging it fills: the editor keeps a
+    `gesture` union (`select` / `fill` / `move`), previews the target by toggling
+    `.is-fill-preview` / `.is-drop-preview` on the live DOM (no re-render
+    mid-drag), and commits on the document `mouseup` via `fillRangeTo` -> `fillCells`
+    (dominant direction wins; up/left work; the whole filled area is selected).
+  - **Drag to move.** Pressing on an already-selected cell grabs that range;
+    dragging and releasing dispatches `moveCells` by the pointer offset (clamped to
+    the sheet's top-left). Release without moving is a plain click. Only the range
+    holding the grabbed cell moves. Right mousedown is ignored so the context menu
+    decides the selection.
+  - **Right-click menu** (`openContextMenu`, `contextmenu` on the canvas; selects the
+    cell first unless it is already inside a range): Cut, Copy, Paste (disabled
+    until something is copied), Clear, Insert cells shift right/down, Delete cells
+    shift left/up, Insert/Delete row/column, Merge/Unmerge. Items keep `data-action`s.
+    (Superseded by the submenu layout in the next entry.)
+  - **`sheet/cell-shift.js` + `insertCells` / `deleteCells` commands.** Only a *band*
+    slides (the range's columns for up/down, its rows for left/right). Formulas
+    pointing into the band are retargeted: a lone reference follows its cell, a
+    range follows only when wholly inside the band (an insert inside it grows it, a
+    delete trims it), deleted targets become `#REF!`; a range straddling the band's
+    edge is left alone. A merge in the way raises `CommandError` (`mergedCells`), as
+    does pushing a cell past the sheet limits; the table grows to fit.
+  - **Popover.** `createPopoverHost` gained `showAt(point, content, {class})`
+    (viewport-clamped, closes on Escape / outside press). The sheet and document
+    menus mount on `document.body` so view zoom does not skew `position: fixed`.
+  - **Document right-click menu** (`block-editor.js`, `openContextMenu` on the
+    handle). The task asked for a menu "like the one in the document editor", but
+    none existed, so one was added: Cut/Copy/Paste (best effort via `execCommand` and
+    `navigator.clipboard`), text marks (disabled without a selection or in code),
+    Turn into (paragraph, headings, list, quote, code), Indent/Outdent, insert
+    paragraph/divider below, Delete block(s). Right-clicking inside a block
+    selection keeps it; elsewhere it clears the selection and activates that unit;
+    outside any block the native menu is left alone (superseded below).
+- **Sheet: move recalculation, in-cell editing, resize, submenus; document menu fix:**
+  - **Move retargets references.** `cell-shift.js` `retargetMovedReferences(text, block,
+    dCol, dRow)` (token-based; keeps spacing/strings/`$`). `moveCells` applies it to every
+    formula *outside* the source rect for same-table moves: a lone ref into the moved
+    block follows it; a range follows only if both ends are inside the block; a target
+    pushed off the sheet becomes `#REF!`. References into the overwritten destination are
+    left alone. Formulas inside the moved block keep the relative-offset behaviour.
+    Engines rebuild on every change, so values recalculate. Cross-table refs: Phase 6.
+  - **In-cell editing.** A persistent `input.sheet-cell-editor` is placed inside the
+    active `td` (`placeCellEditor`); `refresh()` re-renders the whole canvas, so it saves
+    caret/focus, lifts the input out under `suppressBlur`, and restores it. Double-click
+    (`detail >= 2`), F2, or a printable key (typing over) starts an edit; Enter/Tab commit
+    and move, Escape cancels, blur commits. It mirrors the formula bar both ways. Keyboard
+    focus now rests on the grid (`canvasWrap`, `tabindex=-1`, `focusGrid()`), not the
+    formula bar. Merged-covered cells fall back to the formula bar.
+  - **Resize.** Row height / column width fields left Home for a new sheet **Layout** tab
+    and are bare number inputs that apply on change/Enter (Escape reverts); no Apply
+    button. Interactive renders add `.sheet-resize-handle` strips (`col-resize` /
+    `row-resize`) to the headers; dragging previews live and dispatches one
+    `setColumnWidth` / `setRowHeight` on release (min 24 px / 16 px).
+  - **Submenus.** `popover.js` `MenuItem.submenu` -> `buildSubmenu`: a trigger showing
+    only the section name and a `›`, with a flyout that opens on hover/click (flips left
+    near the window edge). The sheet menu has Insert and Delete submenus (shift cells
+    plus row/column); the document menu's "Turn into" is a submenu. Inner `data-action`s
+    are unchanged.
+  - **Document right-click outside a paragraph.** `.page-body` is a flex column and
+    `.document-editor` fills it, so margin clicks reach the handler; `nearestUnitKey`
+    picks the vertically nearest block (active/last block when there is no layout), so
+    the custom menu appears and the native one is shown only with no blocks at all.
+- **Phase 5 complete — presentation editor (spec §7):**
+  - **Model (`src/presentation/model.js`).** `content = { size, slideOrder, slides }`.
+    `size` (`{width, height}`, 320..7680, default 1280x720) lives on the content and is
+    shared by every slide. A slide has `layout`, `background`, `transition`
+    (`style` none|fade|wipe, `direction`, `duration`), `objectOrder` (z-order, bottom to
+    top) and `objects`; identity (`slide_...`, `obj_...`) is separate from both orders.
+    Objects: `text | shape | line | image` with x/y/width/height/rotation, fill/stroke,
+    `shape` kind, `flipV` for lines, a `text` body (`runs`, fontSize, color, align,
+    valign), `link`, and `src` (data URL; moves to the asset registry in Phase 7).
+    `validatePresentationContent` / `ensurePresentationContent` follow the sheet pattern.
+  - **Layouts (`layouts.js`).** Title, Title + content, Two columns, Blank; defined in
+    fractions of the slide size, they only pre-place text objects (no placeholders).
+  - **Commands (`commands.js`).** `createSlide`, `duplicateSlide`, `deleteSlide`
+    (`lastSlide` refusal), `moveSlide`, `setSlideBackground`, `setSlideTransition`,
+    `applyTransitionToAll`, `setSlideSize {scaleContent}` (rescales every object in the
+    same transaction), `insertObject`, `updateObject`, `updateObjects`, `setObjectRuns`,
+    `deleteObjects`, `duplicateObjects`, `pasteObjects`, `reorderObjects`. All are
+    transactions, so undo/redo comes from the store.
+  - **Geometry (`geometry.js`, pure).** `rotatedBounds`, `resizeRect` (local axes, fixed
+    anchor), `rotationFrom`, `snapMove` (slide edges/centre, other objects, optional
+    grid), `objectsInMarquee`, `planSlideReorder`, `fitScale`, `scaleObject`,
+    `SIZE_PRESETS` (16:9, 4:3, 16:10).
+  - **Render (`render.js`).** `renderSlide(slide, {size, scale})` is shared by the stage
+    and the thumbnails; shapes/lines are inline SVG, text goes through `renderRuns`.
+  - **Editor (`app/presentation-editor.js`).** Three panes: `slide-strip.js` (thumbnails,
+    hover "+", drag reorder, right-click menu with a layout submenu, strip keyboard),
+    the scaled stage, and `inspector.js` (selection-driven sections; slide background,
+    transition and size when nothing is selected). A `gesture` union
+    (`move | resize | rotate | marquee | draw`) previews on the live DOM and commits one
+    command on mouseup; geometry lands on whole logical px. Pointer conversion uses
+    `rect.width / size.width || 1`, so jsdom (zero rects) works. Text edits in place
+    (double-click, F2/Enter, or typing) through a `contenteditable` committed with
+    `setObjectRuns`; marks and links share `app/marks.js`. The shell holds the state that
+    must survive its remount-on-undo (current slide per page, view toggles, clipboard).
+  - **Ribbon.** New `kind: "color"` control (native colour input, applies on change).
+    Home: clipboard, slides, text, arrange, history. Insert: text box, shape gallery,
+    line, image (file picker to data URL). Design: size presets + width/height (asks
+    Scale content / Keep as is), background colour, Theme seam. Transitions: style,
+    direction, duration, apply to all. View: inspector, snap guides, grid snap.
+  - **Scoping call.** Multi-selection supports move, delete, duplicate, arrange and X/Y
+    only; resize and rotate handles are for a single selected object.
+  - **Browser smoke (playwright-core driving system Chrome; throwaway scripts, not in
+    `npm test`).** Move/resize/rotate/marquee, draw, in-place text with marks, context
+    menus with submenus (native menu suppressed), slide add/reorder, size popover were
+    all exercised. Bugs found and fixed: unrounded drag/draw geometry; an inspector
+    number field re-committed on blur and swallowed the next click (the change event
+    fires on blur after Enter); a heavy focus outline around the sheet canvas.
+  - Deferred: Animations (disabled seam), slideshow playback and transition playback,
+    themes, embedding slides in documents (Phase 6), image assets in the registry
+    (Phase 7), resize/rotate of multi-selections.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
-  `sheet-commands`, `sheet-table-engine`, `sheet-render`, `app-inline`,
+  `sheet-commands`, `sheet-fill`, `sheet-cell-shift`, `sheet-table-engine`, `sheet-render`, `app-inline`,
   `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`, `app-ribbon`,
-  `app-quick-find`. `document-nesting`. **471 tests green across 27 files**; the single-file
-  build inlines JS + CSS into one ~142 kB HTML.
+  `app-quick-find`, `app-popover`, `document-nesting`, `presentation-model`,
+  `presentation-commands`, `presentation-geometry`, `presentation-render`,
+  `app-presentation-editor`, `app-marks`. **690 tests green across 36 files**; the
+  single-file build inlines JS + CSS into one ~245 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
@@ -333,10 +484,12 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
    images, pure DOM renderer. Block export still outstanding.
 4. **Phase 4 — sheet editor** (in progress — core landed): Numbers-style canvas,
    independent tables, sparse storage, row/col ops wired to the engine, table
-   renderer, an interactive editor, range selection and merge UI. Remaining:
-   canvas dragging, incremental recalc, cross-table visual polish.
-5. **Phase 5 — presentation:** 1280×720 slides, stable object IDs, text/image/shape/
-   line, transitions, ordered animations.
+   renderer, an interactive editor, range selection and merge UI, multi-range
+   selection, fill/copy/move with relative-reference offsets. Remaining: canvas
+   dragging, fill-handle / drag-to-move, incremental recalc, cross-table visual polish.
+5. **Phase 5 — presentation** (done): slides on a shared, editable canvas size
+   (default 1280×720), stable object IDs, text/image/shape/line, stored transitions.
+   Ordered animations and playback are deferred.
 6. **Phase 6 — references/sections:** typed source locators, reference instances,
    live cross-editor embeds, parameters, conditional visibility (small AST language),
    source-vs-instance editing, section dep cycles and invalidation.

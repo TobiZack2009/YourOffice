@@ -14,14 +14,19 @@ import { CommandError } from "../core/errors.js";
 import { touchPage } from "../workspace/commands.js";
 import { MAX_COLUMN, MAX_ROW } from "./references.js";
 import {
+  SHEET_DEFAULTS,
+  cellKey,
   createTable,
   ensureSheetContent,
   findMerge,
   mergeBounds,
   normaliseMerge,
   setCell as writeCell,
+  tableExtent,
   validateCell
 } from "./model.js";
+import { mergeBlocksShift, retargetMovedReferences, shiftRegionCells } from "./cell-shift.js";
+import { offsetCell, tileSourceFor } from "./fill.js";
 import {
   shiftCells,
   shiftMerges,
@@ -115,6 +120,108 @@ function growToFit(table, col, row) {
   if (row >= table.rowCount) table.rowCount = row + 1;
 }
 
+/** Largest number of cells one fill/move may touch (keeps a stray huge range from freezing the UI). */
+const MAX_FILL_CELLS = 250000;
+
+/**
+ * Validate an inclusive 0-based rectangle from a payload.
+ * @param {unknown} value
+ * @param {string} field
+ * @returns {{ start: { col: number, row: number }, end: { col: number, row: number } }}
+ */
+function requireRect(value, field) {
+  const v = /** @type {any} */ (value);
+  if (typeof v !== "object" || v === null || typeof v.start !== "object" || typeof v.end !== "object" || !v.start || !v.end) {
+    throw new CommandError(`${field} must be { start, end }`, "invalidRange");
+  }
+  const rect = {
+    start: {
+      col: requireIndex(v.start.col, `${field}.start.col`, "invalidRange"),
+      row: requireIndex(v.start.row, `${field}.start.row`, "invalidRange")
+    },
+    end: {
+      col: requireIndex(v.end.col, `${field}.end.col`, "invalidRange"),
+      row: requireIndex(v.end.row, `${field}.end.row`, "invalidRange")
+    }
+  };
+  if (rect.end.col < rect.start.col || rect.end.row < rect.start.row) {
+    throw new CommandError(`${field} must run from its top-left to its bottom-right`, "invalidRange");
+  }
+  if (rect.end.col >= MAX_COLUMN || rect.end.row >= MAX_ROW) {
+    throw new CommandError(`${field} is beyond the sheet limits`, "invalidRange");
+  }
+  return rect;
+}
+
+/**
+ * @param {{ start: { col: number, row: number }, end: { col: number, row: number } }} rect
+ * @returns {number}
+ */
+function areaOf(rect) {
+  return (rect.end.col - rect.start.col + 1) * (rect.end.row - rect.start.row + 1);
+}
+
+/**
+ * Default canvas position for a new table: left-aligned, below every existing
+ * table so a new one never lands on top of another.
+ * @param {SheetContent} content
+ * @returns {{ x: number, y: number }}
+ */
+function nextTablePosition(content) {
+  let bottom = null;
+  for (const id of content.tableOrder) {
+    const table = content.tables[id];
+    if (!table) continue;
+    const reach = table.position.y + tableExtent(table).height;
+    bottom = bottom === null ? reach : Math.max(bottom, reach);
+  }
+  return {
+    x: SHEET_DEFAULTS.gap,
+    y: bottom === null ? SHEET_DEFAULTS.gap : bottom + SHEET_DEFAULTS.gap
+  };
+}
+
+/**
+ * Shared body of `insertCells` / `deleteCells`.
+ * @param {Workspace} store
+ * @param {Transaction} tx
+ * @param {unknown} payload
+ * @param {"insert" | "delete"} mode
+ */
+function shiftRegion(store, tx, payload, mode) {
+  const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+  const { page, content } = requireSheetPage(store, p.pageId);
+  const table = requireTable(content, p.tableId);
+  const range = requireRect(p.range, "range");
+  const allowed = mode === "insert" ? ["right", "down"] : ["left", "up"];
+  if (typeof p.direction !== "string" || !allowed.includes(p.direction)) {
+    throw new CommandError(`direction must be one of ${allowed.join(", ")}`, "invalidDirection");
+  }
+  const axis = p.direction === "right" || p.direction === "left" ? "column" : "row";
+  const shift = {
+    mode,
+    axis: /** @type {"row" | "column"} */ (axis),
+    index: axis === "row" ? range.start.row : range.start.col,
+    count: axis === "row" ? range.end.row - range.start.row + 1 : range.end.col - range.start.col + 1,
+    lo: axis === "row" ? range.start.col : range.start.row,
+    hi: axis === "row" ? range.end.col : range.end.row
+  };
+  if (table.merges.some((merge) => mergeBlocksShift(merge, shift))) {
+    throw new CommandError("cannot shift cells through merged cells", "mergedCells");
+  }
+
+  const cells = shiftRegionCells(table.cells, shift);
+  for (const key of Object.keys(cells)) {
+    const [col, row] = key.split(",").map(Number);
+    if (col >= MAX_COLUMN || row >= MAX_ROW) {
+      throw new CommandError("cells would be pushed off the sheet", "invalidRange");
+    }
+    growToFit(table, col, row);
+  }
+  table.cells = cells;
+  touchPage(tx, page);
+}
+
 /** Sheet commands keyed by command type. */
 export const sheetCommands = {
   /**
@@ -127,11 +234,12 @@ export const sheetCommands = {
     const p = /** @type {Record<string, unknown>} */ (payload ?? {});
     const { page, content } = requireSheetPage(store, p.pageId);
 
+    const free = nextTablePosition(content);
     const table = createTable({
       name: typeof p.name === "string" ? p.name : `Table ${content.tableOrder.length + 1}`,
       position: {
-        x: typeof p.x === "number" ? p.x : 32 + content.tableOrder.length * 48,
-        y: typeof p.y === "number" ? p.y : 32 + content.tableOrder.length * 48
+        x: typeof p.x === "number" ? p.x : free.x,
+        y: typeof p.y === "number" ? p.y : free.y
       },
       ...(typeof p.rows === "number" ? { rowCount: p.rows } : {}),
       ...(typeof p.columns === "number" ? { columnCount: p.columns } : {})
@@ -242,6 +350,146 @@ export const sheetCommands = {
     growToFit(table, col, row);
     writeCell(table, col, row, cell);
     touchPage(tx, page);
+  },
+
+  /**
+   * Fill: copy the contents of a source range across one or more target ranges,
+   * tiling the source (so a single cell fills a whole range, a row fills down).
+   * Formulas have their relative references moved by the distance between the
+   * source cell and the target cell, exactly as if each were copy-pasted;
+   * `$`-pinned parts stay. A blank source cell clears its targets. The source
+   * itself is never changed.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, tableId: string, sourceTableId?: string, source: object, targets?: object[], target?: object }} payload
+   */
+  fillCells(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireSheetPage(store, p.pageId);
+    const table = requireTable(content, p.tableId);
+    const sourceTable = p.sourceTableId === undefined ? table : requireTable(content, p.sourceTableId);
+    const source = requireRect(p.source, "source");
+    const rawTargets = Array.isArray(p.targets) ? p.targets : p.target !== undefined ? [p.target] : [];
+    if (rawTargets.length === 0) throw new CommandError("targets must contain at least one range", "invalidRange");
+    const targets = rawTargets.map((target, index) => requireRect(target, `targets[${index}]`));
+
+    let total = 0;
+    for (const target of targets) total += areaOf(target);
+    if (total > MAX_FILL_CELLS) throw new CommandError("fill area is too large", "invalidRange");
+
+    // Read first: the source must not shift while the targets are written.
+    const snapshot = new Map();
+    for (let row = source.start.row; row <= source.end.row; row++) {
+      for (let col = source.start.col; col <= source.end.col; col++) {
+        snapshot.set(cellKey(col, row), sourceTable.cells[cellKey(col, row)]);
+      }
+    }
+
+    for (const target of targets) {
+      for (let row = target.start.row; row <= target.end.row; row++) {
+        for (let col = target.start.col; col <= target.end.col; col++) {
+          const from = tileSourceFor(source, { col, row });
+          if (sourceTable === table && from.col === col && from.row === row) continue;
+          const cell = snapshot.get(cellKey(from.col, from.row));
+          if (!cell) {
+            writeCell(table, col, row, null);
+            continue;
+          }
+          growToFit(table, col, row);
+          writeCell(table, col, row, offsetCell(cell, col - from.col, row - from.row));
+        }
+      }
+    }
+    touchPage(tx, page);
+  },
+
+  /**
+   * Move a range's contents so its top-left lands on `to`. The source cells are
+   * cleared, the destination area is overwritten (blank source cells blank it),
+   * and formulas that move have their relative references moved by the same
+   * offset, so a block of formulas keeps pointing at its neighbours. Formulas
+   * elsewhere in the table that reference the moved cells are retargeted to
+   * follow them (a range only when it lies wholly inside the moved block).
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, tableId: string, sourceTableId?: string, source: object, to: { col: number, row: number } }} payload
+   */
+  moveCells(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireSheetPage(store, p.pageId);
+    const table = requireTable(content, p.tableId);
+    const sourceTable = p.sourceTableId === undefined ? table : requireTable(content, p.sourceTableId);
+    const source = requireRect(p.source, "source");
+    const to = /** @type {any} */ (p.to);
+    const dest = {
+      col: requireIndex(to?.col, "to.col", "invalidPosition"),
+      row: requireIndex(to?.row, "to.row", "invalidPosition")
+    };
+    const deltaCol = dest.col - source.start.col;
+    const deltaRow = dest.row - source.start.row;
+    requireRect(
+      { start: dest, end: { col: source.end.col + deltaCol, row: source.end.row + deltaRow } },
+      "destination"
+    );
+    if (areaOf(source) > MAX_FILL_CELLS) throw new CommandError("move area is too large", "invalidRange");
+    if (deltaCol === 0 && deltaRow === 0 && sourceTable === table) return;
+
+    /** @type {{ col: number, row: number, cell: Cell }[]} */
+    const moving = [];
+    for (let row = source.start.row; row <= source.end.row; row++) {
+      for (let col = source.start.col; col <= source.end.col; col++) {
+        const cell = sourceTable.cells[cellKey(col, row)];
+        if (cell) moving.push({ col, row, cell });
+      }
+    }
+
+    // Formulas elsewhere in the table that point at the moving cells follow them.
+    // (Cross-table references arrive in Phase 6; until then only this table matters.)
+    if (sourceTable === table) {
+      for (const [key, cell] of Object.entries(table.cells)) {
+        if (typeof cell.formula !== "string") continue;
+        const [col, row] = key.split(",").map(Number);
+        const insideSource =
+          col >= source.start.col && col <= source.end.col && row >= source.start.row && row <= source.end.row;
+        if (insideSource) continue;
+        const retargeted = retargetMovedReferences(cell.formula, source, deltaCol, deltaRow);
+        if (retargeted !== cell.formula) table.cells[key] = { ...cell, formula: retargeted };
+      }
+    }
+
+    for (const { col, row } of moving) writeCell(sourceTable, col, row, null);
+    for (let row = source.start.row; row <= source.end.row; row++) {
+      for (let col = source.start.col; col <= source.end.col; col++) {
+        writeCell(table, col + deltaCol, row + deltaRow, null);
+      }
+    }
+    for (const { col, row, cell } of moving) {
+      growToFit(table, col + deltaCol, row + deltaRow);
+      writeCell(table, col + deltaCol, row + deltaRow, offsetCell(cell, deltaCol, deltaRow));
+    }
+    touchPage(tx, page);
+  },
+
+  /**
+   * Insert blank cells over a range, sliding the cells in its columns (down) or
+   * rows (right) out of the way. Formulas that point at slid cells follow them.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, tableId: string, range: object, direction: "right" | "down" }} payload
+   */
+  insertCells(store, tx, payload) {
+    shiftRegion(store, tx, payload, "insert");
+  },
+
+  /**
+   * Delete a range's cells and slide the cells after it back (left or up). A
+   * formula that pointed at a deleted cell becomes `#REF!`.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, tableId: string, range: object, direction: "left" | "up" }} payload
+   */
+  deleteCells(store, tx, payload) {
+    shiftRegion(store, tx, payload, "delete");
   },
 
   /**

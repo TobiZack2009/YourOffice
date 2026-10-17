@@ -138,6 +138,55 @@ describe("renderTable", () => {
     expect(element.querySelectorAll(".sheet-cell.is-selected")).toHaveLength(1);
   });
 
+  it("marks several disjoint ranges, even single cells, and ignores other tables", () => {
+    const { table } = setup();
+    const id = table().id;
+    const element = renderTable(table(), {
+      selected: {
+        tableId: id,
+        col: 2,
+        row: 2,
+        ranges: [
+          { tableId: id, start: { col: 0, row: 0 }, end: { col: 0, row: 0 } },
+          { tableId: id, start: { col: 2, row: 2 }, end: { col: 2, row: 2 } },
+          { tableId: "other", start: { col: 1, row: 1 }, end: { col: 1, row: 1 } }
+        ]
+      }
+    });
+    const inRange = [...element.querySelectorAll(".sheet-cell.is-in-range")].map((el) => el.getAttribute("data-key"));
+    expect(inRange.sort()).toEqual(["0,0", "2,2"]);
+  });
+
+  it("puts a fill handle in the last cell of the active range, only when interactive", () => {
+    const { table } = setup();
+    const id = table().id;
+    const selected = {
+      tableId: id,
+      col: 0,
+      row: 0,
+      ranges: [
+        { tableId: id, start: { col: 0, row: 0 }, end: { col: 0, row: 0 } },
+        { tableId: id, start: { col: 1, row: 1 }, end: { col: 2, row: 2 } }
+      ]
+    };
+    const element = renderTable(table(), { selected, interactive: true });
+    const handles = element.querySelectorAll("[data-role=fill-handle]");
+    expect(handles).toHaveLength(1);
+    expect(handles[0].closest("td")?.getAttribute("data-key")).toBe("2,2");
+    expect(renderTable(table(), { selected }).querySelector("[data-role=fill-handle]")).toBeNull();
+    expect(renderTable(table(), { interactive: true }).querySelector("[data-role=fill-handle]")).toBeNull();
+  });
+
+  it("puts the fill handle on a merged anchor that holds the range's end", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("mergeCells", { pageId, tableId, start: { col: 1, row: 1 }, end: { col: 2, row: 2 } });
+    const element = renderTable(table(), {
+      selected: { tableId, col: 1, row: 1, range: { tableId, start: { col: 0, row: 0 }, end: { col: 2, row: 2 } } },
+      interactive: true
+    });
+    expect(element.querySelector('[data-key="1,1"] [data-role=fill-handle]')).toBeTruthy();
+  });
+
   it("does not mark a single-cell range", () => {
     const { table } = setup();
     const id = table().id;
@@ -159,6 +208,18 @@ describe("renderTable", () => {
       }
     });
     expect(element.querySelector('[data-key="0,0"]')?.classList.contains("is-in-range")).toBe(true);
+  });
+
+  it("adds header resize handles only when interactive", () => {
+    const { table } = setup();
+    const plain = renderTable(table(), {});
+    expect(plain.querySelector(".sheet-resize-handle")).toBeNull();
+    const element = renderTable(table(), { interactive: true });
+    expect(element.querySelectorAll('[data-role="col-resize"]')).toHaveLength(3);
+    expect(element.querySelectorAll('[data-role="row-resize"]')).toHaveLength(4);
+    expect(element.querySelector('.sheet-col-header [data-role="col-resize"]')?.getAttribute("data-col")).toBe("0");
+    // The handles do not change what the headers read.
+    expect([...element.querySelectorAll(".sheet-col-header")].map((th) => th.textContent)).toEqual(["A", "B", "C"]);
   });
 
   it("applies row heights and column widths", () => {

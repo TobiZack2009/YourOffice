@@ -3,16 +3,18 @@
  *
  * The shell owns page selection and the active editor instance; every mutation
  * flows through workspace commands. The ribbon is contextual: its tabs follow the
- * open page's type (see ribbon-tabs.js). Presentation pages render a placeholder
- * until Phase 5.
+ * open page's type (see ribbon-tabs.js).
  */
 
 import { registerDocumentCommands } from "../document/commands.js";
 import { registerSheetCommands } from "../sheet/commands.js";
+import { registerPresentationCommands } from "../presentation/commands.js";
+import { createId } from "../core/ids.js";
 import { exportWorkspaceJSON, importWorkspaceJSON } from "../workspace/format.js";
 import { createSidebar } from "./sidebar.js";
 import { createDocumentEditor } from "./block-editor.js";
 import { createSheetEditor } from "./sheet-editor.js";
+import { createPresentationEditor } from "./presentation-editor.js";
 import { createRibbon } from "./ribbon.js";
 import { createQuickFind } from "./quick-find.js";
 import { icon } from "./icons.js";
@@ -67,9 +69,15 @@ function fileStem(title) {
 export function mountApp(root, workspace, options = {}) {
   if (!workspace.hasCommand("insertBlock")) registerDocumentCommands(workspace);
   if (!workspace.hasCommand("createTable")) registerSheetCommands(workspace);
+  if (!workspace.hasCommand("createSlide")) registerPresentationCommands(workspace);
 
-  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, zoom: number }} */
-  const state = { selectedPageId: null, editor: null, sheetEditor: null, zoom: 100 };
+  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, zoom: number }} */
+  const state = { selectedPageId: null, editor: null, sheetEditor: null, presentationEditor: null, zoom: 100 };
+  // Presentation UI state that must survive the editor being rebuilt on undo/redo.
+  const presentationView = { inspector: true, snap: true, grid: false };
+  const presentationClipboard = { objects: /** @type {any[]} */ ([]), pastes: 0 };
+  /** @type {Map<string, string>} */
+  const lastSlideByPage = new Map();
 
   clear(root);
   const shell = h("div", { class: "app", "data-page-type": "none" });
@@ -156,6 +164,7 @@ export function mountApp(root, workspace, options = {}) {
       page: state.selectedPageId ? workspace.getPage(state.selectedPageId) : undefined,
       docEditor: state.editor,
       sheetEditor: state.sheetEditor,
+      presentationEditor: state.presentationEditor,
       shell: shellApi
     };
   }
@@ -213,6 +222,8 @@ export function mountApp(root, workspace, options = {}) {
     state.editor = null;
     state.sheetEditor?.destroy();
     state.sheetEditor = null;
+    state.presentationEditor?.destroy();
+    state.presentationEditor = null;
     clear(canvas);
 
     const pageId = state.selectedPageId;
@@ -268,25 +279,19 @@ export function mountApp(root, workspace, options = {}) {
       state.sheetEditor = sheetEditor;
       canvas.append(pageHeader, sheetEditor.element);
     } else {
-      canvas.append(pageHeader, renderStub(page.type));
+      const presentationEditor = createPresentationEditor(workspace, page.id, {
+        onChange: () => updateChrome(),
+        onSelectionChange: () => ribbon.update(),
+        initialSlideId: lastSlideByPage.get(page.id),
+        onSlideChange: (slideId) => lastSlideByPage.set(page.id, slideId),
+        view: presentationView,
+        clipboard: presentationClipboard
+      });
+      state.presentationEditor = presentationEditor;
+      canvas.append(pageHeader, presentationEditor.element);
     }
 
     updateChrome();
-  }
-
-  /**
-   * @param {PageType} type
-   * @returns {HTMLElement}
-   */
-  function renderStub(type) {
-    const messages = {
-      presentation: ["Presentation", "1280×720 slides arrive in Phase 5."]
-    };
-    const [title, detail] = messages[type] ?? ["Coming soon", "This page type is not editable yet."];
-    return h("div", { class: "stub" }, [
-      h("h2", { text: title }),
-      h("p", { text: detail })
-    ]);
   }
 
   function renderBreadcrumb() {
@@ -352,6 +357,9 @@ export function mountApp(root, workspace, options = {}) {
               x: 32,
               y: 32
             });
+          }
+          if (type === "presentation" && created) {
+            workspace.dispatch("createSlide", { pageId: created, slideId: createId("slide"), layout: "title" });
           }
         });
         const created = workspace.getChildren(parentId).slice(-1)[0];
@@ -481,6 +489,8 @@ export function mountApp(root, workspace, options = {}) {
       state.editor = null;
       state.sheetEditor?.destroy();
       state.sheetEditor = null;
+      state.presentationEditor?.destroy();
+      state.presentationEditor = null;
       clear(root);
     },
     /** @param {string} pageId */
@@ -491,6 +501,8 @@ export function mountApp(root, workspace, options = {}) {
     getEditor: () => state.editor,
     /** @returns {import("./sheet-editor.js").SheetEditorHandle | null} */
     getSheetEditor: () => state.sheetEditor,
+    /** @returns {import("./presentation-editor.js").PresentationEditorHandle | null} */
+    getPresentationEditor: () => state.presentationEditor,
     /** @returns {string | null} */
     getSelection: () => selection(),
     openQuickFind: () => quickFind.open()

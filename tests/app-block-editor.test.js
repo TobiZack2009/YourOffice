@@ -774,3 +774,132 @@ describe("code blocks", () => {
     expect(editor.getActiveBlockId()).toBe(order()[0]);
   });
 });
+
+describe("context menu", () => {
+  const openOn = (/** @type {Element} */ el) =>
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+  const item = (/** @type {string} */ action, extra = "") =>
+    /** @type {HTMLButtonElement | null} */ (document.body.querySelector(`.context-menu [data-action="${action}"]${extra}`));
+  const closeMenu = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+  it("opens on right-click in a block and makes that block active", () => {
+    const { editor, order } = setup([{ type: "paragraph" }, { type: "paragraph" }]);
+    const second = editor.element.querySelectorAll("[contenteditable=true]")[1];
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    second.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.body.querySelector(".popover.context-menu")).toBeTruthy();
+    expect(editor.getActiveBlockId()).toBe(order()[1]);
+    editor.destroy();
+    expect(document.body.querySelector(".popover.context-menu")).toBeNull();
+  });
+
+  it("picks the nearest block when the click lands outside every block", () => {
+    const { editor, order } = setup([{ type: "paragraph" }, { type: "paragraph" }, { type: "paragraph" }]);
+    const units = [...editor.element.querySelectorAll("[data-unit]")];
+    const rect = (/** @type {number} */ top) => () => /** @type {DOMRect} */ ({ top, bottom: top + 20, height: 20 });
+    units.forEach((unit, index) => (unit.getBoundingClientRect = rect(index * 100)));
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientY: 190 });
+    editor.element.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.body.querySelector(".popover.context-menu")).toBeTruthy();
+    expect(editor.getActiveBlockId()).toBe(order()[2]);
+    closeMenu();
+
+    const above = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientY: 2 });
+    editor.element.dispatchEvent(above);
+    expect(editor.getActiveBlockId()).toBe(order()[0]);
+    editor.destroy();
+  });
+
+  it("falls back to the active block when nothing has layout", () => {
+    const { editor, order } = setup([{ type: "paragraph" }, { type: "paragraph" }]);
+    editor.focusBlock(order()[0]);
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    editor.element.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(editor.getActiveBlockId()).toBe(order()[0]);
+    editor.destroy();
+  });
+
+  it("turns the block into another type", () => {
+    const { editor, order, block } = setup([{ type: "paragraph", runs: [{ text: "hi" }] }]);
+    openOn(editor.element.querySelector("[contenteditable=true]"));
+    item("ctx-block-type", '[data-type="heading-2"]')?.click();
+    expect(block(order()[0]).type).toBe("heading");
+    expect(block(order()[0]).level).toBe(2);
+    expect(document.body.querySelector(".context-menu")).toBeNull();
+
+    openOn(editor.element.querySelector("[contenteditable=true]"));
+    item("ctx-block-type", '[data-type="quote"]')?.click();
+    expect(block(order()[0]).type).toBe("quote");
+    editor.destroy();
+  });
+
+  it("only offers text formatting while text is selected", () => {
+    const { editor } = setup([{ type: "paragraph", runs: [{ text: "hello" }] }]);
+    const el = editor.element.querySelector("[contenteditable=true]");
+    setCaret(el, 2);
+    openOn(el);
+    expect(item("ctx-mark", '[data-mark="bold"]')?.disabled).toBe(true);
+    expect(item("ctx-cut")?.disabled).toBe(true);
+    closeMenu();
+    editor.destroy();
+  });
+
+  it("inserts a divider below and deletes the block", () => {
+    const { editor, order, block } = setup([
+      { type: "paragraph", runs: [{ text: "a" }] },
+      { type: "paragraph", runs: [{ text: "b" }] }
+    ]);
+    const first = editor.element.querySelectorAll("[contenteditable=true]")[0];
+    openOn(first);
+    item("ctx-insert-divider")?.click();
+    expect(order().map((id) => block(id).type)).toEqual(["paragraph", "divider", "paragraph"]);
+
+    const again = editor.element.querySelectorAll("[contenteditable=true]")[0];
+    openOn(again);
+    item("ctx-delete")?.click();
+    expect(order().map((id) => block(id).type)).toEqual(["divider", "paragraph"]);
+    editor.destroy();
+  });
+
+  it("deletes every selected block and keeps the selection when right-clicking inside it", () => {
+    const { editor, order } = setup([{ type: "paragraph" }, { type: "paragraph" }, { type: "paragraph" }]);
+    const els = editor.element.querySelectorAll("[contenteditable=true]");
+    editor.focusBlock(order()[0], "end");
+    els[1].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, shiftKey: true }));
+    expect(editor.getSelectedUnits()).toHaveLength(2);
+    openOn(els[1]);
+    expect(editor.getSelectedUnits()).toHaveLength(2);
+    expect(item("ctx-delete")?.textContent).toContain("Delete blocks");
+    item("ctx-delete")?.click();
+    expect(order()).toHaveLength(1);
+    editor.destroy();
+  });
+
+  it("indents and outdents from the menu", () => {
+    const list = {
+      type: "list",
+      ordered: false,
+      items: [
+        { id: "item-a", runs: [{ text: "a" }] },
+        { id: "item-b", runs: [{ text: "b" }] }
+      ]
+    };
+    const { editor, order, block } = setup([list, { type: "quote", runs: [{ text: "q" }] }]);
+    const quote = editor.element.querySelector("blockquote[contenteditable=true]");
+    openOn(quote);
+    expect(item("ctx-outdent")?.disabled).toBe(true);
+    item("ctx-indent")?.click();
+    expect(order()).toHaveLength(1);
+    expect(block(block(order()[0]).items[1].children[0]).type).toBe("quote");
+
+    const nested = editor.element.querySelector(".item-children blockquote[contenteditable=true]");
+    openOn(nested);
+    item("ctx-outdent")?.click();
+    expect(order()).toHaveLength(2);
+    editor.destroy();
+  });
+
+});

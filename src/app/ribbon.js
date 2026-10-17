@@ -87,6 +87,23 @@ export function createRibbon(getContext) {
       return { wrap, element: select };
     }
 
+    if (control.kind === "color") {
+      const input = /** @type {HTMLInputElement} */ (
+        h("input", { class: "ribbon-color-input", type: "color", "aria-label": control.title ?? control.label, "data-role": control.id })
+      );
+      for (const [name, value] of Object.entries(attrs)) input.setAttribute(name, String(value));
+      input.addEventListener("change", () => {
+        control.onSelect?.(getContext(), input.value);
+        update();
+      });
+      const wrap = h("label", { class: "ribbon-control ribbon-color-wrap" }, [
+        control.icon ? icon(control.icon, { size: 22 }) : null,
+        input,
+        h("span", { class: "ribbon-label", text: control.label })
+      ]);
+      return { wrap, element: input };
+    }
+
     if (control.kind === "field") {
       const input = /** @type {HTMLInputElement} */ (
         h("input", {
@@ -97,25 +114,23 @@ export function createRibbon(getContext) {
           "data-role": control.id
         })
       );
-      const apply = h("button", {
-        class: "ribbon-apply",
-        type: "button",
-        text: "Apply",
-        title: `Apply ${control.label.toLowerCase()}`,
-        "data-control": control.id
-      });
-      for (const [name, value] of Object.entries(attrs)) apply.setAttribute(name, String(value));
+      for (const [name, value] of Object.entries(attrs)) input.setAttribute(name, String(value));
+      // Applies as the value is committed (Enter, or leaving the field): no button.
       const run = () => {
         const value = Number(input.value);
         if (input.value.trim() === "" || !Number.isFinite(value)) return;
         control.apply?.(getContext(), value);
         update();
       };
-      apply.addEventListener("click", run);
+      input.addEventListener("change", run);
       input.addEventListener("keydown", (event) => {
-        if (/** @type {KeyboardEvent} */ (event).key === "Enter") {
+        const key = /** @type {KeyboardEvent} */ (event).key;
+        if (key === "Enter") {
           event.preventDefault();
           run();
+        } else if (key === "Escape") {
+          input.value = String(control.value?.(getContext()) ?? "");
+          input.blur();
         }
       });
       const wrap = h("div", { class: "ribbon-control ribbon-field" }, [
@@ -123,9 +138,9 @@ export function createRibbon(getContext) {
           control.icon ? icon(control.icon, { size: 16 }) : null,
           h("span", { text: control.label })
         ]),
-        h("span", { class: "ribbon-field-row" }, [input, apply])
+        h("span", { class: "ribbon-field-row" }, [input])
       ]);
-      return { wrap, element: apply, input };
+      return { wrap, element: input };
     }
 
     const button = h("button", {
@@ -230,10 +245,15 @@ export function createRibbon(getContext) {
         const select = /** @type {HTMLSelectElement} */ (target);
         select.disabled = !enabled;
         if (control.value && document.activeElement !== select) select.value = String(control.value(ctx));
-      } else if (control.kind === "field" && input) {
-        /** @type {HTMLButtonElement} */ (target).disabled = !enabled;
-        input.disabled = !enabled;
-        if (control.value && document.activeElement !== input) input.value = String(control.value(ctx));
+      } else if (control.kind === "color") {
+        const picker = /** @type {HTMLInputElement} */ (target);
+        picker.disabled = !enabled;
+        const value = control.value ? String(control.value(ctx)) : "";
+        if (document.activeElement !== picker && /^#[0-9a-f]{6}$/i.test(value)) picker.value = value.toLowerCase();
+      } else if (control.kind === "field") {
+        const field = /** @type {HTMLInputElement} */ (target);
+        field.disabled = !enabled;
+        if (control.value && document.activeElement !== field) field.value = String(control.value(ctx));
       } else {
         /** @type {HTMLButtonElement} */ (target).disabled = !enabled;
         if (control.active) {

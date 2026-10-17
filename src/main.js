@@ -6,12 +6,15 @@ import "./app/styles.css";
 import { Workspace } from "./workspace/store.js";
 import { registerDocumentCommands } from "./document/commands.js";
 import { registerSheetCommands } from "./sheet/commands.js";
+import { registerPresentationCommands } from "./presentation/commands.js";
+import { createId } from "./core/ids.js";
 /** @typedef {import("./workspace/store.js").Workspace} Workspace */
 import { mountApp } from "./app/shell.js";
 
 const workspace = Workspace.create({ title: "My Workspace" });
 registerDocumentCommands(workspace);
 registerSheetCommands(workspace);
+registerPresentationCommands(workspace);
 
 workspace.transact("seed welcome document", () => {
   workspace.dispatch("createPage", { type: "document", title: "Welcome" });
@@ -83,6 +86,34 @@ workspace.transact("seed budget sheet", () => {
       cell: typeof value === "number" ? { value } : { value: String(value) }
     });
   }
+});
+
+workspace.markSaved();
+
+workspace.transact("seed demo deck", () => {
+  workspace.dispatch("createPage", { type: "presentation", title: "Kickoff deck" });
+  const deckId = workspace.getChildren(null)[2];
+  const first = createId("slide");
+  workspace.dispatch("createSlide", { pageId: deckId, slideId: first, layout: "title" });
+  const second = createId("slide");
+  workspace.dispatch("createSlide", { pageId: deckId, slideId: second, layout: "titleContent" });
+  const content = /** @type {any} */ (workspace.getPage(deckId)?.content);
+  const [titleId, subtitleId] = content.slides[first].objectOrder;
+  workspace.dispatch("setObjectRuns", { pageId: deckId, slideId: first, objectId: titleId, runs: [{ text: "YourOffice" }] });
+  workspace.dispatch("setObjectRuns", {
+    pageId: deckId,
+    slideId: first,
+    objectId: subtitleId,
+    runs: [{ text: "Documents, sheets and slides in one workspace" }]
+  });
+  const [heading, body] = content.slides[second].objectOrder;
+  workspace.dispatch("setObjectRuns", { pageId: deckId, slideId: second, objectId: heading, runs: [{ text: "Why local-first" }] });
+  workspace.dispatch("setObjectRuns", {
+    pageId: deckId,
+    slideId: second,
+    objectId: body,
+    runs: [{ text: "Your data stays on your machine" }]
+  });
 });
 
 workspace.markSaved();

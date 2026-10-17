@@ -60,6 +60,42 @@ export const SHEET_DEFAULTS = {
   gap: 32
 };
 
+export const HEADER_WIDTH = 34;
+export const HEADER_HEIGHT = 22;
+
+/**
+ * @param {Table} table
+ * @param {number} col
+ * @returns {number}
+ */
+export function columnWidthOf(table, col) {
+  const override = table.columnOverrides[String(col)];
+  return override?.width ?? table.columnWidth;
+}
+
+/**
+ * @param {Table} table
+ * @param {number} row
+ * @returns {number}
+ */
+export function rowHeightOf(table, row) {
+  const override = table.rowOverrides[String(row)];
+  return override?.height ?? table.rowHeight;
+}
+
+/**
+ * Rendered size of a table's grid, including headers.
+ * @param {Table} table
+ * @returns {{ width: number, height: number }}
+ */
+export function tableExtent(table) {
+  let width = HEADER_WIDTH;
+  for (let col = 0; col < table.columnCount; col++) width += columnWidthOf(table, col);
+  let height = HEADER_HEIGHT;
+  for (let row = 0; row < table.rowCount; row++) height += rowHeightOf(table, row);
+  return { width, height };
+}
+
 const KEY_PATTERN = /^([0-9]+),([0-9]+)$/;
 
 /**

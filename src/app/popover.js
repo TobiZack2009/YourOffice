@@ -13,6 +13,8 @@ import { h } from "./dom.js";
  * @typedef {object} PopoverHost
  * @property {(anchor: HTMLElement, content: HTMLElement, options?: { keepFocus?: boolean, class?: string }) => HTMLElement | null} show
  *   Opens the popover, or closes it and returns null when this anchor already owns it.
+ * @property {(point: { x: number, y: number }, content: HTMLElement, options?: { class?: string }) => HTMLElement} showAt
+ *   Opens the popover at a screen point (context menus), kept inside the window.
  * @property {() => void} close
  * @property {() => boolean} isOpen
  * @property {() => void} destroy
@@ -49,37 +51,56 @@ export function createPopoverHost(container) {
     document.removeEventListener("keydown", onKeydown, true);
   }
 
+  /**
+   * @param {HTMLElement | null} anchor
+   * @param {HTMLElement} content
+   * @param {{ keepFocus?: boolean, class?: string }} options
+   * @param {(element: HTMLElement) => void} place
+   */
+  function open(anchor, content, options, place) {
+    const element = h("div", { class: `popover${options.class ? ` ${options.class}` : ""}`, role: "dialog" }, [
+      content
+    ]);
+    // Pressing a button inside the popover must not move focus or selection.
+    element.addEventListener("mousedown", (event) => {
+      if (/** @type {HTMLElement} */ (event.target).closest("button")) event.preventDefault();
+    });
+    container.append(element);
+    place(element);
+
+    popover = element;
+    anchorElement = anchor;
+    document.addEventListener("mousedown", onOutsidePress, true);
+    document.addEventListener("keydown", onKeydown, true);
+
+    if (options.keepFocus) {
+      /** @type {HTMLInputElement | null} */ (element.querySelector("input"))?.focus();
+    }
+    return element;
+  }
+
   return {
     show(anchor, content, options = {}) {
       const toggledOff = popover !== null && anchorElement === anchor;
       close();
       if (toggledOff) return null;
-
-      const element = h("div", { class: `popover${options.class ? ` ${options.class}` : ""}`, role: "dialog" }, [
-        content
-      ]);
-      // Pressing a button inside the popover must not move focus or selection.
-      element.addEventListener("mousedown", (event) => {
-        if (/** @type {HTMLElement} */ (event.target).closest("button")) event.preventDefault();
+      return open(anchor, content, options, (element) => {
+        const rect = anchor.getBoundingClientRect();
+        const width = element.offsetWidth || 0;
+        const maxLeft = Math.max(0, (window.innerWidth || 0) - width - 8);
+        const left = Math.max(8, maxLeft > 0 ? Math.min(rect.left, maxLeft) : rect.left);
+        element.style.left = `${left}px`;
+        element.style.top = `${rect.bottom + 4}px`;
       });
-      container.append(element);
-
-      const rect = anchor.getBoundingClientRect();
-      const width = element.offsetWidth || 0;
-      const maxLeft = Math.max(0, (window.innerWidth || 0) - width - 8);
-      const left = Math.max(8, maxLeft > 0 ? Math.min(rect.left, maxLeft) : rect.left);
-      element.style.left = `${left}px`;
-      element.style.top = `${rect.bottom + 4}px`;
-
-      popover = element;
-      anchorElement = anchor;
-      document.addEventListener("mousedown", onOutsidePress, true);
-      document.addEventListener("keydown", onKeydown, true);
-
-      if (options.keepFocus) {
-        /** @type {HTMLInputElement | null} */ (element.querySelector("input"))?.focus();
-      }
-      return element;
+    },
+    showAt(point, content, options = {}) {
+      close();
+      return open(null, content, options, (element) => {
+        const maxLeft = Math.max(0, (window.innerWidth || 0) - (element.offsetWidth || 0) - 8);
+        const maxTop = Math.max(0, (window.innerHeight || 0) - (element.offsetHeight || 0) - 8);
+        element.style.left = `${Math.max(8, maxLeft > 0 ? Math.min(point.x, maxLeft) : point.x)}px`;
+        element.style.top = `${Math.max(8, maxTop > 0 ? Math.min(point.y, maxTop) : point.y)}px`;
+      });
     },
     close,
     isOpen: () => popover !== null,
@@ -98,6 +119,8 @@ export function createPopoverHost(container) {
  * @property {boolean} [disabled]
  * @property {boolean} [separator] Renders a divider instead of an item.
  * @property {string} [heading] Renders a small section heading instead of an item.
+ * @property {MenuItem[]} [submenu] Turns the item into a section name; hovering
+ *   (or pressing) it opens a flyout menu holding these items.
  */
 
 /**
@@ -119,6 +142,10 @@ export function buildMenu(items, close, makeIcon) {
       menu.append(h("div", { class: "menu-label", text: item.heading }));
       continue;
     }
+    if (item.submenu) {
+      menu.append(buildSubmenu(item, close, makeIcon));
+      continue;
+    }
     const button = h("button", {
       class: `menu-item${item.danger ? " is-danger" : ""}${item.className ? ` ${item.className}` : ""}`,
       type: "button",
@@ -135,4 +162,49 @@ export function buildMenu(items, close, makeIcon) {
     menu.append(button);
   }
   return menu;
+}
+
+/**
+ * A section entry: a row showing only the section name and a chevron, with the
+ * real options in a flyout that opens on hover (or press, for keyboard and touch).
+ * The flyout stays in the DOM so its items are always addressable.
+ * @param {MenuItem} item
+ * @param {() => void} close
+ * @param {(name: string) => Element} [makeIcon]
+ * @returns {HTMLElement}
+ */
+function buildSubmenu(item, close, makeIcon) {
+  const wrapper = h("div", { class: "menu-submenu" });
+  const trigger = h("button", {
+    class: `menu-item menu-submenu-trigger${item.className ? ` ${item.className}` : ""}`,
+    type: "button",
+    role: "menuitem",
+    "aria-haspopup": "menu",
+    disabled: item.disabled
+  });
+  if (item.icon && makeIcon) trigger.append(makeIcon(item.icon));
+  trigger.append(h("span", { class: "menu-item-label", text: item.label ?? "" }));
+  trigger.append(h("span", { class: "menu-submenu-chevron", text: "\u203A", "aria-hidden": "true" }));
+  for (const [name, value] of Object.entries(item.attrs ?? {})) trigger.setAttribute(name, value);
+  const flyout = buildMenu(item.submenu ?? [], close, makeIcon);
+  flyout.classList.add("menu-flyout");
+
+  const open = () => {
+    if (item.disabled) return;
+    // Only one flyout per menu is open at a time.
+    for (const sibling of wrapper.parentElement?.querySelectorAll(":scope > .menu-submenu.is-open") ?? []) {
+      if (sibling !== wrapper) sibling.classList.remove("is-open");
+    }
+    wrapper.classList.add("is-open");
+    // Flip to the left when the flyout would run off the window.
+    const rect = wrapper.getBoundingClientRect();
+    const width = flyout.offsetWidth || 0;
+    wrapper.classList.toggle("opens-left", width > 0 && rect.right + width > (window.innerWidth || Infinity));
+  };
+  wrapper.addEventListener("mouseenter", open);
+  wrapper.addEventListener("mouseleave", () => wrapper.classList.remove("is-open"));
+  trigger.addEventListener("click", open);
+
+  wrapper.append(trigger, flyout);
+  return wrapper;
 }

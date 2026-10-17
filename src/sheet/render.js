@@ -9,21 +9,32 @@
  */
 
 import { displayValue } from "./evaluator.js";
-import { cellKey, columnLabel, findMerge, mergeBounds } from "./model.js";
+import {
+  HEADER_HEIGHT,
+  HEADER_WIDTH,
+  cellKey,
+  columnLabel,
+  columnWidthOf,
+  findMerge,
+  mergeBounds,
+  rowHeightOf,
+  tableExtent
+} from "./model.js";
+
+// The sizing helpers live in the model (commands place tables with them too).
+export { HEADER_HEIGHT, HEADER_WIDTH, columnWidthOf, rowHeightOf, tableExtent };
 
 /** @typedef {import("./model.js").SheetContent} SheetContent */
 /** @typedef {import("./model.js").Table} Table */
 /** @typedef {import("./table-engine.js").TableEngines} TableEngines */
 
-export const HEADER_WIDTH = 34;
-export const HEADER_HEIGHT = 22;
-
 /**
  * @typedef {object} SheetRenderOptions
  * @property {Document} [document]
  * @property {TableEngines} [engines] Computed-value source for formula cells.
- * @property {{ tableId: string, col: number, row: number, range?: { tableId: string, start: { col: number, row: number }, end: { col: number, row: number } } } | null} [selected]
- *   The active cell, plus an optional selected range (normalised start <= end).
+ * @property {{ tableId: string, col: number, row: number, range?: { tableId: string, start: { col: number, row: number }, end: { col: number, row: number } }, ranges?: { tableId: string, start: { col: number, row: number }, end: { col: number, row: number } }[] } | null} [selected]
+ *   The active cell, plus an optional selected range (normalised start <= end)
+ *   or several ranges (`ranges`, which wins over `range`).
  * @property {boolean} [interactive] Adds hover/cursor affordances (editor mode).
  */
 
@@ -64,39 +75,6 @@ export function rectsIntersect(a, b) {
 /**
  * @param {Table} table
  * @param {number} col
- * @returns {number}
- */
-export function columnWidthOf(table, col) {
-  const override = table.columnOverrides[String(col)];
-  return override?.width ?? table.columnWidth;
-}
-
-/**
- * @param {Table} table
- * @param {number} row
- * @returns {number}
- */
-export function rowHeightOf(table, row) {
-  const override = table.rowOverrides[String(row)];
-  return override?.height ?? table.rowHeight;
-}
-
-/**
- * Rendered size of a table's grid, including headers.
- * @param {Table} table
- * @returns {{ width: number, height: number }}
- */
-export function tableExtent(table) {
-  let width = HEADER_WIDTH;
-  for (let col = 0; col < table.columnCount; col++) width += columnWidthOf(table, col);
-  let height = HEADER_HEIGHT;
-  for (let row = 0; row < table.rowCount; row++) height += rowHeightOf(table, row);
-  return { width, height };
-}
-
-/**
- * @param {Table} table
- * @param {number} col
  * @param {number} row
  * @param {SheetRenderOptions} [options]
  * @returns {{ display: string, kind: "blank" | "literal" | "formula", error: boolean }}
@@ -115,6 +93,23 @@ export function resolveCell(table, col, row, options) {
     return { display: displayValue(cell.value), kind: "literal", error: false };
   }
   return { display: "", kind: "blank", error: false };
+}
+
+/**
+ * The grab strip on a header's trailing edge (editor mode): dragging it resizes
+ * the column or row.
+ * @param {Document} doc
+ * @param {"col-resize" | "row-resize"} role
+ * @param {string} indexAttribute
+ * @param {number} index
+ * @returns {HTMLElement}
+ */
+function resizeHandle(doc, role, indexAttribute, index) {
+  const handle = doc.createElement("span");
+  handle.className = `sheet-resize-handle is-${role}`;
+  handle.setAttribute("data-role", role);
+  handle.setAttribute(indexAttribute, String(index));
+  return handle;
 }
 
 /**
@@ -164,6 +159,7 @@ export function renderTable(table, options) {
     th.className = "sheet-col-header";
     th.setAttribute("data-col", String(col));
     th.textContent = columnLabel(col);
+    if (options?.interactive) th.appendChild(resizeHandle(doc, "col-resize", "data-col", col));
     headRow.appendChild(th);
   }
   head.appendChild(headRow);
@@ -172,6 +168,10 @@ export function renderTable(table, options) {
   const body = doc.createElement("tbody");
   /** @type {Set<string>} */
   const covered = new Set();
+  const ranges = (options?.selected?.ranges ?? (options?.selected?.range ? [options.selected.range] : [])).filter(
+    (range) => range.tableId === table.id
+  );
+  const handleRange = options?.interactive && ranges.length > 0 ? ranges[ranges.length - 1] : null;
 
   for (let row = 0; row < table.rowCount; row++) {
     const tr = doc.createElement("tr");
@@ -182,6 +182,7 @@ export function renderTable(table, options) {
     rowHeader.className = "sheet-row-header";
     rowHeader.setAttribute("data-row", String(row));
     rowHeader.textContent = String(row + 1);
+    if (options?.interactive) rowHeader.appendChild(resizeHandle(doc, "row-resize", "data-row", row));
     tr.appendChild(rowHeader);
 
     for (let col = 0; col < table.columnCount; col++) {
@@ -220,14 +221,20 @@ export function renderTable(table, options) {
       const selected = options?.selected;
       if (selected && selected.tableId === table.id) {
         if (rectContains(block, selected.col, selected.row)) cell.classList.add("is-selected");
-        const range = selected.range;
-        if (
-          range &&
-          range.tableId === table.id &&
-          (range.start.col !== range.end.col || range.start.row !== range.end.row) &&
-          rectsIntersect(block, range)
-        ) {
-          cell.classList.add("is-in-range");
+        if (ranges.length > 0) {
+          const multiple =
+            ranges.length > 1 || ranges.some((r) => r.start.col !== r.end.col || r.start.row !== r.end.row);
+          if (multiple && ranges.some((range) => rectsIntersect(block, range))) {
+            cell.classList.add("is-in-range");
+          }
+        }
+        // The fill handle sits in the last cell of the active (last) range.
+        if (handleRange && rectContains(block, handleRange.end.col, handleRange.end.row)) {
+          const handle = doc.createElement("span");
+          handle.className = "sheet-fill-handle";
+          handle.setAttribute("data-role", "fill-handle");
+          handle.title = "Drag to fill";
+          cell.appendChild(handle);
         }
       }
       if (options?.interactive) cell.classList.add("is-interactive");

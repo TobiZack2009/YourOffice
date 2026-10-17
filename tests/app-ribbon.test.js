@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Workspace } from "../src/workspace/store.js";
-import { defaultTabId, getTabs, EMBED_REASON, PRESENTATION_REASON } from "../src/app/ribbon-tabs.js";
+import { defaultTabId, getTabs, EMBED_REASON, ANIMATION_REASON, THEME_REASON } from "../src/app/ribbon-tabs.js";
 import { createRibbon } from "../src/app/ribbon.js";
 
 const ids = (/** @type {any[]} */ list) => list.map((item) => item.id);
@@ -19,7 +19,7 @@ describe("getTabs", () => {
 
   it("gives documents Home and Insert, sheets Home and Insert, presentations the full set", () => {
     expect(ids(getTabs("document"))).toEqual(["file", "home", "insert", "view"]);
-    expect(ids(getTabs("sheet"))).toEqual(["file", "home", "insert", "view"]);
+    expect(ids(getTabs("sheet"))).toEqual(["file", "home", "insert", "layout", "view"]);
     expect(ids(getTabs("presentation"))).toEqual([
       "file",
       "home",
@@ -48,20 +48,36 @@ describe("getTabs", () => {
         expect(new Set(ids(controls)).size).toBe(controls.length);
         for (const control of controls) {
           expect(control.label).toBeTruthy();
-          expect(["button", "toggle", "select", "menu", "field"]).toContain(control.kind);
+          expect(["button", "toggle", "select", "menu", "field", "color"]).toContain(control.kind);
         }
       }
     }
   });
 
-  it("disables every presentation control except on View, with the reason", () => {
+  it("disables every presentation control without an editor, and keeps the deferred seams explained", () => {
+    const ctx = /** @type {any} */ ({ workspace: { canUndo: false, canRedo: false } });
     for (const tab of getTabs("presentation")) {
-      if (tab.id === "file" || tab.id === "view") continue;
+      if (tab.id === "file") continue;
       for (const control of tab.groups.flatMap((group) => group.controls)) {
-        expect(control.enabled?.(/** @type {any} */ ({}))).toBe(false);
-        expect(control.disabledReason).toBe(PRESENTATION_REASON);
+        if (control.id === "undo" || control.id === "redo") continue;
+        if (tab.id === "view" && !["toggle-inspector", "toggle-snap", "toggle-grid"].includes(control.id)) continue;
+        expect(control.enabled?.(ctx), control.id).toBe(false);
       }
     }
+    const seams = allControls("presentation").filter((control) => control.disabledReason);
+    expect(Object.fromEntries(seams.map((control) => [control.id, control.disabledReason]))).toEqual({
+      theme: THEME_REASON,
+      "add-animation": ANIMATION_REASON
+    });
+  });
+
+  it("offers the presentation view toggles instead of canvas zoom", () => {
+    const view = ids(allControls("presentation"));
+    expect(view).toContain("toggle-inspector");
+    expect(view).toContain("toggle-snap");
+    expect(view).toContain("toggle-grid");
+    expect(view).not.toContain("zoom");
+    expect(ids(allControls("document"))).toContain("zoom");
   });
 
   it("keeps embed seams disabled in the document Insert tab", () => {
@@ -89,6 +105,13 @@ describe("createRibbon", () => {
       canMerge: vi.fn(() => false),
       canUnmerge: vi.fn(() => false),
       mergeSelection: vi.fn(),
+      canPaste: vi.fn(() => false),
+      paste: vi.fn(),
+      copy: vi.fn(),
+      cut: vi.fn(),
+      fillDown: vi.fn(),
+      fillRight: vi.fn(),
+      fillSelection: vi.fn(),
       getSelection: vi.fn(() => null),
       getRange: vi.fn(() => null),
       selectedRowHeight: vi.fn(() => null),
@@ -138,6 +161,30 @@ describe("createRibbon", () => {
     expect(bold.disabled).toBe(false);
   });
 
+  it("keeps the size fields off Home and applies them when the value is committed", () => {
+    const { ribbon, ctx, sheetEditor } = setup();
+    const setSelectedRowHeight = vi.fn();
+    ctx.sheetEditor = /** @type {any} */ ({
+      ...sheetEditor,
+      getSelection: vi.fn(() => ({ tableId: "t", col: 0, row: 0 })),
+      setSelectedRowHeight
+    });
+    ribbon.setPage("sheet");
+    expect(ribbon.element.querySelector('[data-control="row-height"]')).toBeNull();
+
+    ribbon.selectTab("layout");
+    expect(ribbon.element.querySelector(".ribbon-apply")).toBeNull();
+    const field = /** @type {HTMLInputElement} */ (ribbon.element.querySelector('[data-action="row-height"]'));
+    expect(field.disabled).toBe(false);
+    field.value = "44";
+    field.dispatchEvent(new Event("change"));
+    expect(setSelectedRowHeight).toHaveBeenCalledWith(44);
+
+    field.value = "50";
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(setSelectedRowHeight).toHaveBeenLastCalledWith(50);
+  });
+
   it("reflects the active block type in the style select and runs actions", () => {
     const { ribbon, ctx, docEditor } = setup();
     ctx.docEditor = docEditor;
@@ -171,9 +218,10 @@ describe("createRibbon", () => {
   it("explains disabled controls through the tooltip and does not run them", () => {
     const { ribbon } = setup();
     ribbon.setPage("presentation");
+    ribbon.selectTab("animations");
     const control = /** @type {HTMLButtonElement} */ (ribbon.element.querySelector(".ribbon-panel .ribbon-button"));
     expect(control.disabled).toBe(true);
-    expect(control.title).toBe(PRESENTATION_REASON);
+    expect(control.title).toBe(ANIMATION_REASON);
   });
 
   it("enables Merge from the editor's state", () => {
@@ -188,6 +236,40 @@ describe("createRibbon", () => {
     expect(merge.disabled).toBe(false);
     merge.click();
     expect(sheetEditor.mergeSelection).toHaveBeenCalled();
+  });
+
+  it("wires the sheet clipboard controls to the editor", () => {
+    const { ribbon, ctx, sheetEditor } = setup();
+    ctx.sheetEditor = /** @type {any} */ (sheetEditor);
+    sheetEditor.getSelection.mockReturnValue(/** @type {any} */ ({ tableId: "t", col: 0, row: 0 }));
+    ribbon.setPage("sheet");
+    const button = (/** @type {string} */ action) =>
+      /** @type {HTMLButtonElement} */ (ribbon.element.querySelector(`[data-action="${action}"]`));
+
+    expect(button("paste").disabled).toBe(true);
+    sheetEditor.canPaste.mockReturnValue(true);
+    ribbon.update();
+    expect(button("paste").disabled).toBe(false);
+
+    for (const [action, method] of [
+      ["paste", "paste"],
+      ["copy", "copy"],
+      ["cut", "cut"]
+    ]) {
+      button(action).click();
+      expect(sheetEditor[method]).toHaveBeenCalled();
+    }
+  });
+
+  it("leaves fill and row/column structure to the sheet's handle and context menu", () => {
+    const { ribbon } = setup();
+    ribbon.setPage("sheet");
+    for (const tab of ["home", "insert"]) {
+      ribbon.selectTab(tab);
+      for (const action of ["fill-down", "fill-right", "fill-selection", "add-row", "delete-row", "add-column", "delete-column"]) {
+        expect(ribbon.element.querySelector(`[data-action="${action}"]`)).toBeNull();
+      }
+    }
   });
 
   it("opens a menu popover for menu controls and closes it on tab change", () => {

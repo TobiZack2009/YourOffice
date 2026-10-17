@@ -6,20 +6,24 @@
  * tab or a control is a data change here, not a change to the renderer.
  *
  * A control is
- *   { id, kind: "button" | "toggle" | "select" | "menu" | "field", label, icon,
+ *   { id, kind: "button" | "toggle" | "select" | "menu" | "field" | "color", label, icon,
  *     size: "large" | "small", title?, attrs?, action(ctx, element), enabled(ctx),
  *     active(ctx), disabledReason? }
  * - toggle: a button that can show an active state.
  * - select: `options`, `value(ctx)`, `action(ctx, value)`.
  * - menu: opens a popover from `items(ctx)` (menu rows) or `content(ctx, close)`.
- * - field: a number input with Apply — `value(ctx)`, `apply(ctx, number)`.
+ * - field: a number input that applies when committed (Enter or blur) — `value(ctx)`, `apply(ctx, number)`.
  * `attrs` are extra attributes on the rendered element; the stable `data-action`
  * / `data-type` / `data-level` / `data-mark` / `data-insert` hooks live there.
  *
- * ctx is { workspace, page, docEditor, sheetEditor, shell }.
+ * - color: a native colour picker — `value(ctx)` (hex), `onSelect(ctx, hex)`.
+ *
+ * ctx is { workspace, page, docEditor, sheetEditor, presentationEditor, shell }.
  */
 
 import { h } from "./dom.js";
+import { LAYOUTS } from "../presentation/layouts.js";
+import { SIZE_PRESETS } from "../presentation/geometry.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 
@@ -29,6 +33,7 @@ import { h } from "./dom.js";
  * @property {import("../workspace/schema.js").PageEnvelope | undefined} page
  * @property {import("./block-editor.js").EditorHandle | null} docEditor
  * @property {import("./sheet-editor.js").SheetEditorHandle | null} sheetEditor
+ * @property {import("./presentation-editor.js").PresentationEditorHandle | null} [presentationEditor]
  * @property {ShellApi} shell
  */
 
@@ -50,7 +55,7 @@ import { h } from "./dom.js";
 /**
  * @typedef {object} Control
  * @property {string} id
- * @property {"button" | "toggle" | "select" | "menu" | "field"} kind
+ * @property {"button" | "toggle" | "select" | "menu" | "field" | "color"} kind
  * @property {string} label
  * @property {string} [title]
  * @property {string} [icon]
@@ -75,7 +80,8 @@ import { h } from "./dom.js";
  * @typedef {{ id: string, label: string, groups: Group[] }} Tab
  */
 
-export const PRESENTATION_REASON = "Presentations arrive in Phase 5";
+export const ANIMATION_REASON = "Animations arrive in a later pass";
+export const THEME_REASON = "Themes arrive later";
 export const EMBED_REASON = "Embeds arrive with references (Phase 6)";
 
 // -- shared predicates --------------------------------------------------------
@@ -86,6 +92,14 @@ const hasDoc = (ctx) => Boolean(ctx.docEditor);
 const hasSheet = (ctx) => Boolean(ctx.sheetEditor);
 /** @param {RibbonContext} ctx */
 const hasCell = (ctx) => Boolean(ctx.sheetEditor?.getSelection());
+/** @param {RibbonContext} ctx */
+const hasPres = (ctx) => Boolean(ctx.presentationEditor);
+/** @param {RibbonContext} ctx */
+const hasSlide = (ctx) => Boolean(ctx.presentationEditor?.getSlideId());
+/** @param {RibbonContext} ctx */
+const hasObjects = (ctx) => (ctx.presentationEditor?.getSelection().length ?? 0) > 0;
+/** @param {RibbonContext} ctx */
+const canEditPresText = (ctx) => Boolean(ctx.presentationEditor?.canEditText());
 
 // -- popover bodies -----------------------------------------------------------
 
@@ -286,44 +300,6 @@ function historyControls() {
   ];
 }
 
-/** @returns {Control[]} Row and column structure controls (kept `data-action`s). */
-function lineControls() {
-  return [
-    button({
-      id: "insert-row",
-      label: "Insert row",
-      icon: "row-add",
-      attrs: { "data-action": "add-row" },
-      enabled: hasCell,
-      action: (ctx) => ctx.sheetEditor?.insertRow()
-    }),
-    button({
-      id: "delete-row",
-      label: "Delete row",
-      icon: "row-delete",
-      attrs: { "data-action": "delete-row" },
-      enabled: hasCell,
-      action: (ctx) => ctx.sheetEditor?.deleteRow()
-    }),
-    button({
-      id: "insert-column",
-      label: "Insert column",
-      icon: "column-add",
-      attrs: { "data-action": "add-column" },
-      enabled: hasCell,
-      action: (ctx) => ctx.sheetEditor?.insertColumn()
-    }),
-    button({
-      id: "delete-column",
-      label: "Delete column",
-      icon: "column-delete",
-      attrs: { "data-action": "delete-column" },
-      enabled: hasCell,
-      action: (ctx) => ctx.sheetEditor?.deleteColumn()
-    })
-  ];
-}
-
 const STYLE_OPTIONS = [
   { value: "", label: "Style" },
   { value: "paragraph", label: "Paragraph" },
@@ -469,13 +445,45 @@ function fileTab() {
   };
 }
 
-/** @returns {Tab} */
-function viewTab() {
+/**
+ * @param {string | null | undefined} [pageType]
+ * @returns {Tab}
+ */
+function viewTab(pageType) {
+  const presentation = pageType === "presentation";
+  /** @param {string} id @param {string} label @param {string} iconName @param {string} field @param {string} title */
+  const viewToggle = (id, label, iconName, field, title) =>
+    button({
+      id,
+      kind: "toggle",
+      label,
+      title,
+      icon: iconName,
+      attrs: { "data-action": id },
+      enabled: hasPres,
+      active: (ctx) => Boolean(/** @type {any} */ (ctx.presentationEditor?.getView())?.[field]),
+      action: (ctx) => {
+        const view = /** @type {any} */ (ctx.presentationEditor?.getView());
+        ctx.presentationEditor?.setView({ [field]: !view?.[field] });
+      }
+    });
   return {
     id: "view",
     label: "View",
     groups: [
-      {
+      ...(presentation
+        ? [
+            {
+              id: "stage",
+              label: "Stage",
+              controls: [
+                viewToggle("toggle-inspector", "Inspector", "inspector", "inspector", "Show or hide the inspector"),
+                viewToggle("toggle-snap", "Guides", "snap", "snap", "Snap to guides"),
+                viewToggle("toggle-grid", "Grid", "grid", "grid", "Show and snap to a grid")
+              ]
+            }
+          ]
+        : [{
         id: "zoom",
         label: "Zoom",
         controls: [
@@ -491,7 +499,7 @@ function viewTab() {
             onSelect: (ctx, value) => ctx.shell.setZoom(Number(value))
           }
         ]
-      },
+      }]),
       {
         id: "layout",
         label: "Layout",
@@ -635,6 +643,41 @@ function sheetTabs() {
       label: "Home",
       groups: [
         {
+          id: "clipboard",
+          label: "Clipboard",
+          controls: [
+            button({
+              id: "paste",
+              label: "Paste",
+              title: "Paste the copied or cut cells (Ctrl/Cmd+V)",
+              icon: "paste",
+              attrs: { "data-action": "paste" },
+              enabled: (ctx) => Boolean(ctx.sheetEditor?.canPaste()),
+              action: (ctx) => ctx.sheetEditor?.paste()
+            }),
+            button({
+              id: "cut",
+              label: "Cut",
+              size: "small",
+              title: "Cut the selected cells; pasting moves them (Ctrl/Cmd+X)",
+              icon: "cut",
+              attrs: { "data-action": "cut" },
+              enabled: hasCell,
+              action: (ctx) => ctx.sheetEditor?.cut()
+            }),
+            button({
+              id: "copy",
+              label: "Copy",
+              size: "small",
+              title: "Copy the selected cells (Ctrl/Cmd+C)",
+              icon: "copy",
+              attrs: { "data-action": "copy" },
+              enabled: hasCell,
+              action: (ctx) => ctx.sheetEditor?.copy()
+            })
+          ]
+        },
+        {
           id: "cells",
           label: "Cells",
           controls: [
@@ -656,35 +699,6 @@ function sheetTabs() {
               enabled: (ctx) => Boolean(ctx.sheetEditor?.canUnmerge()),
               action: (ctx) => ctx.sheetEditor?.unmergeSelection()
             })
-          ]
-        },
-        { id: "lines", label: "Rows and Columns", controls: lineControls() },
-        {
-          id: "size",
-          label: "Size",
-          controls: [
-            {
-              id: "row-height",
-              kind: "field",
-              label: "Row height",
-              icon: "row-height",
-              min: 1,
-              attrs: { "data-action": "row-height" },
-              enabled: hasCell,
-              value: (ctx) => ctx.sheetEditor?.selectedRowHeight() ?? "",
-              apply: (ctx, value) => ctx.sheetEditor?.setSelectedRowHeight(value)
-            },
-            {
-              id: "column-width",
-              kind: "field",
-              label: "Column width",
-              icon: "column-width",
-              min: 1,
-              attrs: { "data-action": "column-width" },
-              enabled: hasCell,
-              value: (ctx) => ctx.sheetEditor?.selectedColumnWidth() ?? "",
-              apply: (ctx, value) => ctx.sheetEditor?.setSelectedColumnWidth(value)
-            }
           ]
         },
         { id: "history", label: "History", controls: historyControls() }
@@ -726,25 +740,321 @@ function sheetTabs() {
                 )
             })
           ]
-        },
-        { id: "lines", label: "Rows and Columns", controls: lineControls() }
+        }
+      ]
+    },
+    {
+      id: "layout",
+      label: "Layout",
+      groups: [
+        {
+          id: "size",
+          label: "Size",
+          controls: [
+            {
+              id: "row-height",
+              kind: "field",
+              label: "Row height",
+              icon: "row-height",
+              min: 1,
+              attrs: { "data-action": "row-height" },
+              enabled: hasCell,
+              value: (ctx) => ctx.sheetEditor?.selectedRowHeight() ?? "",
+              apply: (ctx, value) => ctx.sheetEditor?.setSelectedRowHeight(value)
+            },
+            {
+              id: "column-width",
+              kind: "field",
+              label: "Column width",
+              icon: "column-width",
+              min: 1,
+              attrs: { "data-action": "column-width" },
+              enabled: hasCell,
+              value: (ctx) => ctx.sheetEditor?.selectedColumnWidth() ?? "",
+              apply: (ctx, value) => ctx.sheetEditor?.setSelectedColumnWidth(value)
+            }
+          ]
+        }
       ]
     }
   ];
 }
 
+const SHAPE_ITEMS = [
+  { shape: "rect", label: "Rectangle", icon: "rect" },
+  { shape: "roundRect", label: "Rounded rectangle", icon: "roundrect" },
+  { shape: "ellipse", label: "Ellipse", icon: "ellipse" },
+  { shape: "triangle", label: "Triangle", icon: "triangle" },
+  { shape: "arrow", label: "Arrow", icon: "arrow" }
+];
+
+const ARRANGE_ITEMS = [
+  { op: "front", label: "Bring to front", icon: "bring-front" },
+  { op: "forward", label: "Bring forward", icon: "bring-forward" },
+  { op: "backward", label: "Send backward", icon: "send-backward" },
+  { op: "back", label: "Send to back", icon: "send-back" }
+];
+
+const TRANSITION_STYLE_OPTIONS = [
+  { value: "none", label: "None" },
+  { value: "fade", label: "Fade" },
+  { value: "wipe", label: "Wipe" }
+];
+
+const TRANSITION_DIRECTION_OPTIONS = [
+  { value: "left", label: "From left" },
+  { value: "right", label: "From right" },
+  { value: "up", label: "From top" },
+  { value: "down", label: "From bottom" }
+];
+
+/**
+ * The link popover for presentations: the caret/selection while a text object is
+ * being edited, otherwise the selected object. Mirrors the document popover.
+ * @param {RibbonContext} ctx
+ * @param {() => void} close
+ * @returns {HTMLElement}
+ */
+function presentationLinkPopover(ctx, close) {
+  const editor = ctx.presentationEditor;
+  const input = /** @type {HTMLInputElement} */ (
+    h("input", {
+      class: "popover-input",
+      type: "url",
+      placeholder: "https://…",
+      "aria-label": "Link URL",
+      "data-role": "link-input",
+      value: editor?.getLinkUrl() ?? ""
+    })
+  );
+  const apply = h("button", { class: "popover-apply", type: "button", text: "Apply" });
+  const remove = h("button", { class: "popover-remove", type: "button", text: "Remove" });
+  apply.addEventListener("click", () => {
+    const value = input.value.trim();
+    close();
+    if (value) editor?.setLink(value);
+  });
+  remove.addEventListener("click", () => {
+    close();
+    editor?.setLink("");
+  });
+  input.addEventListener("keydown", (event) => {
+    const key = /** @type {KeyboardEvent} */ (event).key;
+    if (key === "Enter") {
+      event.preventDefault();
+      apply.click();
+    } else if (key === "Escape") {
+      close();
+    }
+  });
+  return h("div", { class: "popover-body" }, [input, h("div", { class: "popover-row" }, [apply, remove])]);
+}
+
+/**
+ * @param {string} mark
+ * @param {string} label
+ * @param {string} iconName
+ * @returns {Control}
+ */
+function presentationMark(mark, label, iconName) {
+  return {
+    id: `pres-mark-${mark}`,
+    kind: "toggle",
+    size: "small",
+    label,
+    icon: iconName,
+    attrs: { "data-action": "mark", "data-mark": mark },
+    enabled: canEditPresText,
+    active: (ctx) => Boolean(ctx.presentationEditor?.markActive(/** @type {any} */ (mark))),
+    action: (ctx) => ctx.presentationEditor?.toggleMark(/** @type {any} */ (mark))
+  };
+}
+
+/**
+ * @param {string} align
+ * @param {string} label
+ * @returns {Control}
+ */
+function presentationAlign(align, label) {
+  return {
+    id: `pres-align-${align}`,
+    kind: "toggle",
+    size: "small",
+    label,
+    icon: `align-${align}`,
+    attrs: { "data-action": "align", "data-align": align },
+    enabled: canEditPresText,
+    active: (ctx) => ctx.presentationEditor?.getTextState()?.align === align,
+    action: (ctx) => ctx.presentationEditor?.setAlign(/** @type {any} */ (align))
+  };
+}
+
+/** @returns {Control} */
+function arrangeMenu() {
+  return button({
+    id: "arrange",
+    kind: "menu",
+    label: "Arrange",
+    title: "Arrange objects",
+    icon: "bring-front",
+    attrs: { "data-action": "arrange-menu" },
+    enabled: hasObjects,
+    items: (ctx) =>
+      ARRANGE_ITEMS.map((item) => ({
+        label: item.label,
+        icon: item.icon,
+        attrs: { "data-action": `arrange-${item.op}` },
+        action: () => ctx.presentationEditor?.arrange(/** @type {any} */ (item.op))
+      }))
+  });
+}
+
+/** @returns {Control} */
+function layoutMenu() {
+  return button({
+    id: "new-slide",
+    kind: "menu",
+    label: "New slide",
+    icon: "slide-new",
+    attrs: { "data-action": "new-slide" },
+    enabled: hasPres,
+    items: (ctx) =>
+      LAYOUTS.map((layout) => ({
+        label: layout.label,
+        icon: "layout",
+        attrs: { "data-action": "new-slide-layout", "data-layout": layout.id },
+        action: () => ctx.presentationEditor?.newSlide(layout.id)
+      }))
+  });
+}
+
+/**
+ * A Width / Height field that routes through the editor's scale-or-keep popover.
+ * @param {"width" | "height"} axis
+ * @returns {Control}
+ */
+function slideSizeField(axis) {
+  return {
+    id: `slide-${axis}`,
+    kind: "field",
+    label: axis === "width" ? "Width" : "Height",
+    icon: axis === "width" ? "column-width" : "row-height",
+    min: 320,
+    attrs: { "data-action": `slide-${axis}` },
+    enabled: hasPres,
+    value: (ctx) => ctx.presentationEditor?.getSize()[axis] ?? "",
+    apply: (ctx, value) => {
+      const size = ctx.presentationEditor?.getSize();
+      if (!size) return;
+      ctx.presentationEditor?.requestSlideSize(
+        axis === "width" ? value : size.width,
+        axis === "height" ? value : size.height
+      );
+    }
+  };
+}
+
 /** @returns {Tab[]} */
 function presentationTabs() {
-  const R = PRESENTATION_REASON;
-  /** @param {string} id @param {string} label @param {string} iconName */
-  const s = (id, label, iconName) => seam({ id, label, icon: iconName, attrs: { "data-action": id } }, R);
   return [
     {
       id: "home",
       label: "Home",
       groups: [
-        { id: "slides", label: "Slides", controls: [s("new-slide", "New slide", "slide-new"), s("layout", "Layout", "layout")] },
-        { id: "text", label: "Text", controls: [s("text-box", "Text box", "textbox")] }
+        {
+          id: "clipboard",
+          label: "Clipboard",
+          controls: [
+            button({
+              id: "paste",
+              label: "Paste",
+              title: "Paste the copied objects (Ctrl/Cmd+V)",
+              icon: "paste",
+              attrs: { "data-action": "paste" },
+              enabled: (ctx) => hasSlide(ctx) && Boolean(ctx.presentationEditor?.canPaste()),
+              action: (ctx) => ctx.presentationEditor?.paste()
+            }),
+            button({
+              id: "cut",
+              label: "Cut",
+              size: "small",
+              title: "Cut (Ctrl/Cmd+X)",
+              icon: "cut",
+              attrs: { "data-action": "cut" },
+              enabled: hasObjects,
+              action: (ctx) => ctx.presentationEditor?.cut()
+            }),
+            button({
+              id: "copy",
+              label: "Copy",
+              size: "small",
+              title: "Copy (Ctrl/Cmd+C)",
+              icon: "copy",
+              attrs: { "data-action": "copy" },
+              enabled: hasObjects,
+              action: (ctx) => ctx.presentationEditor?.copy()
+            })
+          ]
+        },
+        {
+          id: "slides",
+          label: "Slides",
+          controls: [
+            layoutMenu(),
+            button({
+              id: "duplicate-slide",
+              label: "Duplicate",
+              size: "small",
+              title: "Duplicate slide",
+              icon: "duplicate",
+              attrs: { "data-action": "duplicate-slide" },
+              enabled: hasSlide,
+              action: (ctx) => {
+                const id = ctx.presentationEditor?.getSlideId();
+                if (id) ctx.presentationEditor?.duplicateSlide(id);
+              }
+            }),
+            button({
+              id: "delete-slide",
+              label: "Delete",
+              size: "small",
+              title: "Delete slide",
+              icon: "trash",
+              attrs: { "data-action": "delete-slide" },
+              enabled: (ctx) => hasSlide(ctx) && Boolean(ctx.presentationEditor?.canDeleteSlide()),
+              action: (ctx) => {
+                const id = ctx.presentationEditor?.getSlideId();
+                if (id) ctx.presentationEditor?.deleteSlide(id);
+              }
+            })
+          ]
+        },
+        {
+          id: "text",
+          label: "Text",
+          controls: [
+            presentationMark("bold", "Bold", "bold"),
+            presentationMark("italic", "Italic", "italic"),
+            presentationMark("underline", "Underline", "underline"),
+            presentationMark("strike", "Strikethrough", "strike"),
+            presentationAlign("left", "Align left"),
+            presentationAlign("center", "Align centre"),
+            presentationAlign("right", "Align right"),
+            button({
+              id: "pres-link",
+              kind: "menu",
+              label: "Link",
+              title: "Link",
+              icon: "link",
+              keepFocus: true,
+              attrs: { "data-action": "link" },
+              enabled: hasObjects,
+              content: presentationLinkPopover
+            })
+          ]
+        },
+        { id: "arrange", label: "Arrange", controls: [arrangeMenu()] },
+        { id: "history", label: "History", controls: historyControls() }
       ]
     },
     {
@@ -754,7 +1064,62 @@ function presentationTabs() {
         {
           id: "objects",
           label: "Objects",
-          controls: [s("insert-image", "Image", "image"), s("insert-shape", "Shape", "shape"), s("insert-line", "Line", "line")]
+          controls: [
+            button({
+              id: "insert-textbox",
+              kind: "toggle",
+              label: "Text box",
+              title: "Text box: drag on the slide to draw it",
+              icon: "textbox",
+              attrs: { "data-action": "insert-textbox" },
+              enabled: hasSlide,
+              active: (ctx) => ctx.presentationEditor?.getTool()?.type === "text",
+              action: (ctx) => {
+                const armed = ctx.presentationEditor?.getTool()?.type === "text";
+                ctx.presentationEditor?.setTool(armed ? null : { type: "text" });
+              }
+            }),
+            button({
+              id: "insert-shape",
+              kind: "menu",
+              label: "Shape",
+              title: "Shape: pick one, then drag on the slide",
+              icon: "shape",
+              attrs: { "data-action": "insert-shape" },
+              enabled: hasSlide,
+              active: (ctx) => ctx.presentationEditor?.getTool()?.type === "shape",
+              items: (ctx) =>
+                SHAPE_ITEMS.map((item) => ({
+                  label: item.label,
+                  icon: item.icon,
+                  attrs: { "data-action": "insert-shape-item", "data-shape": item.shape },
+                  action: () => ctx.presentationEditor?.setTool({ type: "shape", shape: item.shape })
+                }))
+            }),
+            button({
+              id: "insert-line",
+              kind: "toggle",
+              label: "Line",
+              title: "Line: drag on the slide to draw it",
+              icon: "line",
+              attrs: { "data-action": "insert-line" },
+              enabled: hasSlide,
+              active: (ctx) => ctx.presentationEditor?.getTool()?.type === "line",
+              action: (ctx) => {
+                const armed = ctx.presentationEditor?.getTool()?.type === "line";
+                ctx.presentationEditor?.setTool(armed ? null : { type: "line" });
+              }
+            }),
+            button({
+              id: "insert-image",
+              label: "Image",
+              title: "Insert an image from a file",
+              icon: "image",
+              attrs: { "data-action": "insert-image" },
+              enabled: hasSlide,
+              action: (ctx) => ctx.presentationEditor?.pickImage()
+            })
+          ]
         }
       ]
     },
@@ -762,7 +1127,51 @@ function presentationTabs() {
       id: "design",
       label: "Design",
       groups: [
-        { id: "theme", label: "Theme", controls: [s("theme", "Theme", "theme"), s("background", "Background", "background")] }
+        {
+          id: "size",
+          label: "Slide size",
+          controls: [
+            button({
+              id: "slide-size",
+              kind: "menu",
+              label: "Size",
+              title: "Slide size presets",
+              icon: "layout",
+              attrs: { "data-action": "slide-size" },
+              enabled: hasPres,
+              items: (ctx) =>
+                SIZE_PRESETS.map((preset) => ({
+                  label: `${preset.label}  ${preset.width}×${preset.height}`,
+                  attrs: { "data-action": "slide-size-preset", "data-preset": preset.id },
+                  action: () => ctx.presentationEditor?.requestSlideSize(preset.width, preset.height)
+                }))
+            }),
+            slideSizeField("width"),
+            slideSizeField("height")
+          ]
+        },
+        {
+          id: "background",
+          label: "Background",
+          controls: [
+            {
+              id: "slide-background",
+              kind: "color",
+              label: "Background",
+              title: "Slide background colour",
+              icon: "background",
+              attrs: { "data-action": "slide-background" },
+              enabled: hasSlide,
+              value: (ctx) => ctx.presentationEditor?.getSlide()?.background.color ?? "#ffffff",
+              onSelect: (ctx, value) => ctx.presentationEditor?.setBackground(value)
+            }
+          ]
+        },
+        {
+          id: "theme",
+          label: "Theme",
+          controls: [seam({ id: "theme", label: "Theme", icon: "theme", attrs: { "data-action": "theme" } }, THEME_REASON)]
+        }
       ]
     },
     {
@@ -780,11 +1189,43 @@ function presentationTabs() {
               icon: "transition",
               size: "large",
               attrs: { "data-action": "transition-style" },
-              options: [{ value: "none", label: "None" }],
-              value: () => "none",
-              enabled: () => false,
-              disabledReason: R
-            }
+              options: TRANSITION_STYLE_OPTIONS,
+              enabled: hasSlide,
+              value: (ctx) => ctx.presentationEditor?.getSlide()?.transition.style ?? "none",
+              onSelect: (ctx, value) => ctx.presentationEditor?.setTransition({ style: value })
+            },
+            {
+              id: "transition-direction",
+              kind: "select",
+              label: "Direction",
+              icon: "transition",
+              size: "large",
+              attrs: { "data-action": "transition-direction" },
+              options: TRANSITION_DIRECTION_OPTIONS,
+              enabled: (ctx) => (ctx.presentationEditor?.getSlide()?.transition.style ?? "none") === "wipe",
+              value: (ctx) => ctx.presentationEditor?.getSlide()?.transition.direction ?? "left",
+              onSelect: (ctx, value) => ctx.presentationEditor?.setTransition({ direction: value })
+            },
+            {
+              id: "transition-duration",
+              kind: "field",
+              label: "Duration (ms)",
+              icon: "transition",
+              min: 0,
+              attrs: { "data-action": "transition-duration" },
+              enabled: (ctx) => (ctx.presentationEditor?.getSlide()?.transition.style ?? "none") !== "none",
+              value: (ctx) => ctx.presentationEditor?.getSlide()?.transition.duration ?? "",
+              apply: (ctx, value) => ctx.presentationEditor?.setTransition({ duration: value })
+            },
+            button({
+              id: "transition-all",
+              label: "Apply to all",
+              title: "Use this slide's transition on every slide",
+              icon: "slide",
+              attrs: { "data-action": "apply-transition-all" },
+              enabled: hasSlide,
+              action: (ctx) => ctx.presentationEditor?.applyTransitionToAll()
+            })
           ]
         }
       ]
@@ -792,7 +1233,13 @@ function presentationTabs() {
     {
       id: "animations",
       label: "Animations",
-      groups: [{ id: "animation", label: "Animation", controls: [s("add-animation", "Add animation", "animation")] }]
+      groups: [
+        {
+          id: "animation",
+          label: "Animation",
+          controls: [seam({ id: "add-animation", label: "Add animation", icon: "animation", attrs: { "data-action": "add-animation" } }, ANIMATION_REASON)]
+        }
+      ]
     }
   ];
 }
@@ -809,7 +1256,7 @@ export function getTabs(pageType) {
   if (pageType === "document") own = documentTabs();
   else if (pageType === "sheet") own = sheetTabs();
   else if (pageType === "presentation") own = presentationTabs();
-  return [fileTab(), ...own, viewTab()];
+  return [fileTab(), ...own, viewTab(pageType)];
 }
 
 /**

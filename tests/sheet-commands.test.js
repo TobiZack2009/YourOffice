@@ -29,6 +29,17 @@ describe("createTable", () => {
     expect(content.tables[content.tableOrder[1]].name).toBe("Table 2");
   });
 
+  it("places a new table below the existing ones instead of on top of them", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("createTable", { pageId });
+    ws.dispatch("createTable", { pageId });
+    const content = ws.getPage(pageId).content;
+    const [a, b, c] = content.tableOrder.map((id) => content.tables[id]);
+    expect(b.position.y).toBeGreaterThan(a.position.y + 5 * a.rowHeight);
+    expect(c.position.y).toBeGreaterThan(b.position.y + b.rowCount * b.rowHeight);
+    expect(c.position.x).toBe(b.position.x);
+  });
+
   it("rejects creating on a non-sheet page", () => {
     const ws = Workspace.create({ title: "W" });
     registerSheetCommands(ws);
@@ -239,5 +250,219 @@ describe("history integration", () => {
     ws.undo();
     expect(table().rowCount).toBe(5);
     expect(table().cells["0,0"]).toEqual({ value: 1 });
+  });
+});
+
+const rect = (c0, r0, c1 = c0, r1 = r0) => ({ start: { col: c0, row: r0 }, end: { col: c1, row: r1 } });
+
+describe("fillCells", () => {
+  it("fills a range from one cell, shifting relative references per target", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 0, cell: { formula: "=A1*2" } });
+    ws.dispatch("fillCells", { pageId, tableId, source: rect(1, 0), targets: [rect(1, 0, 1, 3)] });
+    expect(table().cells["1,1"]).toEqual({ formula: "=A2*2" });
+    expect(table().cells["1,3"]).toEqual({ formula: "=A4*2" });
+    expect(table().cells["1,0"]).toEqual({ formula: "=A1*2" });
+  });
+
+  it("keeps $-pinned references and copies literals as they are", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { formula: "=$B$1+A1" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1, cell: { value: "x" } });
+    ws.dispatch("fillCells", { pageId, tableId, source: rect(0, 0), targets: [rect(1, 0, 2, 0)] });
+    expect(table().cells["1,0"]).toEqual({ formula: "=$B$1+B1" });
+    expect(table().cells["2,0"]).toEqual({ formula: "=$B$1+C1" });
+    ws.dispatch("fillCells", { pageId, tableId, source: rect(0, 1), targets: [rect(1, 1, 2, 1)] });
+    expect(table().cells["2,1"]).toEqual({ value: "x" });
+  });
+
+  it("tiles a multi-cell source over several targets", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 1 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 0, cell: { value: 2 } });
+    ws.dispatch("fillCells", {
+      pageId,
+      tableId,
+      source: rect(0, 0, 1, 0),
+      targets: [rect(0, 2, 1, 3), rect(2, 4)]
+    });
+    expect(table().cells["0,2"]).toEqual({ value: 1 });
+    expect(table().cells["1,3"]).toEqual({ value: 2 });
+    expect(table().cells["2,4"]).toEqual({ value: 1 });
+  });
+
+  it("clears the targets when the source cell is blank", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 1, cell: { value: 9 } });
+    ws.dispatch("fillCells", { pageId, tableId, source: rect(0, 0), targets: [rect(1, 1)] });
+    expect(table().cells["1,1"]).toBeUndefined();
+  });
+
+  it("grows the table to fit the targets and undoes as one step", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 1 } });
+    ws.dispatch("fillCells", { pageId, tableId, source: rect(0, 0), targets: [rect(0, 1, 4, 1)] });
+    expect(table().columnCount).toBe(5);
+    ws.undo();
+    expect(table().columnCount).toBe(3);
+    expect(table().cells["1,1"]).toBeUndefined();
+  });
+
+  it("rejects malformed and empty ranges", () => {
+    const { ws, pageId, tableId } = setup();
+    expect(() => ws.dispatch("fillCells", { pageId, tableId, source: rect(0, 0), targets: [] })).toThrow(CommandError);
+    expect(() =>
+      ws.dispatch("fillCells", { pageId, tableId, source: rect(2, 2, 0, 0), targets: [rect(0, 0)] })
+    ).toThrow(CommandError);
+    expect(() => ws.dispatch("fillCells", { pageId, tableId, source: rect(0, 0) , targets: [{}] })).toThrow(CommandError);
+  });
+});
+
+describe("moveCells", () => {
+  it("moves cells, clears the source and shifts the moved formulas' relative references", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 5 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 0, cell: { formula: "=A1+$A$1" } });
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0, 1, 0), to: { col: 1, row: 2 } });
+    expect(table().cells["0,0"]).toBeUndefined();
+    expect(table().cells["1,0"]).toBeUndefined();
+    expect(table().cells["1,2"]).toEqual({ value: 5 });
+    expect(table().cells["2,2"]).toEqual({ formula: "=B3+$A$1" });
+  });
+
+  it("retargets formulas elsewhere so they keep following the moved cells", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 5 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1, cell: { value: 7 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 0, cell: { formula: "=A1*2" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 1, cell: { formula: "=$A$1+A2" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 2, cell: { formula: "=SUM(A1:A2)" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 3, cell: { formula: "=SUM(A1:A5)" } });
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0, 0, 1), to: { col: 1, row: 0 } });
+    expect(table().cells["2,0"]).toEqual({ formula: "=B1*2" });
+    expect(table().cells["2,1"]).toEqual({ formula: "=$B$1+B2" });
+    // A range moves only when it sits wholly inside the moved block.
+    expect(table().cells["2,2"]).toEqual({ formula: "=SUM(B1:B2)" });
+    expect(table().cells["2,3"]).toEqual({ formula: "=SUM(A1:A5)" });
+  });
+
+  it("retargets a lone reference while leaving references to other cells alone", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 0, cell: { value: 1 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 3, row: 0, cell: { formula: "=B1+C9" } });
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(1, 0), to: { col: 1, row: 2 } });
+    expect(table().cells["3,0"]).toEqual({ formula: "=B3+C9" });
+  });
+
+  it("overwrites the destination, including with blanks", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 1 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 1, cell: { value: "old" } });
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0, 0, 1), to: { col: 1, row: 0 } });
+    expect(table().cells["1,0"]).toEqual({ value: 1 });
+    expect(table().cells["1,1"]).toBeUndefined();
+  });
+
+  it("handles overlapping source and destination", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: "a" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1, cell: { value: "b" } });
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0, 0, 1), to: { col: 0, row: 1 } });
+    expect(table().cells["0,0"]).toBeUndefined();
+    expect(table().cells["0,1"]).toEqual({ value: "a" });
+    expect(table().cells["0,2"]).toEqual({ value: "b" });
+  });
+
+  it("is a no-op for a zero offset, rejects an off-sheet destination and undoes", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 1 } });
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0), to: { col: 0, row: 0 } });
+    expect(table().cells["0,0"]).toEqual({ value: 1 });
+    expect(() => ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0), to: { col: -1, row: 0 } })).toThrow(
+      CommandError
+    );
+    ws.dispatch("moveCells", { pageId, tableId, source: rect(0, 0), to: { col: 2, row: 2 } });
+    ws.undo();
+    expect(table().cells["0,0"]).toEqual({ value: 1 });
+    expect(table().cells["2,2"]).toBeUndefined();
+  });
+});
+
+describe("insertCells / deleteCells", () => {
+  it("shifts the cells under a range down, and retargets formulas that point at them", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: "a" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1, cell: { value: "b" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 1, cell: { value: "side" } });
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 0, cell: { formula: "=A2" } });
+    ws.dispatch("insertCells", { pageId, tableId, range: rect(0, 0, 0, 0), direction: "down" });
+    expect(table().cells["0,0"]).toBeUndefined();
+    expect(table().cells["0,1"]).toEqual({ value: "a" });
+    expect(table().cells["0,2"]).toEqual({ value: "b" });
+    expect(table().cells["1,1"]).toEqual({ value: "side" }); // other columns stay
+    expect(table().cells["2,0"]).toEqual({ formula: "=A3" });
+  });
+
+  it("shifts right and grows the table to fit", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 0, cell: { value: "edge" } });
+    ws.dispatch("insertCells", { pageId, tableId, range: rect(0, 0, 1, 0), direction: "right" });
+    expect(table().cells["4,0"]).toEqual({ value: "edge" });
+    expect(table().columnCount).toBe(5);
+  });
+
+  it("deletes cells, closing the gap and turning references into them into #REF!", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 1 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1, cell: { value: 2 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 2, cell: { value: 3 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 0, cell: { formula: "=A2+A3" } });
+    ws.dispatch("deleteCells", { pageId, tableId, range: rect(0, 1, 0, 1), direction: "up" });
+    expect(table().cells["0,1"]).toEqual({ value: 3 });
+    expect(table().cells["0,2"]).toBeUndefined();
+    expect(table().cells["1,0"]).toEqual({ formula: "=#REF!+A2" });
+
+    ws.dispatch("deleteCells", { pageId, tableId, range: rect(0, 0, 0, 0), direction: "left" });
+    expect(table().cells["0,0"]).toEqual({ formula: "=#REF!+A2" });
+  });
+
+  it("is one undo step", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: "a" } });
+    ws.dispatch("insertCells", { pageId, tableId, range: rect(0, 0, 0, 1), direction: "down" });
+    expect(table().cells["0,2"]).toEqual({ value: "a" });
+    ws.undo();
+    expect(table().cells["0,0"]).toEqual({ value: "a" });
+    expect(table().cells["0,2"]).toBeUndefined();
+  });
+
+  it("refuses to shift through a merged cell", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("mergeCells", { pageId, tableId, start: { col: 0, row: 2 }, end: { col: 1, row: 2 } });
+    let error;
+    try {
+      ws.dispatch("insertCells", { pageId, tableId, range: rect(0, 0, 0, 0), direction: "down" });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(CommandError);
+    expect(error.reason).toBe("mergedCells");
+    // A band that does not meet the merge is fine.
+    ws.dispatch("insertCells", { pageId, tableId, range: rect(2, 0, 2, 0), direction: "down" });
+    expect(table().merges).toHaveLength(1);
+  });
+
+  it("rejects cells pushed off the end of the sheet and bad directions", () => {
+    const { ws, pageId, tableId } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1048575, cell: { value: 1 } });
+    expect(() =>
+      ws.dispatch("insertCells", { pageId, tableId, range: rect(0, 0, 0, 0), direction: "down" })
+    ).toThrow(CommandError);
+    expect(() =>
+      ws.dispatch("insertCells", { pageId, tableId, range: rect(0, 0, 0, 0), direction: "left" })
+    ).toThrow(CommandError);
+    expect(() =>
+      ws.dispatch("deleteCells", { pageId, tableId, range: rect(0, 0, 0, 0), direction: "right" })
+    ).toThrow(CommandError);
   });
 });

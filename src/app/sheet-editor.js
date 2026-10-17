@@ -8,10 +8,17 @@
  * table, rebuilt whenever the sheet changes.
  */
 
+import { CommandError } from "../core/errors.js";
 import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
 import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf } from "../sheet/render.js";
 import { TableEngines } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
+import { icon } from "./icons.js";
+import { buildMenu, createPopoverHost } from "./popover.js";
+
+/** Smallest size a header drag can shrink a column or row to. */
+const MIN_COLUMN_WIDTH = 24;
+const MIN_ROW_HEIGHT = 16;
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../sheet/model.js").Cell} Cell */
@@ -48,6 +55,7 @@ export function rawCellText(cell) {
 /**
  * @typedef {{ col: number, row: number }} Position
  * @typedef {{ tableId: string, start: Position, end: Position }} SheetRange
+ * @typedef {{ start: Position, end: Position }} Rect
  */
 
 /**
@@ -56,9 +64,25 @@ export function rawCellText(cell) {
  * @property {() => void} refresh
  * @property {() => void} destroy
  * @property {() => { tableId: string, col: number, row: number } | null} getSelection The active (anchor) cell.
- * @property {() => SheetRange | null} getRange The normalised selected range (a single cell is a 1x1 range).
+ * @property {() => SheetRange | null} getRange The active (most recent) normalised range; a single cell is a 1x1 range.
+ * @property {() => SheetRange[]} getRanges Every selected range, the active one last.
  * @property {(tableId: string, col: number, row: number) => void} selectCell
- * @property {(tableId: string, anchor: Position, focus: Position) => void} selectRange
+ * @property {(tableId: string, anchor: Position, focus: Position) => void} selectRange Replaces the whole selection.
+ * @property {(tableId: string, anchor: Position, focus: Position) => void} addRange Adds a range to the selection (Ctrl/Cmd+click).
+ * @property {() => void} fillSelection Writes the formula-bar content into the active cell and every selected range.
+ * @property {() => void} fillDown
+ * @property {() => void} fillRight
+ * @property {() => boolean} copy
+ * @property {() => boolean} cut
+ * @property {() => boolean} paste
+ * @property {() => boolean} canPaste
+ * @property {() => boolean} hasSelection
+ * @property {() => void} clearSelection Empties every selected cell.
+ * @property {(direction: "right" | "down") => boolean} insertCells Insert blank cells over the active range, sliding the rest.
+ * @property {(direction: "left" | "up") => boolean} deleteCells Delete the active range, sliding the rest back.
+ * @property {(from: Position, to: Position) => boolean} moveRange Move the active range by the offset between two cells (what dragging does).
+ * @property {(extent: Position) => boolean} fillRangeTo Fill from the active range out to a cell (what dragging the fill handle does).
+ * @property {(point: { x: number, y: number }) => void} openContextMenu
  * @property {() => void} commit
  * @property {(text: string) => void} setInputValue
  * @property {() => boolean} canMerge
@@ -89,11 +113,31 @@ export function createSheetEditor(workspace, pageId, options = {}) {
   const engines = new TableEngines();
   const element = h("div", { class: "sheet-editor" });
   /**
-   * The active cell is the anchor; the focus is the opposite corner of the range.
-   * @type {{ tableId: string, anchor: Position, focus: Position } | null}
+   * The active range is `anchor`..`focus` (the anchor is the active cell); `others`
+   * are earlier ranges added with Ctrl/Cmd+click, all in the same table.
+   * @type {{ tableId: string, anchor: Position, focus: Position, others: Rect[] } | null}
    */
   let selection = null;
-  let dragging = false;
+  /**
+   * The mouse gesture in progress, if any.
+   * @type {null
+   *   | { type: "select" }
+   *   | { type: "fill", tableId: string, source: Rect, target: Rect | null, hit: Position | null }
+   *   | { type: "move", tableId: string, grab: Position, range: Rect, delta: Position | null }
+   *   | { type: "resize", axis: "col" | "row", tableId: string, index: number, origin: number, original: number, size: number }}
+   */
+  let gesture = null;
+  /** True once the user typed into the formula bar and has not committed yet. */
+  let inputDirty = false;
+  /** True while the active cell is being edited in place (the editor input sits inside it). */
+  let cellEditing = false;
+  /** Set while the in-cell input is moved or removed on purpose, so its blur is not a "click away". */
+  let suppressBlur = false;
+  /**
+   * The cell clipboard: a range that was copied or cut, pasted by `paste()`.
+   * @type {{ tableId: string, range: Rect, cut: boolean } | null}
+   */
+  let clipboard = null;
 
   /** @returns {import("../sheet/model.js").SheetContent} */
   function content() {
@@ -118,9 +162,20 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     })
   );
 
+  // The in-cell editor. It shares its text with the formula bar, so either can be typed into.
+  const cellInput = /** @type {HTMLInputElement} */ (
+    h("input", {
+      class: "sheet-cell-editor",
+      "data-role": "cell-editor",
+      "aria-label": "Edit cell",
+      spellcheck: "false"
+    })
+  );
+
   const bar = h("div", { class: "sheet-bar" }, [address, input]);
-  const canvasWrap = h("div", { class: "sheet-canvas-wrap" });
+  const canvasWrap = h("div", { class: "sheet-canvas-wrap", tabindex: "-1" });
   element.append(bar, canvasWrap);
+  const popovers = createPopoverHost(document.body);
 
   // -- selection ---------------------------------------------------------------
 
@@ -146,8 +201,37 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     selection = {
       tableId: selection.tableId,
       anchor: clampPosition(selection.anchor, table),
-      focus: clampPosition(selection.focus, table)
+      focus: clampPosition(selection.focus, table),
+      others: selection.others.map((rect) => ({
+        start: clampPosition(rect.start, table),
+        end: clampPosition(rect.end, table)
+      }))
     };
+  }
+
+  /**
+   * @param {Position} a
+   * @param {Position} b
+   * @returns {Rect}
+   */
+  function rectOf(a, b) {
+    return {
+      start: { col: Math.min(a.col, b.col), row: Math.min(a.row, b.row) },
+      end: { col: Math.max(a.col, b.col), row: Math.max(a.row, b.row) }
+    };
+  }
+
+  /**
+   * Every selected range, earlier ones first and the active one last.
+   * @returns {SheetRange[]}
+   */
+  function allRanges() {
+    if (!selection) return [];
+    const { tableId } = selection;
+    const ranges = selection.others.map((rect) => ({ tableId, start: { ...rect.start }, end: { ...rect.end } }));
+    const active = currentRange();
+    if (active) ranges.push(active);
+    return ranges;
   }
 
   /** @returns {SheetRange | null} */
@@ -167,7 +251,41 @@ export function createSheetEditor(workspace, pageId, options = {}) {
    * @param {Position} focus
    */
   function selectRange(tableId, anchor, focus) {
-    selection = { tableId, anchor: { ...anchor }, focus: { ...focus } };
+    setSelection({ tableId, anchor: { ...anchor }, focus: { ...focus }, others: [] });
+  }
+
+  /**
+   * Add a range to the selection, keeping the earlier ones (same table only).
+   * @param {string} tableId
+   * @param {Position} anchor
+   * @param {Position} focus
+   */
+  function addRange(tableId, anchor, focus) {
+    const others = selection && selection.tableId === tableId ? [...selection.others, rectOf(selection.anchor, selection.focus)] : [];
+    setSelection({ tableId, anchor: { ...anchor }, focus: { ...focus }, others });
+  }
+
+  /** @param {Position} focus */
+  function extendFocus(focus) {
+    if (!selection) return;
+    setSelection({ ...selection, focus: { ...focus } });
+  }
+
+  /**
+   * Replace the selection. Moving the active cell discards a half-typed formula-bar edit.
+   * @param {NonNullable<typeof selection>} next
+   */
+  function setSelection(next) {
+    const moved =
+      !selection ||
+      selection.tableId !== next.tableId ||
+      selection.anchor.col !== next.anchor.col ||
+      selection.anchor.row !== next.anchor.row;
+    selection = next;
+    if (moved) {
+      inputDirty = false;
+      endCellEdit();
+    }
     refresh();
   }
 
@@ -197,16 +315,130 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     if (!table) return;
     const from = extend ? selection.focus : selection.anchor;
     const next = clampPosition({ col: from.col + deltaCol, row: from.row + deltaRow }, table);
-    selection = extend
-      ? { tableId: selection.tableId, anchor: selection.anchor, focus: next }
-      : { tableId: selection.tableId, anchor: next, focus: { ...next } };
-    refresh();
+    setSelection(
+      extend
+        ? { ...selection, focus: next }
+        : { tableId: selection.tableId, anchor: next, focus: { ...next }, others: [] }
+    );
   }
 
   // -- editing ----------------------------------------------------------------
 
+  /** Keep the keyboard on the grid, so arrows move the selection and typing starts an edit. */
+  function focusGrid() {
+    canvasWrap.focus({ preventScroll: true });
+  }
+
+  /** The `<td>` of the active cell, if it is drawn (a cell covered by a merge is not). */
+  function activeCellElement() {
+    if (!selection) return null;
+    const { tableId, anchor } = selection;
+    const host = [...canvasWrap.querySelectorAll(".sheet-table")].find(
+      (el) => el.getAttribute("data-table-id") === tableId
+    );
+    return /** @type {HTMLElement | null} */ (host?.querySelector(`td[data-key="${anchor.col},${anchor.row}"]`) ?? null);
+  }
+
+  /** Stop editing in place (the formula bar keeps whatever it holds). */
+  function endCellEdit() {
+    if (!cellEditing) return;
+    cellEditing = false;
+    suppressBlur = true;
+    cellInput.parentElement?.classList.remove("is-editing");
+    cellInput.remove();
+    suppressBlur = false;
+  }
+
+  /**
+   * Put the in-cell editor into the active cell's `<td>` (after every render) and focus it.
+   * @param {number[] | null} [caret] Selection to restore.
+   * @param {boolean} [focus] False to place it without taking the keyboard (the formula bar has it).
+   */
+  function placeCellEditor(caret, focus = true) {
+    if (!cellEditing) return;
+    const td = activeCellElement();
+    if (!td) {
+      cellEditing = false;
+      return;
+    }
+    suppressBlur = true;
+    td.classList.add("is-editing");
+    td.append(cellInput);
+    if (focus) {
+      cellInput.focus({ preventScroll: true });
+      const end = cellInput.value.length;
+      cellInput.setSelectionRange(caret ? caret[0] : end, caret ? caret[1] : end);
+    }
+    suppressBlur = false;
+  }
+
+  /**
+   * Edit the active cell in place. With `text` the cell restarts from it (typing
+   * over a cell); without, the cell's current content is edited (double-click, F2).
+   * @param {string} [text]
+   * @returns {boolean} Whether editing started.
+   */
+  function startCellEdit(text) {
+    if (!selection || !activeCellElement()) return false;
+    if (text !== undefined) {
+      input.value = text;
+      inputDirty = true;
+    }
+    cellEditing = true;
+    cellInput.value = input.value;
+    placeCellEditor();
+    return cellEditing;
+  }
+
+  /** @param {[number, number]} [move] Selection step after the commit. */
+  function commitCellEdit(move) {
+    endCellEdit();
+    commitInput(move);
+    focusGrid();
+  }
+
+  function cancelCellEdit() {
+    endCellEdit();
+    inputDirty = false;
+    refresh();
+    focusGrid();
+  }
+
+  cellInput.addEventListener("input", () => {
+    input.value = cellInput.value;
+    inputDirty = true;
+  });
+
+  cellInput.addEventListener("keydown", (event) => {
+    const keyboard = /** @type {KeyboardEvent} */ (event);
+    keyboard.stopPropagation();
+    if (handleShortcut(keyboard, true, cellInput)) {
+      keyboard.preventDefault();
+      return;
+    }
+    if (keyboard.key === "Enter") {
+      keyboard.preventDefault();
+      commitCellEdit([0, keyboard.shiftKey ? -1 : 1]);
+    } else if (keyboard.key === "Tab") {
+      keyboard.preventDefault();
+      commitCellEdit([keyboard.shiftKey ? -1 : 1, 0]);
+    } else if (keyboard.key === "Escape") {
+      keyboard.preventDefault();
+      cancelCellEdit();
+    }
+  });
+
+  cellInput.addEventListener("blur", (event) => {
+    if (suppressBlur || !cellEditing) return;
+    // Moving to the formula bar continues the same edit there.
+    if (/** @type {FocusEvent} */ (event).relatedTarget === input) return;
+    endCellEdit();
+    if (inputDirty) commitInput();
+  });
+
   function commitInput(move) {
     if (!selection) return;
+    endCellEdit();
     const payload = parseCellInput(input.value);
     workspace.dispatch("setCell", {
       pageId,
@@ -215,25 +447,193 @@ export function createSheetEditor(workspace, pageId, options = {}) {
       row: selection.anchor.row,
       cell: payload
     });
+    inputDirty = false;
     if (move) moveSelection(move[0], move[1]);
     else refresh();
   }
 
   function clearSelectionCell() {
-    const range = currentRange();
-    if (!range) return;
+    const ranges = allRanges();
+    if (ranges.length === 0) return;
     workspace.transact("clear cells", () => {
-      for (let row = range.start.row; row <= range.end.row; row++) {
-        for (let col = range.start.col; col <= range.end.col; col++) {
-          if (!getCell(tableOf(range.tableId), col, row)) continue;
-          workspace.dispatch("setCell", { pageId, tableId: range.tableId, col, row, cell: null });
+      for (const range of ranges) {
+        for (let row = range.start.row; row <= range.end.row; row++) {
+          for (let col = range.start.col; col <= range.end.col; col++) {
+            if (!getCell(tableOf(range.tableId), col, row)) continue;
+            workspace.dispatch("setCell", { pageId, tableId: range.tableId, col, row, cell: null });
+          }
         }
       }
     });
   }
 
+  // -- fill, copy and move ------------------------------------------------------
+
+  /**
+   * Put the formula-bar content in the active cell and repeat it in every
+   * selected range. Formulas keep their meaning relative to each cell they land
+   * in (`=A1*2` filled one row down becomes `=A2*2`); `$` pins a reference.
+   */
+  function fillSelection() {
+    if (!selection) return;
+    const active = { col: selection.anchor.col, row: selection.anchor.row };
+    const { tableId } = selection;
+    const targets = allRanges().map(({ start, end }) => ({ start, end }));
+    const payload = parseCellInput(input.value);
+    inputDirty = false;
+    workspace.transact("fill cells", () => {
+      workspace.dispatch("setCell", { pageId, tableId, col: active.col, row: active.row, cell: payload });
+      workspace.dispatch("fillCells", {
+        pageId,
+        tableId,
+        source: { start: active, end: active },
+        targets
+      });
+    });
+  }
+
+  /**
+   * Fill each range from its first row (down) or column (right). A one-row (or
+   * one-column) range copies from the line just above (or left of) it instead.
+   * @param {"down" | "right"} direction
+   */
+  function fillFromEdge(direction) {
+    const ranges = allRanges();
+    if (ranges.length === 0) return;
+    const down = direction === "down";
+    workspace.transact(`fill ${direction}`, () => {
+      for (const range of ranges) {
+        const thin = down ? range.start.row === range.end.row : range.start.col === range.end.col;
+        /** @type {Rect} */
+        let source;
+        if (thin) {
+          const before = down ? range.start.row : range.start.col;
+          if (before === 0) continue;
+          source = down
+            ? { start: { col: range.start.col, row: before - 1 }, end: { col: range.end.col, row: before - 1 } }
+            : { start: { col: before - 1, row: range.start.row }, end: { col: before - 1, row: range.end.row } };
+        } else {
+          source = down
+            ? { start: range.start, end: { col: range.end.col, row: range.start.row } }
+            : { start: range.start, end: { col: range.start.col, row: range.end.row } };
+        }
+        workspace.dispatch("fillCells", {
+          pageId,
+          tableId: range.tableId,
+          source,
+          targets: [{ start: range.start, end: range.end }]
+        });
+      }
+    });
+  }
+
+  function remember(cut) {
+    const range = currentRange();
+    if (!range) return false;
+    clipboard = { tableId: range.tableId, range: { start: range.start, end: range.end }, cut };
+    options.onSelectionChange?.();
+    return true;
+  }
+
+  const copy = () => remember(false);
+  const cut = () => remember(true);
+  const canPaste = () => clipboard !== null && selection !== null;
+
+  /**
+   * Paste the clipboard range. A cut moves its cells (relative references shift
+   * by the move); a copy tiles into each selected range when that range is a
+   * whole multiple of the copied block, else lands once at the range's start.
+   * @returns {boolean} Whether anything was pasted.
+   */
+  function paste() {
+    const active = currentRange();
+    if (!clipboard || !selection || !active) return false;
+    const { range: source } = clipboard;
+    const width = source.end.col - source.start.col + 1;
+    const height = source.end.row - source.start.row + 1;
+    try {
+      if (clipboard.cut) {
+        workspace.dispatch("moveCells", {
+          pageId,
+          tableId: active.tableId,
+          sourceTableId: clipboard.tableId,
+          source,
+          to: active.start
+        });
+        clipboard = null;
+        selectRange(
+          active.tableId,
+          active.start,
+          { col: active.start.col + width - 1, row: active.start.row + height - 1 }
+        );
+        return true;
+      }
+      const targets = allRanges().map((range) => {
+        const spanCols = range.end.col - range.start.col + 1;
+        const spanRows = range.end.row - range.start.row + 1;
+        if (spanCols % width === 0 && spanRows % height === 0) return { start: range.start, end: range.end };
+        return {
+          start: range.start,
+          end: { col: range.start.col + width - 1, row: range.start.row + height - 1 }
+        };
+      });
+      workspace.dispatch("fillCells", {
+        pageId,
+        tableId: active.tableId,
+        sourceTableId: clipboard.tableId,
+        source,
+        targets
+      });
+      if (targets.length === 1) selectRange(active.tableId, targets[0].start, targets[0].end);
+      return true;
+    } catch (error) {
+      if (error instanceof CommandError) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * Spreadsheet shortcuts shared by the canvas and the formula bar.
+   * @param {KeyboardEvent} keyboard
+   * @param {boolean} fromInput Typing in the formula bar or cell keeps native cut/copy/paste while editing.
+   * @param {HTMLInputElement} [field] The text field the event came from.
+   * @returns {boolean} Whether the event was handled.
+   */
+  function handleShortcut(keyboard, fromInput, field = input) {
+    if (!(keyboard.ctrlKey || keyboard.metaKey) || keyboard.altKey || !selection) return false;
+    const editing = fromInput && (inputDirty || field.selectionStart !== field.selectionEnd);
+    switch (keyboard.key.toLowerCase()) {
+      case "enter":
+        fillSelection();
+        return true;
+      case "d":
+        fillFromEdge("down");
+        return true;
+      case "r":
+        fillFromEdge("right");
+        return true;
+      case "c":
+        return editing ? false : copy();
+      case "x":
+        return editing ? false : cut();
+      case "v":
+        return fromInput && (inputDirty || !clipboard) ? false : paste();
+      default:
+        return false;
+    }
+  }
+
+  input.addEventListener("input", () => {
+    inputDirty = true;
+    if (cellEditing) cellInput.value = input.value;
+  });
+
   input.addEventListener("keydown", (event) => {
     const keyboard = /** @type {KeyboardEvent} */ (event);
+    if (handleShortcut(keyboard, true)) {
+      keyboard.preventDefault();
+      return;
+    }
     if (keyboard.key === "Enter") {
       keyboard.preventDefault();
       commitInput([0, 1]);
@@ -242,6 +642,8 @@ export function createSheetEditor(workspace, pageId, options = {}) {
       commitInput([1, 0]);
     } else if (keyboard.key === "Escape") {
       keyboard.preventDefault();
+      endCellEdit();
+      inputDirty = false;
       refresh();
       input.blur();
     }
@@ -269,6 +671,50 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   function addTable() {
     workspace.dispatch("createTable", { pageId });
+  }
+
+  /**
+   * Run a command that may be refused (e.g. shifting through a merge) without
+   * letting the refusal escape into an event handler.
+   * @param {() => void} action
+   * @returns {boolean}
+   */
+  function attempt(action) {
+    try {
+      action();
+      return true;
+    } catch (error) {
+      if (error instanceof CommandError) return false;
+      throw error;
+    }
+  }
+
+  /** @param {"right" | "down"} direction */
+  function insertCells(direction) {
+    const range = currentRange();
+    if (!range) return false;
+    return attempt(() =>
+      workspace.dispatch("insertCells", {
+        pageId,
+        tableId: range.tableId,
+        range: { start: range.start, end: range.end },
+        direction
+      })
+    );
+  }
+
+  /** @param {"left" | "up"} direction */
+  function deleteCells(direction) {
+    const range = currentRange();
+    if (!range) return false;
+    return attempt(() =>
+      workspace.dispatch("deleteCells", {
+        pageId,
+        tableId: range.tableId,
+        range: { start: range.start, end: range.end },
+        direction
+      })
+    );
   }
 
   /** Merges that overlap the selected range. */
@@ -341,22 +787,26 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   /** @param {number} height */
   function setSelectedRowHeight(height) {
-    const range = currentRange();
-    if (!range || !Number.isFinite(height) || height <= 0) return;
+    const ranges = allRanges();
+    if (ranges.length === 0 || !Number.isFinite(height) || height <= 0) return;
     workspace.transact("set row height", () => {
-      for (let row = range.start.row; row <= range.end.row; row++) {
-        workspace.dispatch("setRowHeight", { pageId, tableId: range.tableId, row, height });
+      for (const range of ranges) {
+        for (let row = range.start.row; row <= range.end.row; row++) {
+          workspace.dispatch("setRowHeight", { pageId, tableId: range.tableId, row, height });
+        }
       }
     });
   }
 
   /** @param {number} width */
   function setSelectedColumnWidth(width) {
-    const range = currentRange();
-    if (!range || !Number.isFinite(width) || width <= 0) return;
+    const ranges = allRanges();
+    if (ranges.length === 0 || !Number.isFinite(width) || width <= 0) return;
     workspace.transact("set column width", () => {
-      for (let column = range.start.col; column <= range.end.col; column++) {
-        workspace.dispatch("setColumnWidth", { pageId, tableId: range.tableId, column, width });
+      for (const range of ranges) {
+        for (let column = range.start.col; column <= range.end.col; column++) {
+          workspace.dispatch("setColumnWidth", { pageId, tableId: range.tableId, column, width });
+        }
       }
     });
   }
@@ -367,17 +817,26 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     const snapshot = content();
     for (const table of Object.values(snapshot.tables)) engines.rebuild(table);
     clampSelection();
+    if (clipboard && !snapshot.tables[clipboard.tableId]) clipboard = null;
 
+    // Re-rendering replaces the cells, so the in-cell editor is lifted out and put back.
+    const caret = cellEditing ? [cellInput.selectionStart ?? 0, cellInput.selectionEnd ?? 0] : null;
+    const hadFocus = document.activeElement === cellInput;
+    suppressBlur = true;
     clear(canvasWrap);
-    const range = currentRange();
+    suppressBlur = false;
     canvasWrap.append(
       renderSheet(snapshot, {
         engines,
         interactive: true,
-        selected:
-          selection && range
-            ? { tableId: selection.tableId, col: selection.anchor.col, row: selection.anchor.row, range }
-            : null
+        selected: selection
+          ? {
+              tableId: selection.tableId,
+              col: selection.anchor.col,
+              row: selection.anchor.row,
+              ranges: allRanges()
+            }
+          : null
       })
     );
 
@@ -386,11 +845,14 @@ export function createSheetEditor(workspace, pageId, options = {}) {
       const { col, row } = selection.anchor;
       address.textContent = positionToA1(col, row);
       const cell = table ? getCell(table, col, row) : undefined;
-      if (document.activeElement !== input) input.value = rawCellText(cell);
+      if (!inputDirty) input.value = rawCellText(cell);
     } else {
       address.textContent = "—";
       input.value = "";
+      inputDirty = false;
+      cellEditing = false;
     }
+    if (cellEditing) placeCellEditor(caret, hadFocus);
     options.onSelectionChange?.();
   }
 
@@ -409,21 +871,204 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     return tableId && Number.isInteger(col) && Number.isInteger(row) ? { tableId, col, row } : null;
   }
 
+  /** @param {Position} position @param {Rect} rect */
+  const rectHas = (rect, position) =>
+    position.col >= rect.start.col &&
+    position.col <= rect.end.col &&
+    position.row >= rect.start.row &&
+    position.row <= rect.end.row;
+
+  /**
+   * Mark the cells of a rect with a preview class (and clear any earlier
+   * preview), without re-rendering the canvas mid-gesture.
+   * @param {string} tableId
+   * @param {Rect | null} rect
+   * @param {string} className
+   */
+  function paintPreview(tableId, rect, className) {
+    for (const el of canvasWrap.querySelectorAll(".is-drop-preview, .is-fill-preview")) {
+      el.classList.remove("is-drop-preview", "is-fill-preview");
+    }
+    if (!rect) return;
+    const host = [...canvasWrap.querySelectorAll(".sheet-table")].find(
+      (el) => el.getAttribute("data-table-id") === tableId
+    );
+    if (!host) return;
+    for (let row = rect.start.row; row <= rect.end.row; row++) {
+      for (let col = rect.start.col; col <= rect.end.col; col++) {
+        host.querySelector(`[data-key="${col},${row}"]`)?.classList.add(className);
+      }
+    }
+  }
+
+  /**
+   * Move a range by the offset between two cells (relative references in the
+   * moved formulas shift by the same offset).
+   * @param {Position} from
+   * @param {Position} to
+   */
+  function moveRange(from, to) {
+    const range = currentRange();
+    if (!range) return false;
+    const deltaCol = Math.max(to.col - from.col, -range.start.col);
+    const deltaRow = Math.max(to.row - from.row, -range.start.row);
+    if (deltaCol === 0 && deltaRow === 0) return false;
+    const dest = { col: range.start.col + deltaCol, row: range.start.row + deltaRow };
+    const moved = attempt(() =>
+      workspace.dispatch("moveCells", {
+        pageId,
+        tableId: range.tableId,
+        source: { start: range.start, end: range.end },
+        to: dest
+      })
+    );
+    if (moved) {
+      selectRange(range.tableId, dest, {
+        col: dest.col + range.end.col - range.start.col,
+        row: dest.row + range.end.row - range.start.row
+      });
+    }
+    return moved;
+  }
+
+  /**
+   * The new area a fill drag covers: the strip of cells beyond the source, in
+   * whichever direction the pointer got furthest from it.
+   * @param {Rect} source
+   * @param {Position} hit
+   * @returns {Rect | null}
+   */
+  function fillExtension(source, hit) {
+    const right = hit.col - source.end.col;
+    const left = source.start.col - hit.col;
+    const down = hit.row - source.end.row;
+    const up = source.start.row - hit.row;
+    const horizontal = Math.max(right, left, 0);
+    const vertical = Math.max(down, up, 0);
+    if (horizontal === 0 && vertical === 0) return null;
+    if (vertical >= horizontal) {
+      return down >= up
+        ? { start: { col: source.start.col, row: source.end.row + 1 }, end: { col: source.end.col, row: hit.row } }
+        : { start: { col: source.start.col, row: hit.row }, end: { col: source.end.col, row: source.start.row - 1 } };
+    }
+    return right >= left
+      ? { start: { col: source.end.col + 1, row: source.start.row }, end: { col: hit.col, row: source.end.row } }
+      : { start: { col: hit.col, row: source.start.row }, end: { col: source.start.col - 1, row: source.end.row } };
+  }
+
+  /**
+   * Fill from the active range out to `extent`, tiling it (relative references
+   * shift per target), then select the whole filled area.
+   * @param {Position} extent
+   */
+  function fillRangeTo(extent) {
+    const range = currentRange();
+    if (!range) return false;
+    const source = { start: range.start, end: range.end };
+    const target = fillExtension(source, extent);
+    if (!target) return false;
+    const done = attempt(() =>
+      workspace.dispatch("fillCells", { pageId, tableId: range.tableId, source, targets: [target] })
+    );
+    if (done) {
+      const union = rectOf(
+        { col: Math.min(source.start.col, target.start.col), row: Math.min(source.start.row, target.start.row) },
+        { col: Math.max(source.end.col, target.end.col), row: Math.max(source.end.row, target.end.row) }
+      );
+      selectRange(range.tableId, union.start, union.end);
+    }
+    return done;
+  }
+
   canvasWrap.addEventListener("mousedown", (event) => {
     const mouse = /** @type {MouseEvent} */ (event);
+    if (mouse.button === 2) return; // right-click: the context menu decides the selection
+    const target = /** @type {HTMLElement} */ (event.target);
+    if (target === cellInput) return; // place the caret inside the cell being edited
+    // Pressing anywhere else in the grid finishes an in-place edit first.
+    if (cellEditing) {
+      endCellEdit();
+      if (inputDirty) commitInput();
+    }
+
+    // Dragging a header's trailing edge resizes that column or row.
+    const grip = target.closest?.("[data-role=col-resize], [data-role=row-resize]");
+    if (grip) {
+      const axis = grip.getAttribute("data-role") === "col-resize" ? "col" : "row";
+      const tableId = grip.closest(".sheet-table")?.getAttribute("data-table-id");
+      const index = Number(grip.getAttribute(axis === "col" ? "data-col" : "data-row"));
+      const table = tableId ? tableOf(tableId) : undefined;
+      if (tableId && table && Number.isInteger(index)) {
+        event.preventDefault();
+        const original = axis === "col" ? columnWidthOf(table, index) : rowHeightOf(table, index);
+        gesture = {
+          type: "resize",
+          axis,
+          tableId,
+          index,
+          origin: axis === "col" ? mouse.clientX : mouse.clientY,
+          original,
+          size: original
+        };
+        grip.classList.add("is-dragging");
+        return;
+      }
+    }
+
+    // Dragging the little square at the selection's corner fills.
+    if (target.closest?.("[data-role=fill-handle]") && selection) {
+      const range = currentRange();
+      if (range) {
+        event.preventDefault();
+        gesture = { type: "fill", tableId: range.tableId, source: { start: range.start, end: range.end }, target: null, hit: null };
+        focusGrid();
+        return;
+      }
+    }
+
     const hit = cellFromTarget(event.target);
     if (hit) {
       event.preventDefault();
-      if (mouse.shiftKey && selection && selection.tableId === hit.tableId) {
-        selectRange(hit.tableId, selection.anchor, { col: hit.col, row: hit.row });
-      } else {
-        selectCell(hit.tableId, hit.col, hit.row);
+      // A double-click on the active cell edits it in place.
+      if (
+        mouse.detail >= 2 &&
+        selection &&
+        hit.tableId === selection.tableId &&
+        hit.col === selection.anchor.col &&
+        hit.row === selection.anchor.row &&
+        startCellEdit()
+      ) {
+        gesture = null;
+        return;
       }
-      dragging = true;
-      input.focus();
+      if (mouse.shiftKey && selection && selection.tableId === hit.tableId) {
+        extendFocus({ col: hit.col, row: hit.row });
+        gesture = { type: "select" };
+      } else if (mouse.ctrlKey || mouse.metaKey) {
+        addRange(hit.tableId, { col: hit.col, row: hit.row }, { col: hit.col, row: hit.row });
+        gesture = { type: "select" };
+      } else {
+        // Grabbing a cell that is already selected drags the selection (a plain
+        // click on it still just selects that cell, on release).
+        const grabbed = allRanges().filter((range) => range.tableId === hit.tableId && rectHas(range, hit));
+        if (grabbed.length > 0) {
+          const range = grabbed[grabbed.length - 1];
+          gesture = {
+            type: "move",
+            tableId: hit.tableId,
+            grab: { col: hit.col, row: hit.row },
+            range: { start: range.start, end: range.end },
+            delta: null
+          };
+        } else {
+          selectCell(hit.tableId, hit.col, hit.row);
+          gesture = { type: "select" };
+        }
+      }
+      focusGrid();
       return;
     }
-    const name = /** @type {HTMLElement} */ (event.target).closest("[data-role=table-name]");
+    const name = target.closest("[data-role=table-name]");
     if (name) {
       const tableId = name.getAttribute("data-table-id");
       if (tableId) {
@@ -434,22 +1079,176 @@ export function createSheetEditor(workspace, pageId, options = {}) {
   });
 
   canvasWrap.addEventListener("mouseover", (event) => {
-    if (!dragging || !selection) return;
+    if (!gesture) return;
     const hit = cellFromTarget(event.target);
-    if (!hit || hit.tableId !== selection.tableId) return;
-    if (hit.col === selection.focus.col && hit.row === selection.focus.row) return;
-    selectRange(hit.tableId, selection.anchor, { col: hit.col, row: hit.row });
+    if (!hit) return;
+    if (gesture.type === "select") {
+      if (!selection || hit.tableId !== selection.tableId) return;
+      if (hit.col === selection.focus.col && hit.row === selection.focus.row) return;
+      extendFocus({ col: hit.col, row: hit.row });
+    } else if (gesture.type === "fill") {
+      if (hit.tableId !== gesture.tableId) return;
+      const extension = fillExtension(gesture.source, hit);
+      gesture.target = extension;
+      gesture.hit = { col: hit.col, row: hit.row };
+      paintPreview(
+        gesture.tableId,
+        extension
+          ? {
+              start: {
+                col: Math.min(gesture.source.start.col, extension.start.col),
+                row: Math.min(gesture.source.start.row, extension.start.row)
+              },
+              end: {
+                col: Math.max(gesture.source.end.col, extension.end.col),
+                row: Math.max(gesture.source.end.row, extension.end.row)
+              }
+            }
+          : null,
+        "is-fill-preview"
+      );
+    } else if (gesture.type === "move") {
+      if (hit.tableId !== gesture.tableId) return;
+      const { range, grab } = gesture;
+      const deltaCol = Math.max(hit.col - grab.col, -range.start.col);
+      const deltaRow = Math.max(hit.row - grab.row, -range.start.row);
+      gesture.delta = deltaCol === 0 && deltaRow === 0 ? null : { col: deltaCol, row: deltaRow };
+      paintPreview(
+        gesture.tableId,
+        gesture.delta
+          ? {
+              start: { col: range.start.col + deltaCol, row: range.start.row + deltaRow },
+              end: { col: range.end.col + deltaCol, row: range.end.row + deltaRow }
+            }
+          : null,
+        "is-drop-preview"
+      );
+    }
   });
 
-  const stopDragging = () => {
-    dragging = false;
+  /** Follow the pointer while a header edge is dragged, resizing the live DOM without re-rendering. */
+  const dragResize = (/** @type {Event} */ event) => {
+    if (gesture?.type !== "resize") return;
+    const mouse = /** @type {MouseEvent} */ (event);
+    const pointer = gesture.axis === "col" ? mouse.clientX : mouse.clientY;
+    const minimum = gesture.axis === "col" ? MIN_COLUMN_WIDTH : MIN_ROW_HEIGHT;
+    gesture.size = Math.max(minimum, Math.round(gesture.original + pointer - gesture.origin));
+    const host = [...canvasWrap.querySelectorAll(".sheet-table")].find(
+      (el) => el.getAttribute("data-table-id") === gesture?.tableId
+    );
+    const line = host?.querySelector(
+      gesture.axis === "col" ? `col[data-col="${gesture.index}"]` : `tr[data-row="${gesture.index}"]`
+    );
+    if (line) /** @type {HTMLElement} */ (line).style[gesture.axis === "col" ? "width" : "height"] = `${gesture.size}px`;
   };
-  document.addEventListener("mouseup", stopDragging);
+  document.addEventListener("mousemove", dragResize);
+
+  /** Finish the gesture on mouse release: commit a fill, move or resize, or treat a bare grab as a click. */
+  const finishGesture = () => {
+    const done = gesture;
+    gesture = null;
+    if (!done || done.type === "select") return;
+    if (done.type === "resize") {
+      if (done.size !== done.original) {
+        attempt(() =>
+          workspace.dispatch(
+            done.axis === "col" ? "setColumnWidth" : "setRowHeight",
+            done.axis === "col"
+              ? { pageId, tableId: done.tableId, column: done.index, width: done.size }
+              : { pageId, tableId: done.tableId, row: done.index, height: done.size }
+          )
+        );
+      } else {
+        canvasWrap.querySelector(".sheet-resize-handle.is-dragging")?.classList.remove("is-dragging");
+      }
+      return;
+    }
+    paintPreview(done.tableId, null, "");
+    if (done.type === "fill") {
+      if (done.target && done.hit) fillRangeTo(done.hit);
+    } else if (done.delta) {
+      moveRange(done.grab, { col: done.grab.col + done.delta.col, row: done.grab.row + done.delta.row });
+    } else {
+      selectCell(done.tableId, done.grab.col, done.grab.row);
+    }
+  };
+  document.addEventListener("mouseup", finishGesture);
+
+  // -- context menu ------------------------------------------------------------
+
+  /** @param {{ x: number, y: number }} point */
+  function openContextMenu(point) {
+    if (!selection) return;
+    const range = currentRange();
+    const cellCount = range ? (range.end.col - range.start.col + 1) * (range.end.row - range.start.row + 1) : 0;
+    const label = cellCount > 1 ? "cells" : "cell";
+    /** @type {import("./popover.js").MenuItem[]} */
+    const items = [
+      { label: "Cut", icon: "cut", attrs: { "data-action": "sheet-cut" }, action: () => cut() },
+      { label: "Copy", icon: "copy", attrs: { "data-action": "sheet-copy" }, action: () => copy() },
+      { label: "Paste", icon: "paste", attrs: { "data-action": "sheet-paste" }, disabled: !canPaste(), action: () => paste() },
+      { label: `Clear ${label}`, icon: "clear", attrs: { "data-action": "sheet-clear" }, action: () => clearSelectionCell() },
+      { separator: true },
+      {
+        label: "Insert",
+        icon: "shift-right",
+        attrs: { "data-action": "insert-menu" },
+        submenu: [
+          { label: "Cells, shift right", icon: "shift-right", attrs: { "data-action": "insert-cells-right" }, action: () => insertCells("right") },
+          { label: "Cells, shift down", icon: "shift-down", attrs: { "data-action": "insert-cells-down" }, action: () => insertCells("down") },
+          { separator: true },
+          { label: "Row", icon: "row-add", attrs: { "data-action": "add-row" }, action: () => changeLines("row", "insert") },
+          { label: "Column", icon: "column-add", attrs: { "data-action": "add-column" }, action: () => changeLines("column", "insert") }
+        ]
+      },
+      {
+        label: "Delete",
+        icon: "shift-left",
+        attrs: { "data-action": "delete-menu" },
+        submenu: [
+          { label: "Cells, shift left", icon: "shift-left", attrs: { "data-action": "delete-cells-left" }, action: () => deleteCells("left") },
+          { label: "Cells, shift up", icon: "shift-up", attrs: { "data-action": "delete-cells-up" }, action: () => deleteCells("up") },
+          { separator: true },
+          { label: "Row", icon: "row-delete", attrs: { "data-action": "delete-row" }, action: () => changeLines("row", "delete") },
+          { label: "Column", icon: "column-delete", attrs: { "data-action": "delete-column" }, action: () => changeLines("column", "delete") }
+        ]
+      },
+      { separator: true },
+      { label: "Merge cells", icon: "merge", attrs: { "data-action": "merge" }, disabled: !canMerge(), action: () => mergeSelection() },
+      { label: "Unmerge cells", icon: "unmerge", attrs: { "data-action": "unmerge" }, disabled: !canUnmerge(), action: () => unmergeSelection() }
+    ];
+    popovers.showAt(point, buildMenu(items, popovers.close, (name) => icon(name, { size: 16 })), {
+      class: "context-menu"
+    });
+  }
+
+  canvasWrap.addEventListener("dblclick", (event) => {
+    const hit = cellFromTarget(event.target);
+    if (!hit || cellEditing) return;
+    selectCell(hit.tableId, hit.col, hit.row);
+    startCellEdit();
+  });
+
+  canvasWrap.addEventListener("contextmenu", (event) => {
+    if (event.target === cellInput) return; // the browser's text menu, for the cell being edited
+    const hit = cellFromTarget(event.target);
+    if (!hit) return;
+    event.preventDefault();
+    gesture = null;
+    const inside = allRanges().some((range) => range.tableId === hit.tableId && rectHas(range, hit));
+    if (!inside) selectCell(hit.tableId, hit.col, hit.row);
+    const mouse = /** @type {MouseEvent} */ (event);
+    openContextMenu({ x: mouse.clientX, y: mouse.clientY });
+  });
 
   element.addEventListener("keydown", (event) => {
     if (event.target === input) return;
     const keyboard = /** @type {KeyboardEvent} */ (event);
     if (!selection) return;
+    if (handleShortcut(keyboard, false)) {
+      keyboard.preventDefault();
+      return;
+    }
     const arrows = {
       ArrowUp: [0, -1],
       ArrowDown: [0, 1],
@@ -459,19 +1258,19 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     if (arrows[keyboard.key]) {
       keyboard.preventDefault();
       moveSelection(arrows[keyboard.key][0], arrows[keyboard.key][1], keyboard.shiftKey);
-      input.focus();
+      focusGrid();
       return;
     }
     if (keyboard.key === "Tab") {
       keyboard.preventDefault();
       moveSelection(1, 0);
-      input.focus();
+      focusGrid();
       return;
     }
     if (keyboard.key === "Enter") {
       keyboard.preventDefault();
       moveSelection(0, 1);
-      input.focus();
+      focusGrid();
       return;
     }
     if (keyboard.key === "Backspace" || keyboard.key === "Delete") {
@@ -479,10 +1278,19 @@ export function createSheetEditor(workspace, pageId, options = {}) {
       clearSelectionCell();
       return;
     }
+    if (keyboard.key === "F2") {
+      keyboard.preventDefault();
+      startCellEdit();
+      return;
+    }
     if (keyboard.key.length === 1 && !keyboard.metaKey && !keyboard.ctrlKey && !keyboard.altKey) {
       keyboard.preventDefault();
-      input.value = keyboard.key;
-      input.focus();
+      // Typing over a cell replaces it, in the cell itself (or the formula bar if the cell is hidden by a merge).
+      if (!startCellEdit(keyboard.key)) {
+        input.value = keyboard.key;
+        inputDirty = true;
+        input.focus();
+      }
     }
   });
 
@@ -498,16 +1306,35 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     refresh,
     destroy: () => {
       unsubscribe();
-      document.removeEventListener("mouseup", stopDragging);
+      document.removeEventListener("mouseup", finishGesture);
+      document.removeEventListener("mousemove", dragResize);
+      popovers.destroy();
     },
     getSelection: () =>
       selection ? { tableId: selection.tableId, col: selection.anchor.col, row: selection.anchor.row } : null,
     getRange: currentRange,
+    getRanges: allRanges,
     selectCell,
     selectRange,
+    addRange,
+    fillSelection,
+    fillDown: () => fillFromEdge("down"),
+    fillRight: () => fillFromEdge("right"),
+    copy,
+    cut,
+    paste,
+    canPaste,
+    hasSelection: () => selection !== null,
+    clearSelection: clearSelectionCell,
+    insertCells,
+    deleteCells,
+    moveRange,
+    fillRangeTo,
+    openContextMenu,
     commit: () => commitInput(),
     setInputValue: (text) => {
       input.value = text;
+      inputDirty = true;
     },
     canMerge,
     canUnmerge,
