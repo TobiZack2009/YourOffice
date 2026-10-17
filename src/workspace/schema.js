@@ -229,6 +229,11 @@ export function validateWorkspace(data) {
 
   if (data.settings !== undefined && !isPlainObject(data.settings)) {
     errors.push("settings must be an object when present");
+  } else if (data.settings?.favoritePageIds !== undefined) {
+    const ids = data.settings.favoritePageIds;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+      errors.push("settings.favoritePageIds must be an array of page ids when present");
+    }
   }
 
   return { valid: errors.length === 0, errors };

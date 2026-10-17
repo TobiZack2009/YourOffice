@@ -318,3 +318,68 @@ describe("renameWorkspace command", () => {
     expect(ws.title).toBe("Second");
   });
 });
+
+describe("setFavorite command", () => {
+  function pair() {
+    const ws = Workspace.create({ title: "W" });
+    ws.dispatch("createPage", { type: "document", title: "A" });
+    ws.dispatch("createPage", { type: "sheet", title: "B" });
+    const [a, b] = ws.getChildren(null);
+    return { ws, a, b };
+  }
+
+  it("adds and removes favorites in the order they were chosen", () => {
+    const { ws, a, b } = pair();
+    expect(ws.getFavorites()).toEqual([]);
+    ws.dispatch("setFavorite", { pageId: b, favorite: true });
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    expect(ws.getFavorites()).toEqual([b, a]);
+    ws.dispatch("setFavorite", { pageId: b, favorite: false });
+    expect(ws.getFavorites()).toEqual([a]);
+  });
+
+  it("does not duplicate a page that is favorited twice", () => {
+    const { ws, a } = pair();
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    expect(ws.getFavorites()).toEqual([a]);
+  });
+
+  it("rejects unknown pages and non-boolean flags", () => {
+    const { ws, a } = pair();
+    expect(() => ws.dispatch("setFavorite", { pageId: "ghost", favorite: true })).toThrow(CommandError);
+    expect(() => ws.dispatch("setFavorite", { pageId: a, favorite: "yes" })).toThrow(CommandError);
+  });
+
+  it("prunes deleted pages, including cascaded children", () => {
+    const { ws, a, b } = pair();
+    ws.dispatch("createPage", { type: "document", title: "child", parentId: a });
+    const child = ws.getChildren(a)[0];
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    ws.dispatch("setFavorite", { pageId: child, favorite: true });
+    ws.dispatch("setFavorite", { pageId: b, favorite: true });
+    ws.dispatch("deletePage", { pageId: a, cascade: true });
+    expect(ws.getFavorites()).toEqual([b]);
+    expect(ws.serialized.settings.favoritePageIds).toEqual([b]);
+  });
+
+  it("is undoable", () => {
+    const { ws, a } = pair();
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    ws.undo();
+    expect(ws.getFavorites()).toEqual([]);
+    ws.redo();
+    expect(ws.getFavorites()).toEqual([a]);
+  });
+
+  it("survives a serialization round trip and is validated", async () => {
+    const { ws, a } = pair();
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    const { exportWorkspaceJSON, importWorkspaceJSON } = await import("../src/workspace/format.js");
+    const copy = importWorkspaceJSON(exportWorkspaceJSON(ws));
+    expect(copy.getFavorites()).toEqual([a]);
+    const bad = ws.serialized;
+    bad.settings.favoritePageIds = [1];
+    expect(() => importWorkspaceJSON(JSON.stringify(bad))).toThrow();
+  });
+});

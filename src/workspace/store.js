@@ -145,6 +145,16 @@ export class Workspace {
   }
 
   /**
+   * Favorite page ids in the order they were favorited (settings.favoritePageIds),
+   * ignoring ids that no longer exist.
+   * @returns {string[]}
+   */
+  getFavorites() {
+    const ids = this._data.settings?.favoritePageIds;
+    return Array.isArray(ids) ? ids.filter((id) => Boolean(this._data.pages[id])) : [];
+  }
+
+  /**
    * Ordered child page ids (top-level when parentId is null).
    * @param {string | null} parentId
    * @returns {string[]}

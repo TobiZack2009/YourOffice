@@ -122,6 +122,45 @@ describe("renderTable", () => {
     expect(selected[0].getAttribute("data-key")).toBe("1,2");
   });
 
+  it("marks every cell in a range and keeps the active cell distinct", () => {
+    const { table } = setup();
+    const id = table().id;
+    const element = renderTable(table(), {
+      selected: {
+        tableId: id,
+        col: 0,
+        row: 0,
+        range: { tableId: id, start: { col: 0, row: 0 }, end: { col: 1, row: 1 } }
+      }
+    });
+    const inRange = [...element.querySelectorAll(".sheet-cell.is-in-range")].map((el) => el.getAttribute("data-key"));
+    expect(inRange.sort()).toEqual(["0,0", "0,1", "1,0", "1,1"]);
+    expect(element.querySelectorAll(".sheet-cell.is-selected")).toHaveLength(1);
+  });
+
+  it("does not mark a single-cell range", () => {
+    const { table } = setup();
+    const id = table().id;
+    const element = renderTable(table(), {
+      selected: { tableId: id, col: 1, row: 1, range: { tableId: id, start: { col: 1, row: 1 }, end: { col: 1, row: 1 } } }
+    });
+    expect(element.querySelectorAll(".sheet-cell.is-in-range")).toHaveLength(0);
+  });
+
+  it("highlights a merged cell as a unit when the range touches it", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("mergeCells", { pageId, tableId, start: { col: 0, row: 0 }, end: { col: 1, row: 1 } });
+    const element = renderTable(table(), {
+      selected: {
+        tableId,
+        col: 1,
+        row: 2,
+        range: { tableId, start: { col: 1, row: 1 }, end: { col: 1, row: 2 } }
+      }
+    });
+    expect(element.querySelector('[data-key="0,0"]')?.classList.contains("is-in-range")).toBe(true);
+  });
+
   it("applies row heights and column widths", () => {
     const { ws, pageId, tableId, table } = setup();
     ws.dispatch("setColumnWidth", { pageId, tableId, column: 0, width: 130 });

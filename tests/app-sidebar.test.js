@@ -57,6 +57,13 @@ describe("planDrop", () => {
   });
 });
 
+/** @param {{ element: HTMLElement }} sidebar @param {string} selector */
+function clickIn(sidebar, selector) {
+  const target = sidebar.element.querySelector(selector);
+  if (!target) throw new Error(`no element for ${selector}`);
+  /** @type {HTMLElement} */ (target).click();
+}
+
 describe("createSidebar", () => {
   function mount() {
     const { ws, a, b, a1 } = tree();
@@ -66,7 +73,9 @@ describe("createSidebar", () => {
       rename: vi.fn(),
       remove: vi.fn(),
       move: vi.fn(),
-      renameWorkspace: vi.fn()
+      renameWorkspace: vi.fn(),
+      favorite: vi.fn(),
+      openQuickFind: vi.fn()
     };
     const sidebar = createSidebar(ws, actions);
     document.body.append(sidebar.element);
@@ -77,8 +86,12 @@ describe("createSidebar", () => {
     const { sidebar } = mount();
     const rows = sidebar.element.querySelectorAll(".page-row");
     expect(rows).toHaveLength(3);
-    expect(sidebar.element.querySelector('.type-document')?.textContent).toBe("¶");
-    expect(sidebar.element.querySelector('.type-sheet')?.textContent).toBe("▦");
+    expect(sidebar.element.querySelector(".type-glyph.type-document svg")?.getAttribute("data-icon")).toBe(
+      "page-document"
+    );
+    expect(sidebar.element.querySelector(".type-glyph.type-sheet svg")?.getAttribute("data-icon")).toBe(
+      "page-sheet"
+    );
   });
 
   it("selects a page on click", () => {
@@ -118,24 +131,59 @@ describe("createSidebar", () => {
     expect(sidebar.element.querySelector(`[data-rename-input="${a}"]`)).toBeNull();
   });
 
-  it("requests deletion from the row button", () => {
+  it("requests deletion from the row \"...\" menu", () => {
     const { sidebar, actions, b } = mount();
-    const remove = sidebar.element.querySelector(`[data-page-id="${b}"] .page-delete`);
-    /** @type {HTMLButtonElement} */ (remove).click();
+    clickIn(sidebar, `[data-page-id="${b}"] [data-action="page-menu"]`);
+    clickIn(sidebar, '.menu-item[data-action="delete"]');
     expect(actions.remove).toHaveBeenCalledWith(b);
   });
 
-  it("creates pages of each type from the header buttons", () => {
+  it("creates top-level pages of each type from the header type picker", () => {
     const { sidebar, actions } = mount();
-    const buttons = sidebar.element.querySelectorAll(".new-page");
-    /** @type {HTMLButtonElement} */ (buttons[0]).click();
-    /** @type {HTMLButtonElement} */ (buttons[1]).click();
-    /** @type {HTMLButtonElement} */ (buttons[2]).click();
-    expect(actions.create.mock.calls.map((call) => call[0])).toEqual([
-      "document",
-      "sheet",
-      "presentation"
-    ]);
+    for (const type of ["document", "sheet", "presentation"]) {
+      clickIn(sidebar, '[data-action="new-page"]');
+      clickIn(sidebar, `.new-page[data-type="${type}"]`);
+    }
+    expect(actions.create.mock.calls.map((call) => call[0])).toEqual(["document", "sheet", "presentation"]);
+    expect(actions.create.mock.calls.every((call) => call.length === 1)).toBe(true);
+  });
+
+  it("creates a child page from the row \"+\"", () => {
+    const { sidebar, actions, b } = mount();
+    clickIn(sidebar, `[data-page-id="${b}"] [data-action="add-child"]`);
+    clickIn(sidebar, '.new-page[data-type="document"]');
+    expect(actions.create).toHaveBeenCalledWith("document", b);
+  });
+
+  it("collapses and expands children with the caret", () => {
+    const { sidebar, a, a1 } = mount();
+    expect(sidebar.element.querySelector(`[data-page-id="${a1}"]`)).toBeTruthy();
+    clickIn(sidebar, `[data-page-id="${a}"] [data-action="toggle-children"]`);
+    expect(sidebar.element.querySelector(`[data-page-id="${a1}"]`)).toBeNull();
+    clickIn(sidebar, `[data-page-id="${a}"] [data-action="toggle-children"]`);
+    expect(sidebar.element.querySelector(`[data-page-id="${a1}"]`)).toBeTruthy();
+  });
+
+  it("lists favorites and toggles them from the menu", () => {
+    const { ws, sidebar, actions, a } = mount();
+    expect(sidebar.element.querySelector(".sidebar-favorites")).toBeNull();
+
+    clickIn(sidebar, `[data-page-id="${a}"] [data-action="page-menu"]`);
+    clickIn(sidebar, '.menu-item[data-action="favorite"]');
+    expect(actions.favorite).toHaveBeenCalledWith(a, true);
+
+    ws.dispatch("setFavorite", { pageId: a, favorite: true });
+    sidebar.refresh();
+    expect(sidebar.element.querySelector(`[data-favorite-id="${a}"] .favorite-title`)?.textContent).toBe("A");
+
+    clickIn(sidebar, `[data-favorite-id="${a}"] [data-action="unfavorite"]`);
+    expect(actions.favorite).toHaveBeenLastCalledWith(a, false);
+  });
+
+  it("opens quick find from the search field", () => {
+    const { sidebar, actions } = mount();
+    clickIn(sidebar, '[data-action="quick-find"]');
+    expect(actions.openQuickFind).toHaveBeenCalled();
   });
 
   it("renames the workspace from the title", () => {

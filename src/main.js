@@ -6,6 +6,7 @@ import "./app/styles.css";
 import { Workspace } from "./workspace/store.js";
 import { registerDocumentCommands } from "./document/commands.js";
 import { registerSheetCommands } from "./sheet/commands.js";
+/** @typedef {import("./workspace/store.js").Workspace} Workspace */
 import { mountApp } from "./app/shell.js";
 
 const workspace = Workspace.create({ title: "My Workspace" });
@@ -89,4 +90,13 @@ workspace.markSaved();
 const root = document.getElementById("app");
 if (!root) throw new Error("missing #app element");
 
-mountApp(root, workspace);
+/** @type {ReturnType<typeof mountApp> | null} */
+let app = null;
+
+/** @param {Workspace} current */
+function mount(current) {
+  app?.destroy();
+  app = mountApp(/** @type {HTMLElement} */ (root), current, { onImport: mount });
+}
+
+mount(workspace);

@@ -31,7 +31,7 @@ Full product/technical spec: `app.txt` (source of truth for requirements).
 - **Separate dependency graphs.** Data deps (formulas, variables) vs rendering deps
   (views to rerender) — spec §9.
 
-### Current phase: 4 — Sheet editor (Phases 1–3 complete; editable UI built)
+### Current phase: 4 — Sheet editor (Phases 1–3 complete; editable UI + contextual ribbon built)
 
 Directory layout (logical modules from spec §14; may split further as it grows):
 
@@ -41,11 +41,42 @@ src/
   workspace/   # schema v1, validation, migrations, store, commands, history
   sheet/       # formula engine: tokenizer, parser, evaluator, functions, recalc
   document/    # block model, block commands, DOM renderer
-  app/         # shell UI, editor glue (editable documents UI built)
+  app/         # shell UI, ribbon, sidebar, quick find, editor glue
   main.js      # vite entry, mounts the shell
 index.html     # dev/build shell; vite-plugin-singlefile bundles it into one HTML
 tests/         # vitest suites mirroring src structure
 ```
+
+App layout (`src/app/`): a full-height Notion-style sidebar, and a main column of
+title strip (breadcrumb, undo/redo, dirty dot) → ribbon (tab strip + panel of
+labelled groups) → canvas.
+
+```
++-----------+--------------------------------------------------------+
+| sidebar   | title strip: workspace > page, undo/redo, dirty dot    |
+|           | ribbon:      File | Home | Insert | ... | View         |
+|           |              labelled groups of large/small buttons    |
+|           +--------------------------------------------------------+
+|           | canvas (page header, editor)                           |
++-----------+--------------------------------------------------------+
+```
+
+- `ribbon-tabs.js` is pure data: `getTabs(pageType)` → tabs → groups → controls
+  (`button | toggle | select | menu | field`, each with `enabled(ctx)`, `active(ctx)`,
+  `disabledReason`). Adding a tab or control is a data change. `ctx` is
+  `{ workspace, page, docEditor, sheetEditor, shell }`; `shell` is the narrow
+  `ShellApi` the shell provides (undo/redo/save/export/import/zoom/sidebar).
+- `ribbon.js` renders that data and keeps `enabled`/`active` fresh via `update()`;
+  the shell calls it wherever editor or workspace state changes. Buttons cancel
+  `mousedown` so the editor selection survives.
+- Contextual tabs: document (Home, Insert), sheet (Home, Insert), presentation
+  (full set, disabled until Phase 5), File and View on everything. `data-page-type`
+  on `.app` drives the accent (document blue, sheet green, presentation orange).
+- `popover.js` (positioned popovers + `buildMenu`) is shared by the ribbon and the
+  sidebar. `icons.js` builds inline SVG icons. `quick-find.js` is the Cmd/Ctrl+K
+  overlay (`findPages` is the pure filter).
+- Embedding sheets/slides in documents is deferred: the document Insert tab shows
+  disabled "Sheet"/"Slide" seams (Phase 6).
 
 Key types (JSDoc typedefs document the shapes; there is no static type checker):
 
@@ -206,17 +237,38 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     into numbers, `TRUE`/`FALSE` into booleans, `"=…"` into formulas), Enter/Tab
     commit-and-move, arrow/Delete keys, row/column insert/delete at the selection,
     and Add table. Sheet pages no longer render a stub; only presentations do.
-  - Deliberate gaps: no range selection (so the `mergeCells`/`unmergeCells`
-    commands and merge rendering are not yet reachable from the UI), no table drag
-    on the canvas (positions are set by command only), and cross-table references
-    remain Phase 6.
+  - Deliberate gaps: no table drag on the canvas (positions are set by command
+    only), and cross-table references remain Phase 6. (Range selection and the
+    merge/unmerge UI landed with the ribbon redesign, below.)
+- **UI redesign — Notion-style workspace + Office-style contextual ribbon:**
+  - `shell.js` now builds sidebar + title strip + ribbon + canvas. Added breadcrumb,
+    Cmd/Ctrl+K quick find, File tab (rename workspace, mark saved, export/import
+    JSON via `exportWorkspaceJSON`/`importWorkspaceJSON`; `options.onImport` lets
+    `main.js` remount with the imported workspace) and View tab (canvas zoom as a
+    `--zoom` CSS variable, show/hide sidebar; both are shell UI state, not model).
+  - `sidebar.js`: header "+" opens a type picker (`.new-page[data-type]`), row hover
+    "+" creates a child page, row "..." menu (Rename / Favorite / Delete), expand
+    carets (sidebar-local state), a Favorites section, a search field that opens
+    quick find, SVG type icons. `create(type, parentId?)`; drag-to-nest is unchanged.
+  - `setFavorite` command (undoable) writes `settings.favoritePageIds`; `deletePage`
+    prunes it; `Workspace.getFavorites()` returns the ids that still exist. No schema
+    version bump (`settings` is free-form; validation checks the array shape).
+  - Sheet editor: range selection (`{ tableId, anchor, focus }`; drag, shift-click,
+    shift+arrow). `getSelection()` still returns the anchor cell, `getRange()` the
+    normalised rectangle. Merge/unmerge are now reachable from the UI, merged cells
+    highlight as a unit, and the in-editor action buttons moved into the ribbon
+    (the editor handle exposes `mergeSelection`, `unmergeSelection`,
+    `insertRow`/`deleteRow`/`insertColumn`/`deleteColumn`, `addTable`,
+    `renameSelectedTable`, `setSelectedRowHeight`/`setSelectedColumnWidth`).
+    Row/column insert and delete act on every line the range spans.
+  - `styles.css` rewritten around CSS variables with per-type accents.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
   `sheet-commands`, `sheet-table-engine`, `sheet-render`, `app-inline`,
-  `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`.
-  **347 tests green across 24 files**; the single-file build inlines JS + CSS into
-  one ~95 kB HTML.
+  `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`, `app-ribbon`,
+  `app-quick-find`. **414 tests green across 26 files**; the single-file build
+  inlines JS + CSS into one ~127 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
@@ -229,7 +281,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
    images, pure DOM renderer. Block export still outstanding.
 4. **Phase 4 — sheet editor** (in progress — core landed): Numbers-style canvas,
    independent tables, sparse storage, row/col ops wired to the engine, table
-   renderer and an interactive editor. Remaining: range selection + merge UI,
+   renderer, an interactive editor, range selection and merge UI. Remaining:
    canvas dragging, incremental recalc, cross-table visual polish.
 5. **Phase 5 — presentation:** 1280×720 slides, stable object IDs, text/image/shape/
    line, transitions, ordered animations.
@@ -249,9 +301,8 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
 - **Phase 4 engine mapping — settled:** one `RecalcEngine` per table, with
   cross-table references (`Expenses!B2`) deferred to Phase 6 name resolution.
   `RecalcEngine` positions are 1-based (A1 = `"1,1"`); the sheet model is 0-based
-  and converts in `TableEngines` only. Remaining Phase 4 work: range selection so
-  merges are reachable from the UI, canvas table dragging, and incremental engine
-  updates instead of a rebuild per change.
+  and converts in `TableEngines` only. Remaining Phase 4 work: canvas table
+  dragging and incremental engine updates instead of a rebuild per change.
 
 - Section locator shapes and range semantics (multi-block, non-contiguous cells).
 - Reference/section expression grammar and how it meets the spreadsheet parser.

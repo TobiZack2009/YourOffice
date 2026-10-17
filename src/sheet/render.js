@@ -22,7 +22,8 @@ export const HEADER_HEIGHT = 22;
  * @typedef {object} SheetRenderOptions
  * @property {Document} [document]
  * @property {TableEngines} [engines] Computed-value source for formula cells.
- * @property {{ tableId: string, col: number, row: number } | null} [selected]
+ * @property {{ tableId: string, col: number, row: number, range?: { tableId: string, start: { col: number, row: number }, end: { col: number, row: number } } } | null} [selected]
+ *   The active cell, plus an optional selected range (normalised start <= end).
  * @property {boolean} [interactive] Adds hover/cursor affordances (editor mode).
  */
 
@@ -34,6 +35,30 @@ function getDocument(options) {
   const doc = options?.document ?? (typeof document !== "undefined" ? document : undefined);
   if (!doc) throw new Error("no DOM available; pass options.document");
   return doc;
+}
+
+/** @typedef {{ start: { col: number, row: number }, end: { col: number, row: number } }} Rect */
+
+/**
+ * @param {Rect} rect
+ * @param {number} col
+ * @param {number} row
+ */
+function rectContains(rect, col, row) {
+  return col >= rect.start.col && col <= rect.end.col && row >= rect.start.row && row <= rect.end.row;
+}
+
+/**
+ * @param {Rect} a
+ * @param {Rect} b
+ */
+export function rectsIntersect(a, b) {
+  return (
+    a.start.col <= b.end.col &&
+    b.start.col <= a.end.col &&
+    a.start.row <= b.end.row &&
+    b.start.row <= a.end.row
+  );
 }
 
 /**
@@ -188,13 +213,22 @@ export function renderTable(table, options) {
       if (info.error) cell.classList.add("is-error");
       cell.textContent = info.display;
 
-      if (
-        options?.selected &&
-        options.selected.tableId === table.id &&
-        options.selected.col === col &&
-        options.selected.row === row
-      ) {
-        cell.classList.add("is-selected");
+      // A merged anchor stands for its whole block when testing selection.
+      const block = merge
+        ? { start: merge.start, end: merge.end }
+        : { start: { col, row }, end: { col, row } };
+      const selected = options?.selected;
+      if (selected && selected.tableId === table.id) {
+        if (rectContains(block, selected.col, selected.row)) cell.classList.add("is-selected");
+        const range = selected.range;
+        if (
+          range &&
+          range.tableId === table.id &&
+          (range.start.col !== range.end.col || range.start.row !== range.end.row) &&
+          rectsIntersect(block, range)
+        ) {
+          cell.classList.add("is-in-range");
+        }
       }
       if (options?.interactive) cell.classList.add("is-interactive");
 

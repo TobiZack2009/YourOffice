@@ -47,12 +47,13 @@ describe("rawCellText", () => {
 });
 
 describe("createSheetEditor", () => {
-  it("renders the canvas, formula bar and actions", () => {
+  it("renders the canvas and formula bar, with no in-editor action buttons", () => {
     const { editor } = setup();
     expect(query(editor.element, ".sheet-canvas")).toBeTruthy();
     expect(query(editor.element, ".sheet-grid")).toBeTruthy();
     expect(query(editor.element, '[data-role="cell-address"]')?.textContent).toBe("—");
-    expect(editor.element.querySelectorAll(".sheet-action")).toHaveLength(5);
+    expect(editor.element.querySelector(".sheet-actions")).toBeNull();
+    expect(editor.element.querySelector(".sheet-action")).toBeNull();
   });
 
   it("selects a cell on mousedown and shows its raw content", () => {
@@ -109,7 +110,6 @@ describe("createSheetEditor", () => {
     const { editor, ws, pageId, tableId, cell } = setup();
     ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 9 } });
     editor.selectCell(tableId, 0, 0);
-    query(editor.element, "[data-action=delete-row]");
     editor.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
     expect(cell(0, 0)).toBeUndefined();
   });
@@ -118,28 +118,214 @@ describe("createSheetEditor", () => {
     const { editor, ws, pageId, tableId, table } = setup();
     ws.dispatch("setCell", { pageId, tableId, col: 0, row: 1, cell: { value: "moved" } });
     editor.selectCell(tableId, 0, 1);
-    query(editor.element, "[data-action=add-row]")?.click();
+    editor.insertRow();
 
     expect(table().rowCount).toBe(5);
     expect(table().cells["0,2"]).toEqual({ value: "moved" });
 
-    query(editor.element, "[data-action=add-column]")?.click();
+    editor.insertColumn();
     expect(table().columnCount).toBe(4);
 
-    query(editor.element, "[data-action=delete-row]")?.click();
+    editor.deleteRow();
     expect(table().rowCount).toBe(4);
 
-    query(editor.element, "[data-action=delete-column]")?.click();
+    editor.deleteColumn();
     expect(table().columnCount).toBe(3);
   });
 
-  it("adds another table from the action bar", () => {
+  it("applies row and column operations to every line in a range", () => {
+    const { editor, tableId, table } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 1 });
+    editor.insertRow();
+    expect(table().rowCount).toBe(6);
+    editor.insertColumn();
+    expect(table().columnCount).toBe(5);
+  });
+
+  it("never deletes the last row or column", () => {
+    const { editor, tableId, table } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 2, row: 3 });
+    editor.deleteRow();
+    expect(table().rowCount).toBe(1);
+    editor.deleteColumn();
+    expect(table().columnCount).toBe(1);
+  });
+
+  it("adds another table", () => {
     const { editor, ws, pageId } = setup();
-    query(editor.element, "[data-action=add-table]")?.click();
+    editor.addTable();
     expect(ws.getPage(pageId).content.tableOrder).toHaveLength(2);
     expect(editor.element.querySelectorAll(".sheet-table")).toHaveLength(2);
   });
 
+  it("renames the selected table", () => {
+    const { editor, tableId, table } = setup();
+    expect(editor.selectedTableName()).toBeNull();
+    editor.selectCell(tableId, 0, 0);
+    expect(editor.selectedTableName()).toBe("Budget");
+    editor.renameSelectedTable("  Q1  ");
+    expect(table().name).toBe("Q1");
+    editor.renameSelectedTable("   ");
+    expect(table().name).toBe("Q1");
+  });
+
+  it("sizes the rows and columns of the selection", () => {
+    const { editor, tableId, table } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 1 });
+    editor.setSelectedRowHeight(48);
+    editor.setSelectedColumnWidth(150);
+    expect(table().rowOverrides["0"]).toBeTruthy();
+    expect(editor.selectedRowHeight()).toBe(48);
+    expect(editor.selectedColumnWidth()).toBe(150);
+    editor.setSelectedRowHeight(-5);
+    expect(editor.selectedRowHeight()).toBe(48);
+  });
+});
+
+const mouse = (/** @type {string} */ type, /** @type {object} */ init = {}) =>
+  new MouseEvent(type, { bubbles: true, ...init });
+
+describe("range selection", () => {
+  it("selects a range by dragging across cells", () => {
+    const { editor, tableId } = setup();
+    query(editor.element, '[data-key="0,0"]')?.dispatchEvent(mouse("mousedown"));
+    query(editor.element, '[data-key="1,1"]')?.dispatchEvent(mouse("mouseover"));
+    query(editor.element, '[data-key="2,2"]')?.dispatchEvent(mouse("mouseover"));
+    document.dispatchEvent(mouse("mouseup"));
+    query(editor.element, '[data-key="0,3"]')?.dispatchEvent(mouse("mouseover"));
+
+    expect(editor.getRange()).toEqual({
+      tableId,
+      start: { col: 0, row: 0 },
+      end: { col: 2, row: 2 }
+    });
+    // The active cell stays the anchor.
+    expect(editor.getSelection()).toEqual({ tableId, col: 0, row: 0 });
+    expect(editor.element.querySelectorAll(".sheet-cell.is-in-range").length).toBeGreaterThan(0);
+    expect(query(editor.element, '[data-key="0,0"]')?.classList.contains("is-selected")).toBe(true);
+    expect(query(editor.element, '[data-key="1,1"]')?.classList.contains("is-in-range")).toBe(true);
+  });
+
+  it("extends the range with shift-click", () => {
+    const { editor, tableId } = setup();
+    editor.selectCell(tableId, 1, 1);
+    query(editor.element, '[data-key="2,3"]')?.dispatchEvent(mouse("mousedown", { shiftKey: true }));
+    document.dispatchEvent(mouse("mouseup"));
+    expect(editor.getRange()).toEqual({
+      tableId,
+      start: { col: 1, row: 1 },
+      end: { col: 2, row: 3 }
+    });
+  });
+
+  it("normalises a range dragged up and to the left", () => {
+    const { editor, tableId } = setup();
+    editor.selectRange(tableId, { col: 2, row: 2 }, { col: 0, row: 1 });
+    expect(editor.getRange()).toEqual({
+      tableId,
+      start: { col: 0, row: 1 },
+      end: { col: 2, row: 2 }
+    });
+  });
+
+  it("extends with shift+arrow and collapses on a plain arrow", () => {
+    const { editor, tableId } = setup();
+    editor.selectCell(tableId, 0, 0);
+    editor.element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true }));
+    editor.element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", shiftKey: true, bubbles: true }));
+    expect(editor.getRange()).toEqual({ tableId, start: { col: 0, row: 0 }, end: { col: 1, row: 1 } });
+
+    editor.element.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const range = editor.getRange();
+    expect(range?.start).toEqual(range?.end);
+  });
+
+  it("clears every cell in the range on Delete", () => {
+    const { editor, ws, pageId, tableId, cell } = setup();
+    for (const [col, row] of [[0, 0], [1, 0], [1, 1], [2, 2]]) {
+      ws.dispatch("setCell", { pageId, tableId, col, row, cell: { value: 1 } });
+    }
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 1 });
+    editor.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    expect(cell(0, 0)).toBeUndefined();
+    expect(cell(1, 0)).toBeUndefined();
+    expect(cell(1, 1)).toBeUndefined();
+    expect(cell(2, 2)).toEqual({ value: 1 });
+  });
+
+  it("reports selection changes", () => {
+    const calls = [];
+    const { ws, pageId, tableId } = setup();
+    const editor = createSheetEditor(ws, pageId, { onSelectionChange: () => calls.push(1) });
+    const before = calls.length;
+    editor.selectCell(tableId, 1, 1);
+    expect(calls.length).toBeGreaterThan(before);
+    editor.destroy();
+  });
+});
+
+describe("merge and unmerge", () => {
+  it("cannot merge without a multi-cell range", () => {
+    const { editor, tableId, table } = setup();
+    expect(editor.canMerge()).toBe(false);
+    editor.selectCell(tableId, 0, 0);
+    expect(editor.canMerge()).toBe(false);
+    editor.mergeSelection();
+    expect(table().merges).toHaveLength(0);
+  });
+
+  it("merges the selected range and renders it as one spanning cell", () => {
+    const { editor, tableId, table } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 1 });
+    expect(editor.canMerge()).toBe(true);
+    expect(editor.canUnmerge()).toBe(false);
+    editor.mergeSelection();
+
+    expect(table().merges).toEqual([{ start: { col: 0, row: 0 }, end: { col: 1, row: 1 } }]);
+    const anchor = query(editor.element, '[data-key="0,0"]');
+    expect(anchor?.getAttribute("colspan")).toBe("2");
+    expect(anchor?.getAttribute("rowspan")).toBe("2");
+    expect(query(editor.element, '[data-key="1,1"]')).toBeNull();
+    expect(editor.canMerge()).toBe(false);
+    expect(editor.canUnmerge()).toBe(true);
+  });
+
+  it("highlights a merged cell as a unit when any of it is selected", () => {
+    const { editor, tableId } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 1 });
+    editor.mergeSelection();
+    editor.selectCell(tableId, 1, 1);
+    expect(query(editor.element, '[data-key="0,0"]')?.classList.contains("is-selected")).toBe(true);
+  });
+
+  it("unmerges every merge touched by the selection in one undo step", () => {
+    const { editor, ws, tableId, table } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 0 });
+    editor.mergeSelection();
+    editor.selectRange(tableId, { col: 0, row: 2 }, { col: 1, row: 2 });
+    editor.mergeSelection();
+    expect(table().merges).toHaveLength(2);
+
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 2 });
+    editor.unmergeSelection();
+    expect(table().merges).toHaveLength(0);
+
+    ws.undo();
+    expect(table().merges).toHaveLength(2);
+  });
+
+  it("refuses to merge over an existing merge", () => {
+    const { editor, tableId, table } = setup();
+    editor.selectRange(tableId, { col: 0, row: 0 }, { col: 1, row: 0 });
+    editor.mergeSelection();
+    editor.selectRange(tableId, { col: 1, row: 0 }, { col: 2, row: 1 });
+    expect(editor.canMerge()).toBe(false);
+    editor.mergeSelection();
+    expect(table().merges).toHaveLength(1);
+  });
+});
+
+describe("createSheetEditor lifecycle", () => {
   it("recomputes dependents after edits", () => {
     const { editor, tableId, ws, pageId } = setup();
     ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 4 } });

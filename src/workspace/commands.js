@@ -185,6 +185,11 @@ export const commands = {
       tx.pageIds.add(id);
     }
 
+    const favorites = store._data.settings?.favoritePageIds;
+    if (Array.isArray(favorites)) {
+      store._data.settings.favoritePageIds = favorites.filter((id) => !doomed.includes(id));
+    }
+
     const parentLists = [store._data.pageOrder.root, ...Object.values(store._data.pageOrder)];
     for (const list of parentLists) {
       if (Array.isArray(list)) {
@@ -269,6 +274,28 @@ export const commands = {
       throw new CommandError("title must be a string", "invalidTitle");
     }
     store._data.metadata.title = p.title;
+  },
+
+  /**
+   * Add or remove a page from the favorites list (settings.favoritePageIds).
+   * @param {Workspace} store
+   * @param {Transaction} _tx
+   * @param {{ pageId: string, favorite: boolean }} payload
+   */
+  setFavorite(store, _tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    isNonEmptyString(p.pageId, "pageId", "invalidPage", CommandError);
+    if (typeof p.favorite !== "boolean") {
+      throw new CommandError("favorite must be a boolean", "invalidFavorite");
+    }
+    if (!store._data.pages[p.pageId]) {
+      throw new CommandError(`page does not exist: ${p.pageId}`, "unknownPage");
+    }
+    const current = Array.isArray(store._data.settings.favoritePageIds)
+      ? store._data.settings.favoritePageIds
+      : [];
+    const without = current.filter((id) => id !== p.pageId);
+    store._data.settings.favoritePageIds = p.favorite ? [...without, p.pageId] : without;
   },
 
   /**

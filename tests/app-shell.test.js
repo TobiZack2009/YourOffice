@@ -29,13 +29,23 @@ function query(root, selector) {
 }
 
 describe("mountApp layout", () => {
-  it("renders sidebar, toolbar and canvas", () => {
+  it("renders sidebar, title strip, ribbon and canvas", () => {
     const { root } = setup();
     expect(query(root, ".sidebar")).toBeTruthy();
-    expect(query(root, ".toolbar")).toBeTruthy();
+    expect(query(root, ".title-strip")).toBeTruthy();
+    expect(query(root, ".ribbon")).toBeTruthy();
     expect(query(root, ".canvas")).toBeTruthy();
-    expect(root.querySelectorAll("[data-action=block-type]")).toHaveLength(8);
+    expect(root.querySelectorAll("[data-action=block-type]")).toHaveLength(7);
     expect(root.querySelectorAll("[data-action=mark]")).toHaveLength(5);
+  });
+
+  it("shows a breadcrumb of workspace, ancestors and page", () => {
+    const { ws, root, docPageId } = setup();
+    expect(query(root, ".breadcrumb")?.textContent).toBe("W/Doc");
+    ws.dispatch("createPage", { type: "document", title: "Child", parentId: docPageId });
+    const child = ws.getChildren(docPageId)[0];
+    /** @type {HTMLElement} */ (root.querySelector(`[data-page-id="${child}"] .page-title`)).click();
+    expect(query(root, ".breadcrumb")?.textContent).toBe("W/Doc/Child");
   });
 
   it("shows an empty state when there are no pages", () => {
@@ -71,7 +81,97 @@ describe("mountApp layout", () => {
   });
 });
 
-describe("toolbar actions", () => {
+describe("contextual ribbon", () => {
+  /** @param {HTMLElement} root @param {string} id */
+  function openPage(root, id) {
+    /** @type {HTMLElement} */ (root.querySelector(`.page-row[data-page-id="${id}"] .page-title`)).click();
+  }
+
+  const tabLabels = (/** @type {HTMLElement} */ root) =>
+    [...root.querySelectorAll(".ribbon-tab")].map((tab) => tab.textContent);
+
+  it("switches tabs and accent with the page type", () => {
+    const { ws, root } = setup();
+    expect(query(root, ".app")?.getAttribute("data-page-type")).toBe("document");
+    expect(tabLabels(root)).toEqual(["File", "Home", "Insert", "View"]);
+
+    ws.dispatch("createPage", { type: "sheet", title: "S" });
+    openPage(root, ws.getChildren(null).slice(-1)[0]);
+    expect(query(root, ".app")?.getAttribute("data-page-type")).toBe("sheet");
+    expect(query(root, '[data-action="merge"]')).toBeTruthy();
+    expect(query(root, '[data-action="block-type"]')).toBeNull();
+  });
+
+  it("shows the presentation tab set with disabled controls", () => {
+    const { ws, root } = setup();
+    ws.dispatch("createPage", { type: "presentation", title: "Deck" });
+    openPage(root, ws.getChildren(null).slice(-1)[0]);
+    expect(tabLabels(root)).toEqual(
+      ["File", "Home", "Insert", "Design", "Transitions", "Animations", "View"]
+    );
+    const disabled = root.querySelectorAll(".ribbon-panel .ribbon-button:disabled");
+    expect(disabled.length).toBeGreaterThan(0);
+    expect(/** @type {HTMLElement} */ (disabled[0]).title).toContain("Phase 5");
+  });
+
+  it("shows disabled embed seams on the document Insert tab", () => {
+    const { root } = setup();
+    query(root, '.ribbon-tab[data-tab="insert"]')?.click();
+    const embed = /** @type {HTMLButtonElement} */ (query(root, '[data-action="embed-sheet"]'));
+    expect(embed.disabled).toBe(true);
+    expect(embed.title).toContain("Phase 6");
+    expect(/** @type {HTMLButtonElement} */ (query(root, '[data-action="embed-slide"]')).disabled).toBe(true);
+  });
+
+  it("hides the sidebar and sets zoom from the View tab", () => {
+    const { root } = setup();
+    query(root, '.ribbon-tab[data-tab="view"]')?.click();
+    query(root, '[data-action="toggle-sidebar"]')?.click();
+    expect(query(root, ".app")?.classList.contains("sidebar-collapsed")).toBe(true);
+
+    const zoom = /** @type {HTMLSelectElement} */ (query(root, 'select[data-action="zoom"]'));
+    zoom.value = "125";
+    zoom.dispatchEvent(new Event("change"));
+    expect(query(root, ".canvas")?.style.getPropertyValue("--zoom")).toBe("1.25");
+  });
+
+  it("marks the workspace saved from the File tab", () => {
+    const { ws, root } = setup();
+    expect(ws.dirty).toBe(true);
+    query(root, '.ribbon-tab[data-tab="file"]')?.click();
+    query(root, '[data-action="save"]')?.click();
+    expect(ws.dirty).toBe(false);
+    expect(query(root, ".dirty-dot")?.classList.contains("is-dirty")).toBe(false);
+  });
+
+  it("exports the workspace as JSON from the File tab", () => {
+    const download = vi.fn();
+    const ws = Workspace.create({ title: "My Space" });
+    registerDocumentCommands(ws);
+    const root = document.createElement("div");
+    document.body.append(root);
+    mountApp(root, ws, { download });
+    query(root, '.ribbon-tab[data-tab="file"]')?.click();
+    query(root, '[data-action="export-json"]')?.click();
+    expect(download).toHaveBeenCalledTimes(1);
+    const [filename, text] = download.mock.calls[0];
+    expect(filename).toBe("my-space.yourOffice.json");
+    expect(JSON.parse(text).metadata.title).toBe("My Space");
+  });
+
+  it("renames the workspace from the File tab", () => {
+    const { ws, root } = setup();
+    query(root, '.ribbon-tab[data-tab="file"]')?.click();
+    query(root, '[data-action="rename-workspace"]')?.click();
+    const input = /** @type {HTMLInputElement} */ (query(root, '[data-role="workspace-name-input"]'));
+    input.value = "Renamed WS";
+    query(root, ".popover-apply")?.click();
+    expect(ws.title).toBe("Renamed WS");
+    expect(query(root, ".breadcrumb")?.textContent).toContain("Renamed WS");
+  });
+});
+
+describe("ribbon actions", () => {
   it("converts the active block to a heading", () => {
     const { root, app, ws, docPageId } = setup();
     app.getEditor()?.focusBlock(ws.getPage(docPageId).content.blockOrder[0], "end");
@@ -99,7 +199,7 @@ describe("toolbar actions", () => {
   it("inserts a divider from the insert menu", () => {
     const { root, app, ws, docPageId } = setup();
     configEditor(app, root, ws, docPageId);
-    query(root, '[data-action="insert"]')?.click();
+    query(root, '.ribbon-tab[data-tab="insert"]')?.click();
     query(root, '[data-action="insert-item"][data-insert="divider"]')?.click();
     const order = ws.getPage(docPageId).content.blockOrder;
     expect(order).toHaveLength(2);
@@ -144,11 +244,22 @@ function configEditor(app, root, ws, pageId) {
   app.getEditor()?.focusBlock(ws.getPage(pageId).content.blockOrder[0], "end");
 }
 
+/** @param {HTMLElement} root @param {string} type */
+function createViaPicker(root, type) {
+  /** @type {HTMLElement} */ (root.querySelector('[data-action="new-page"]')).click();
+  /** @type {HTMLElement} */ (root.querySelector(`.new-page[data-type="${type}"]`)).click();
+}
+
+/** @param {HTMLElement} root @param {string} pageId */
+function deleteViaMenu(root, pageId) {
+  /** @type {HTMLElement} */ (root.querySelector(`[data-page-id="${pageId}"] [data-action="page-menu"]`)).click();
+  /** @type {HTMLElement} */ (root.querySelector('.menu-item[data-action="delete"]')).click();
+}
+
 describe("sidebar integration", () => {
   it("creates a document page with a starter paragraph and selects it", () => {
     const { ws, root, app } = setup();
-    const buttons = root.querySelectorAll(".new-page");
-    /** @type {HTMLElement} */ (buttons[0]).click();
+    createViaPicker(root, "document");
 
     const pages = ws.getChildren(null);
     expect(pages).toHaveLength(2);
@@ -161,7 +272,7 @@ describe("sidebar integration", () => {
 
   it("creates sheet pages with a starter table and selects them", () => {
     const { ws, root, app } = setup();
-    /** @type {HTMLElement} */ (root.querySelectorAll(".new-page")[1]).click();
+    createViaPicker(root, "sheet");
     const created = ws.getChildren(null).slice(-1)[0];
     expect(ws.getPage(created)?.type).toBe("sheet");
     expect(app.getSelection()).toBe(created);
@@ -174,15 +285,47 @@ describe("sidebar integration", () => {
 
   it("deletes a page after confirmation and reselects", () => {
     const { ws, root, app, docPageId } = setup();
-    /** @type {HTMLElement} */ (root.querySelectorAll(".new-page")[0]).click();
+    createViaPicker(root, "document");
     const created = ws.getChildren(null).slice(-1)[0];
 
-    const remove = /** @type {HTMLElement} */ (
-      root.querySelector(`.page-row[data-page-id="${created}"] .page-delete`)
-    );
-    remove.click();
+    deleteViaMenu(root, created);
     expect(ws.getPage(created)).toBeUndefined();
     expect(app.getSelection()).toBe(docPageId);
+  });
+
+  it("creates a child page under a parent from the row +", () => {
+    const { ws, root, app, docPageId } = setup();
+    /** @type {HTMLElement} */ (root.querySelector(`[data-page-id="${docPageId}"] [data-action="add-child"]`)).click();
+    /** @type {HTMLElement} */ (root.querySelector('.new-page[data-type="sheet"]')).click();
+    const child = ws.getChildren(docPageId)[0];
+    expect(ws.getPage(child)?.type).toBe("sheet");
+    expect(ws.getChildren(null)).toEqual([docPageId]);
+    expect(app.getSelection()).toBe(child);
+  });
+
+  it("favorites a page through the row menu and lists it", () => {
+    const { ws, root, docPageId } = setup();
+    /** @type {HTMLElement} */ (root.querySelector(`[data-page-id="${docPageId}"] [data-action="page-menu"]`)).click();
+    /** @type {HTMLElement} */ (root.querySelector('.menu-item[data-action="favorite"]')).click();
+    expect(ws.getFavorites()).toEqual([docPageId]);
+    expect(root.querySelector(`[data-favorite-id="${docPageId}"]`)).toBeTruthy();
+  });
+
+  it("opens quick find with Cmd+K and opens the chosen page", () => {
+    const { ws, root, app, docPageId } = setup();
+    ws.dispatch("createPage", { type: "sheet", title: "Budget" });
+    const sheetId = ws.getChildren(null).slice(-1)[0];
+    expect(app.getSelection()).toBe(docPageId);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+    const input = /** @type {HTMLInputElement} */ (query(root, ".quick-find-input"));
+    expect(input).toBeTruthy();
+    input.value = "budg";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(query(root, ".quick-find-backdrop")).toBeNull();
+    expect(app.getSelection()).toBe(sheetId);
+    expect(query(root, ".sheet-editor")).toBeTruthy();
   });
 
   it("renames a page and updates the header", () => {
@@ -225,7 +368,7 @@ describe("lifecycle", () => {
     const root = document.createElement("div");
     document.body.append(root);
     mountApp(root, ws, { confirm });
-    /** @type {HTMLElement} */ (root.querySelector(".page-delete")).click();
+    deleteViaMenu(root, pageId);
     expect(confirm).toHaveBeenCalled();
     expect(ws.getPage(pageId)).toBeTruthy();
   });

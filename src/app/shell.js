@@ -1,16 +1,21 @@
 /**
- * Application shell: sidebar + toolbar + canvas, wired to a workspace.
+ * Application shell: sidebar + title strip + ribbon + canvas, wired to a workspace.
  *
  * The shell owns page selection and the active editor instance; every mutation
- * flows through workspace commands. Sheet and presentation pages render a
- * placeholder until their phases land (Phase 4 / Phase 5).
+ * flows through workspace commands. The ribbon is contextual: its tabs follow the
+ * open page's type (see ribbon-tabs.js). Presentation pages render a placeholder
+ * until Phase 5.
  */
 
 import { registerDocumentCommands } from "../document/commands.js";
 import { registerSheetCommands } from "../sheet/commands.js";
+import { exportWorkspaceJSON, importWorkspaceJSON } from "../workspace/format.js";
 import { createSidebar } from "./sidebar.js";
 import { createDocumentEditor } from "./block-editor.js";
 import { createSheetEditor } from "./sheet-editor.js";
+import { createRibbon } from "./ribbon.js";
+import { createQuickFind } from "./quick-find.js";
+import { icon } from "./icons.js";
 import { clear, h } from "./dom.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
@@ -21,286 +26,176 @@ const REGISTRY_COMMANDS = new Set([
   "renamePage",
   "deletePage",
   "movePage",
-  "renameWorkspace"
+  "renameWorkspace",
+  "setFavorite"
 ]);
 
-const BLOCK_BUTTONS = [
-  { type: "paragraph", label: "Paragraph", glyph: "¶" },
-  { type: "heading", level: 1, label: "Heading 1", glyph: "H1" },
-  { type: "heading", level: 2, label: "Heading 2", glyph: "H2" },
-  { type: "heading", level: 3, label: "Heading 3", glyph: "H3" },
-  { type: "list", label: "List", glyph: "•" },
-  { type: "quote", label: "Quote", glyph: "❝" },
-  { type: "code", label: "Code block", glyph: "</>" },
-  { type: "divider", label: "Divider", glyph: "—" }
-];
+const ZOOM_LEVELS = [75, 100, 125, 150];
 
-const MARK_BUTTONS = [
-  { mark: "bold", label: "Bold", glyph: "B", style: "font-weight:700" },
-  { mark: "italic", label: "Italic", glyph: "I", style: "font-style:italic" },
-  { mark: "underline", label: "Underline", glyph: "U", style: "text-decoration:underline" },
-  { mark: "strike", label: "Strikethrough", glyph: "S", style: "text-decoration:line-through" },
-  { mark: "code", label: "Inline code", glyph: "‹›", style: "font-family:ui-monospace,monospace" }
-];
+/**
+ * Download `text` as a file in the browser.
+ * @param {string} filename
+ * @param {string} text
+ */
+function browserDownload(filename, text) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = h("a", { href: url, download: filename });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
-const INSERT_ITEMS = [
-  { key: "paragraph", label: "Paragraph", block: { type: "paragraph" } },
-  { key: "heading", label: "Heading 1", block: { type: "heading", level: 1 } },
-  { key: "list", label: "List", block: { type: "list" } },
-  { key: "quote", label: "Quote", block: { type: "quote" } },
-  { key: "code", label: "Code block", block: { type: "code" } },
-  { key: "divider", label: "Divider", block: { type: "divider" } }
-];
+/** @param {string} title */
+function fileStem(title) {
+  const stem = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return stem || "workspace";
+}
 
 /**
  * Mount the full application UI.
  * @param {HTMLElement} root
  * @param {Workspace} workspace
- * @param {{ confirm?: (message: string) => boolean }} [options]
- * @returns {{ destroy: () => void, select: (pageId: string) => void }}
+ * @param {{
+ *   confirm?: (message: string) => boolean,
+ *   download?: (filename: string, text: string) => void,
+ *   onImport?: (workspace: Workspace) => void,
+ *   onImportError?: (error: Error) => void
+ * }} [options]
  */
 export function mountApp(root, workspace, options = {}) {
   if (!workspace.hasCommand("insertBlock")) registerDocumentCommands(workspace);
   if (!workspace.hasCommand("createTable")) registerSheetCommands(workspace);
 
-  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null }} */
-  const state = { selectedPageId: null, editor: null, sheetEditor: null };
+  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, zoom: number }} */
+  const state = { selectedPageId: null, editor: null, sheetEditor: null, zoom: 100 };
 
   clear(root);
-  const shell = h("div", { class: "app" });
+  const shell = h("div", { class: "app", "data-page-type": "none" });
   const main = h("main", { class: "main" });
-  const toolbar = h("header", { class: "toolbar" });
   const canvas = h("div", { class: "canvas" });
-  const { element: sidebarElement, refresh: refreshSidebar, select: selectSidebar, selection } =
-    createSidebar(workspace, sidebarActions());
-  main.append(toolbar, canvas);
-  shell.append(sidebarElement, main);
-  root.append(shell);
+  canvas.style.setProperty("--zoom", "1");
 
-  // -- toolbar -----------------------------------------------------------------
+  // -- title strip -------------------------------------------------------------
 
-  const blockButtons = new Map();
-  const typeGroup = h("div", { class: "toolbar-group" });
-  for (const spec of BLOCK_BUTTONS) {
-    const button = h("button", {
-      class: "toolbar-button block-button",
-      type: "button",
-      title: spec.label,
-      "aria-label": spec.label,
-      "data-action": "block-type",
-      "data-type": spec.type,
-      "data-level": spec.level ?? ""
-    });
-    button.append(h("span", { class: "glyph", text: spec.glyph }));
-    button.addEventListener("click", () => {
-      state.editor?.setActiveType({ type: spec.type, level: spec.level });
-      updateToolbar();
-    });
-    blockButtons.set(spec.level ? `${spec.type}:${spec.level}` : spec.type, button);
-    typeGroup.append(button);
-  }
-
-  const markGroup = h("div", { class: "toolbar-group" });
-  for (const spec of MARK_BUTTONS) {
-    const button = h("button", {
-      class: "toolbar-button mark-button",
-      type: "button",
-      title: spec.label,
-      "aria-label": spec.label,
-      "data-action": "mark",
-      "data-mark": spec.mark,
-      style: spec.style
-    });
-    button.append(h("span", { class: "glyph", text: spec.glyph }));
-    button.addEventListener("click", () => state.editor?.toggleMark(/** @type {any} */ (spec.mark)));
-    markGroup.append(button);
-  }
-
-  const linkButton = h("button", {
-    class: "toolbar-button link-button",
-    type: "button",
-    title: "Link",
-    "aria-label": "Link",
-    "data-action": "link"
-  });
-  linkButton.append(h("span", { class: "glyph", text: "↗" }));
-  markGroup.append(linkButton);
-
-  const insertGroup = h("div", { class: "toolbar-group" });
-  const insertButton = h("button", {
-    class: "toolbar-button insert-button",
-    type: "button",
-    "data-action": "insert",
-    title: "Insert a block",
-    "aria-label": "Insert a block"
-  });
-  insertButton.append(h("span", { class: "glyph", text: "+" }), h("span", { text: "Insert" }));
-  insertGroup.append(insertButton);
-
-  const historyGroup = h("div", { class: "toolbar-group toolbar-group-end" });
+  const breadcrumb = h("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" });
   const undoButton = h("button", {
-    class: "toolbar-button",
+    class: "title-button",
     type: "button",
     "data-action": "undo",
     title: "Undo",
     "aria-label": "Undo"
-  });
-  undoButton.append(h("span", { class: "glyph", text: "↶" }));
+  }, [icon("undo", { size: 16 })]);
   const redoButton = h("button", {
-    class: "toolbar-button",
+    class: "title-button",
     type: "button",
     "data-action": "redo",
     title: "Redo",
     "aria-label": "Redo"
-  });
-  redoButton.append(h("span", { class: "glyph", text: "↷" }));
+  }, [icon("redo", { size: 16 })]);
   const dirtyDot = h("span", { class: "dirty-dot", title: "Unsaved changes", "aria-hidden": "true" });
-  historyGroup.append(undoButton, redoButton, dirtyDot);
-
-  toolbar.append(typeGroup, h("div", { class: "toolbar-sep" }), markGroup, h("div", { class: "toolbar-sep" }), insertGroup, historyGroup);
-
-  // Keep the editor selection when a toolbar button is pressed.
-  toolbar.addEventListener("mousedown", (event) => {
-    const target = /** @type {HTMLElement} */ (event.target);
-    if (target.closest("button")) event.preventDefault();
+  const titleStrip = h("header", { class: "title-strip" }, [
+    breadcrumb,
+    h("div", { class: "title-strip-end" }, [undoButton, redoButton, dirtyDot])
+  ]);
+  titleStrip.addEventListener("mousedown", (event) => {
+    if (/** @type {HTMLElement} */ (event.target).closest("button")) event.preventDefault();
   });
+  undoButton.addEventListener("click", () => shellApi.undo());
+  redoButton.addEventListener("click", () => shellApi.redo());
 
-  undoButton.addEventListener("click", () => {
-    workspace.undo();
-    renderMain();
-  });
-  redoButton.addEventListener("click", () => {
-    workspace.redo();
-    renderMain();
-  });
-  linkButton.addEventListener("click", openLinkPopover);
-  insertButton.addEventListener("click", openInsertMenu);
+  // -- ribbon -------------------------------------------------------------------
 
-  let openPopover = null;
-
-  /** @returns {Range | null} */
-  function currentRange() {
-    const selection = document.getSelection();
-    return selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
-  }
-
-  /** @param {Range | null} range */
-  function restoreRange(range) {
-    if (!range) return;
-    const selection = document.getSelection();
-    if (!selection) return;
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-
-  function closePopover() {
-    if (openPopover) {
-      openPopover.remove();
-      openPopover = null;
+  /** @type {import("./ribbon-tabs.js").ShellApi} */
+  const shellApi = {
+    undo() {
+      workspace.undo();
+      renderMain();
+    },
+    redo() {
+      workspace.redo();
+      renderMain();
+    },
+    save() {
+      workspace.markSaved();
+      updateChrome();
+    },
+    exportJSON() {
+      const text = exportWorkspaceJSON(workspace);
+      (options.download ?? browserDownload)(`${fileStem(workspace.title)}.yourOffice.json`, text);
+      workspace.markSaved();
+      updateChrome();
+    },
+    pickImport() {
+      fileInput.value = "";
+      fileInput.click();
+    },
+    renameWorkspace(title) {
+      workspace.dispatch("renameWorkspace", { title });
+      updateChrome();
+    },
+    getZoom: () => state.zoom,
+    setZoom(percent) {
+      if (!ZOOM_LEVELS.includes(percent)) return;
+      state.zoom = percent;
+      canvas.style.setProperty("--zoom", String(percent / 100));
+      canvas.setAttribute("data-zoom", String(percent));
+      ribbon.update();
+    },
+    isSidebarCollapsed: () => shell.classList.contains("sidebar-collapsed"),
+    toggleSidebar() {
+      shell.classList.toggle("sidebar-collapsed");
+      ribbon.update();
     }
+  };
+
+  function getContext() {
+    return {
+      workspace,
+      page: state.selectedPageId ? workspace.getPage(state.selectedPageId) : undefined,
+      docEditor: state.editor,
+      sheetEditor: state.sheetEditor,
+      shell: shellApi
+    };
   }
 
-  /**
-   * @param {HTMLElement} anchor
-   * @param {HTMLElement} content
-   * @param {boolean} [keepFocus]
-   */
-  function showPopover(anchor, content, keepFocus = false) {
-    closePopover();
-    const popover = h("div", { class: "popover" }, [content]);
-    toolbar.append(popover);
-    const anchorRect = anchor.getBoundingClientRect();
-    const toolbarRect = toolbar.getBoundingClientRect();
-    popover.style.left = `${Math.max(0, anchorRect.left - toolbarRect.left)}px`;
-    popover.style.top = `${anchorRect.bottom - toolbarRect.top + 6}px`;
-    openPopover = popover;
-    if (keepFocus) {
-      const field = /** @type {HTMLInputElement | null} */ (popover.querySelector("input"));
-      field?.focus();
-    }
-    return popover;
-  }
+  const ribbon = createRibbon(getContext);
 
-  function openLinkPopover() {
-    const savedRange = currentRange();
-    const input = h("input", {
-      class: "popover-input",
-      type: "url",
-      placeholder: "https://…",
-      "aria-label": "Link URL",
-      "data-role": "link-input"
-    });
-    const apply = h("button", { class: "popover-apply", type: "button", text: "Apply" });
-    const remove = h("button", { class: "popover-remove", type: "button", text: "Remove" });
-    const footer = h("div", { class: "popover-row" }, [apply, remove]);
-    const content = h("div", { class: "popover-body" }, [input, footer]);
-
-    apply.addEventListener("click", () => {
-      const value = input.value.trim();
-      if (value) {
-        restoreRange(savedRange);
-        state.editor?.setLink(value);
+  // Hidden file input behind File > Import.
+  const fileInput = /** @type {HTMLInputElement} */ (
+    h("input", { type: "file", accept: ".json,application/json", class: "visually-hidden", "data-role": "import-file", tabindex: "-1" })
+  );
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const imported = importWorkspaceJSON(String(reader.result ?? ""));
+        options.onImport?.(imported);
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (options.onImportError) options.onImportError(failure);
+        else if (typeof window !== "undefined" && window.alert) window.alert(`Import failed: ${failure.message}`);
       }
-      closePopover();
-    });
-    remove.addEventListener("click", () => {
-      restoreRange(savedRange);
-      state.editor?.setLink("");
-      closePopover();
-    });
-    input.addEventListener("keydown", (event) => {
-      const keyboard = /** @type {KeyboardEvent} */ (event);
-      if (keyboard.key === "Enter") {
-        keyboard.preventDefault();
-        apply.click();
-      } else if (keyboard.key === "Escape") {
-        closePopover();
-      }
-    });
+    };
+    reader.readAsText(file);
+  });
 
-    showPopover(linkButton, content, true);
-  }
+  const { element: sidebarElement, refresh: refreshSidebar, select: selectSidebar, selection } =
+    createSidebar(workspace, sidebarActions());
 
-  function openInsertMenu() {
-    const list = h("div", { class: "menu" });
-    for (const item of INSERT_ITEMS) {
-      const button = h("button", {
-        class: "menu-item",
-        type: "button",
-        text: item.label,
-        "data-action": "insert-item",
-        "data-insert": item.key
-      });
-      button.addEventListener("click", () => {
-        state.editor?.insertAfterActive(item.block);
-        closePopover();
-        updateToolbar();
-      });
-      list.append(button);
+  main.append(titleStrip, ribbon.element, canvas);
+  shell.append(sidebarElement, main, fileInput);
+  root.append(shell);
+
+  const quickFind = createQuickFind(workspace, {
+    container: shell,
+    onSelect: (pageId) => {
+      selectSidebar(pageId);
     }
-
-    const pageIds = workspace.getPages().map((page) => page.id).filter((id) => id !== state.selectedPageId);
-    const linkList = h("div", { class: "menu-section" }, [
-      h("div", { class: "menu-label", text: pageIds.length ? "Page link" : "No other pages" })
-    ]);
-    for (const pageId of pageIds) {
-      const page = workspace.getPage(pageId);
-      const button = h("button", {
-        class: "menu-item",
-        type: "button",
-        text: page?.title || "Untitled",
-        "data-action": "insert-page-link",
-        "data-page-id": pageId
-      });
-      button.addEventListener("click", () => {
-        state.editor?.insertAfterActive({ type: "pageLink", pageId });
-        closePopover();
-      });
-      linkList.append(button);
-    }
-
-    showPopover(insertButton, h("div", { class: "menu-body" }, [list, linkList]));
-  }
+  });
 
   // -- main canvas --------------------------------------------------------------
 
@@ -318,11 +213,12 @@ export function mountApp(root, workspace, options = {}) {
     state.editor = null;
     state.sheetEditor?.destroy();
     state.sheetEditor = null;
-    closePopover();
     clear(canvas);
 
     const pageId = state.selectedPageId;
     const page = pageId ? workspace.getPage(pageId) : undefined;
+    shell.setAttribute("data-page-type", page?.type ?? "none");
+    ribbon.setPage(page?.type ?? null);
 
     if (!page) {
       canvas.append(
@@ -331,7 +227,7 @@ export function mountApp(root, workspace, options = {}) {
           h("p", { text: "Create a page from the sidebar to get started." })
         ])
       );
-      updateToolbar();
+      updateChrome();
       return;
     }
 
@@ -360,19 +256,22 @@ export function mountApp(root, workspace, options = {}) {
     if (page.type === "document") {
       const editor = createDocumentEditor(workspace, page.id, {
         resolvePageTitle: (id) => workspace.getPage(id)?.title,
-        onActiveChange: () => updateToolbar()
+        onActiveChange: () => updateChrome()
       });
       state.editor = editor;
       canvas.append(pageHeader, h("div", { class: "page-body" }, [editor.element]));
     } else if (page.type === "sheet") {
-      const sheetEditor = createSheetEditor(workspace, page.id, { onChange: () => updateToolbar() });
+      const sheetEditor = createSheetEditor(workspace, page.id, {
+        onChange: () => updateChrome(),
+        onSelectionChange: () => ribbon.update()
+      });
       state.sheetEditor = sheetEditor;
       canvas.append(pageHeader, sheetEditor.element);
     } else {
       canvas.append(pageHeader, renderStub(page.type));
     }
 
-    updateToolbar();
+    updateChrome();
   }
 
   /**
@@ -390,24 +289,35 @@ export function mountApp(root, workspace, options = {}) {
     ]);
   }
 
-  function updateToolbar() {
-    const info = state.editor?.activeInfo?.() ?? null;
-    const disabled = !state.editor;
-    for (const [key, button] of blockButtons) {
-      const active =
-        info &&
-        ((key === info.type && !key.includes(":")) ||
-          (key === `${info.type}:${info.level}` && info.type === "heading"));
-      button.classList.toggle("is-active", Boolean(active));
-      button.disabled = disabled;
+  function renderBreadcrumb() {
+    clear(breadcrumb);
+    /** @type {string[]} */
+    const trail = [workspace.title || "Workspace"];
+    const pageId = state.selectedPageId;
+    if (pageId && workspace.getPage(pageId)) {
+      /** @type {string[]} */
+      const ancestors = [];
+      let parent = workspace.getParent(pageId);
+      while (parent) {
+        ancestors.unshift(workspace.getPage(parent)?.title || "Untitled");
+        parent = workspace.getParent(parent);
+      }
+      trail.push(...ancestors, workspace.getPage(pageId)?.title || "Untitled");
     }
-    for (const button of markGroup.querySelectorAll("button")) {
-      button.disabled = disabled;
-    }
-    insertButton.disabled = disabled;
+    trail.forEach((label, index) => {
+      if (index > 0) breadcrumb.append(h("span", { class: "breadcrumb-sep", text: "/", "aria-hidden": "true" }));
+      const last = index === trail.length - 1;
+      breadcrumb.append(h("span", { class: `breadcrumb-item${last ? " is-current" : ""}`, text: label }));
+    });
+  }
+
+  /** Refresh everything derived from workspace/editor state: strip, dirty dot, ribbon. */
+  function updateChrome() {
+    renderBreadcrumb();
     undoButton.disabled = !workspace.canUndo;
     redoButton.disabled = !workspace.canRedo;
     dirtyDot.classList.toggle("is-dirty", workspace.dirty);
+    ribbon.update();
   }
 
   // -- sidebar actions ----------------------------------------------------------
@@ -419,11 +329,14 @@ export function mountApp(root, workspace, options = {}) {
         state.selectedPageId = pageId;
         renderMain();
       },
-      /** @param {PageType} type */
-      create(type) {
+      /**
+       * @param {PageType} type
+       * @param {string | null} [parentId]
+       */
+      create(type, parentId = null) {
         workspace.transact(`create ${type}`, () => {
-          workspace.dispatch("createPage", { type, title: defaultTitle(type) });
-          const created = workspace.getChildren(null).slice(-1)[0];
+          workspace.dispatch("createPage", { type, title: defaultTitle(type), parentId });
+          const created = workspace.getChildren(parentId).slice(-1)[0];
           if (type === "document" && created) {
             workspace.dispatch("insertBlock", {
               pageId: created,
@@ -441,7 +354,7 @@ export function mountApp(root, workspace, options = {}) {
             });
           }
         });
-        const created = workspace.getChildren(null).slice(-1)[0];
+        const created = workspace.getChildren(parentId).slice(-1)[0];
         if (created) {
           state.selectedPageId = created;
           refreshSidebar();
@@ -454,7 +367,7 @@ export function mountApp(root, workspace, options = {}) {
       /** @param {string} pageId @param {string} title */
       rename(pageId, title) {
         workspace.dispatch("renamePage", { pageId, title });
-        updateToolbar();
+        updateChrome();
       },
       /** @param {string} pageId */
       remove(pageId) {
@@ -484,8 +397,15 @@ export function mountApp(root, workspace, options = {}) {
       },
       /** @param {string} title */
       renameWorkspace(title) {
-        workspace.dispatch("renameWorkspace", { title });
-        updateToolbar();
+        shellApi.renameWorkspace(title);
+      },
+      /** @param {string} pageId @param {boolean} favorite */
+      favorite(pageId, favorite) {
+        workspace.dispatch("setFavorite", { pageId, favorite });
+        refreshSidebar();
+      },
+      openQuickFind() {
+        quickFind.open();
       }
     };
   }
@@ -520,7 +440,7 @@ export function mountApp(root, workspace, options = {}) {
     if (commands.some((c) => REGISTRY_COMMANDS.has(c))) {
       refreshSidebar();
     }
-    updateToolbar();
+    updateChrome();
   });
 
   /** @param {KeyboardEvent} event */
@@ -528,18 +448,18 @@ export function mountApp(root, workspace, options = {}) {
     const mod = event.metaKey || event.ctrlKey;
     if (!mod) return;
     const key = event.key.toLowerCase();
-    if (key === "z" && !event.shiftKey) {
+    if (key === "k") {
       event.preventDefault();
-      workspace.undo();
-      renderMain();
+      quickFind.open();
+    } else if (key === "z" && !event.shiftKey) {
+      event.preventDefault();
+      shellApi.undo();
     } else if ((key === "z" && event.shiftKey) || key === "y") {
       event.preventDefault();
-      workspace.redo();
-      renderMain();
+      shellApi.redo();
     } else if (key === "s") {
       event.preventDefault();
-      workspace.markSaved();
-      updateToolbar();
+      shellApi.save();
     }
   }
 
@@ -555,6 +475,8 @@ export function mountApp(root, workspace, options = {}) {
     destroy() {
       unsubscribeChange();
       document.removeEventListener("keydown", onGlobalKeydown);
+      quickFind.destroy();
+      ribbon.destroy();
       state.editor?.destroy();
       state.editor = null;
       state.sheetEditor?.destroy();
@@ -570,6 +492,7 @@ export function mountApp(root, workspace, options = {}) {
     /** @returns {import("./sheet-editor.js").SheetEditorHandle | null} */
     getSheetEditor: () => state.sheetEditor,
     /** @returns {string | null} */
-    getSelection: () => selection()
+    getSelection: () => selection(),
+    openQuickFind: () => quickFind.open()
   };
 }

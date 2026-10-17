@@ -1,21 +1,23 @@
 /**
  * Page sidebar: the workspace hierarchy.
  *
- * Renders the nested page tree, lets the user create/rename/delete pages, and
- * supports drag-and-drop reordering and nesting. All mutations go through the
+ * Renders the nested page tree, lets the user create/rename/delete/favorite pages,
+ * and supports drag-and-drop reordering and nesting. All mutations go through the
  * workspace command layer via the `actions` callbacks; the sidebar holds only
- * transient UI state (selection, inline-rename target, drag source).
+ * transient UI state (selection, inline-rename target, drag source, which parents
+ * are collapsed).
  *
  * `planDrop` is pure so the drop rules (including cycle prevention) are testable
  * without simulating drag events.
  */
 
 import { h, clear } from "./dom.js";
+import { icon } from "./icons.js";
+import { buildMenu, createPopoverHost } from "./popover.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../workspace/schema.js").PageType} PageType */
 
-const TYPE_GLYPH = { document: "¶", sheet: "▦", presentation: "▭" };
 const TYPE_LABEL = { document: "Document", sheet: "Sheet", presentation: "Presentation" };
 
 /**
@@ -81,12 +83,16 @@ export function planDrop(workspace, dragId, target) {
 /**
  * @typedef {object} SidebarActions
  * @property {(pageId: string) => void} select
- * @property {(type: PageType) => void} create
+ * @property {(type: PageType, parentId?: string) => void} create Creates a top-level page, or a child of `parentId`.
  * @property {(pageId: string, title: string) => void} rename
  * @property {(pageId: string) => void} remove
  * @property {(pageId: string, move: { newParentId: string | null, index: number }) => void} move
  * @property {(title: string) => void} renameWorkspace
+ * @property {(pageId: string, favorite: boolean) => void} [favorite]
+ * @property {() => void} [openQuickFind]
  */
+
+const PAGE_TYPES = /** @type {PageType[]} */ (["document", "sheet", "presentation"]);
 
 /**
  * Create the sidebar component.
@@ -96,17 +102,33 @@ export function planDrop(workspace, dragId, target) {
  */
 export function createSidebar(workspace, actions) {
   const element = h("aside", { class: "sidebar" });
-  /** @type {{ selectedPageId: string | null, editingPageId: string | null, editingTitle: boolean, draggingPageId: string | null }} */
+  // Re-rendered on every refresh; popovers live beside it so a refresh never orphans one.
+  const content = h("div", { class: "sidebar-content" });
+  element.append(content);
+  const popovers = createPopoverHost(element);
+
+  /** @type {{ selectedPageId: string | null, editingPageId: string | null, editingTitle: boolean, draggingPageId: string | null, collapsed: Set<string> }} */
   const state = {
     selectedPageId: null,
     editingPageId: null,
     editingTitle: false,
-    draggingPageId: null
+    draggingPageId: null,
+    collapsed: new Set()
   };
+
+  /** Expand every ancestor of a page so its row is visible. */
+  function reveal(pageId) {
+    let parent = workspace.getParent(pageId);
+    while (parent) {
+      state.collapsed.delete(parent);
+      parent = workspace.getParent(parent);
+    }
+  }
 
   /** @param {string} pageId */
   function select(pageId) {
     state.selectedPageId = pageId;
+    reveal(pageId);
     actions.select(pageId);
     refresh();
   }
@@ -131,6 +153,94 @@ export function createSidebar(workspace, actions) {
   }
 
   /**
+   * The "New page" type picker: header "+" (top level) and row "+" (child page).
+   * @param {HTMLElement} anchor
+   * @param {string} [parentId]
+   */
+  function openTypePicker(anchor, parentId) {
+    const close = () => popovers.close();
+    const body = buildMenu(
+      [
+        { heading: parentId ? "New subpage" : "New page" },
+        ...PAGE_TYPES.map((type) => ({
+          label: TYPE_LABEL[type],
+          icon: `page-${type}`,
+          className: "new-page",
+          attrs: { "data-type": type },
+          action: () => (parentId ? actions.create(type, parentId) : actions.create(type))
+        }))
+      ],
+      close,
+      (name) => icon(name, { size: 16 })
+    );
+    popovers.show(anchor, body);
+  }
+
+  /**
+   * The row "..." menu.
+   * @param {HTMLElement} anchor
+   * @param {string} pageId
+   */
+  function openPageMenu(anchor, pageId) {
+    const favorite = workspace.getFavorites().includes(pageId);
+    const body = buildMenu(
+      [
+        { label: "Rename", icon: "rename", attrs: { "data-action": "rename" }, action: () => startRename(pageId) },
+        {
+          label: favorite ? "Remove from favorites" : "Add to favorites",
+          icon: "star",
+          attrs: { "data-action": "favorite" },
+          action: () => actions.favorite?.(pageId, !favorite)
+        },
+        { separator: true },
+        {
+          label: "Delete",
+          icon: "trash",
+          danger: true,
+          attrs: { "data-action": "delete" },
+          action: () => actions.remove(pageId)
+        }
+      ],
+      () => popovers.close(),
+      (name) => icon(name, { size: 16 })
+    );
+    popovers.show(anchor, body);
+  }
+
+  /**
+   * @param {string} label
+   * @param {string} iconName
+   * @param {string} action
+   * @param {(button: HTMLElement) => void} handler
+   */
+  function rowButton(label, iconName, action, handler) {
+    const button = h("button", {
+      class: `row-button row-${action}`,
+      type: "button",
+      title: label,
+      "aria-label": label,
+      "data-action": action
+    });
+    button.append(icon(iconName, { size: 15 }));
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handler(button);
+    });
+    return button;
+  }
+
+  /**
+   * @param {string} type
+   * @returns {HTMLElement}
+   */
+  function typeGlyph(type) {
+    const glyph = h("span", { class: `type-glyph type-${type}`, title: TYPE_LABEL[type] ?? type }, [
+      icon(`page-${type}`, { size: 16 })
+    ]);
+    return glyph;
+  }
+
+  /**
    * @param {string} pageId
    * @param {number} depth
    * @returns {HTMLElement}
@@ -146,9 +256,29 @@ export function createSidebar(workspace, actions) {
       style: `--depth:${depth}`
     });
 
-    const glyph = h("span", { class: `type-glyph type-${page.type}`, text: TYPE_GLYPH[page.type] ?? "•" });
-    glyph.setAttribute("title", TYPE_LABEL[page.type] ?? page.type);
-    row.append(glyph);
+    const childIds = workspace.getChildren(pageId);
+    const collapsed = state.collapsed.has(pageId);
+    if (childIds.length > 0) {
+      const caret = h("button", {
+        class: `page-caret${collapsed ? "" : " is-open"}`,
+        type: "button",
+        "aria-label": collapsed ? "Expand" : "Collapse",
+        "aria-expanded": collapsed ? "false" : "true",
+        "data-action": "toggle-children"
+      });
+      caret.append(icon("chevron", { size: 13 }));
+      caret.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (state.collapsed.has(pageId)) state.collapsed.delete(pageId);
+        else state.collapsed.add(pageId);
+        refresh();
+      });
+      row.append(caret);
+    } else {
+      row.append(h("span", { class: "page-caret-spacer", "aria-hidden": "true" }));
+    }
+
+    row.append(typeGlyph(page.type));
 
     if (state.editingPageId === pageId) {
       const input = h("input", {
@@ -182,17 +312,16 @@ export function createSidebar(workspace, actions) {
       row.append(title);
     }
 
-    const remove = h("button", {
-      class: "page-delete",
-      type: "button",
-      text: "×",
-      "aria-label": `Delete ${page.title || "page"}`
-    });
-    remove.addEventListener("click", (event) => {
-      event.stopPropagation();
-      actions.remove(pageId);
-    });
-    row.append(remove);
+    row.append(
+      h("span", { class: "page-actions" }, [
+        rowButton(`Add a page inside ${page.title || "this page"}`, "plus", "add-child", (button) =>
+          openTypePicker(button, pageId)
+        ),
+        rowButton(`Actions for ${page.title || "this page"}`, "more", "page-menu", (button) =>
+          openPageMenu(button, pageId)
+        )
+      ])
+    );
 
     // Drag and drop wiring.
     row.addEventListener("dragstart", (event) => {
@@ -232,11 +361,35 @@ export function createSidebar(workspace, actions) {
 
     /** @type {HTMLElement[]} */
     const children = [];
-    for (const childId of workspace.getChildren(pageId)) {
-      children.push(renderRow(childId, depth + 1));
+    if (!collapsed) {
+      for (const childId of childIds) children.push(renderRow(childId, depth + 1));
     }
 
     return h("div", { class: "page-node" }, [row, ...children]);
+  }
+
+  /** @param {string} pageId */
+  function renderFavorite(pageId) {
+    const page = workspace.getPage(pageId);
+    if (!page) return null;
+    const row = h("div", {
+      class: `favorite-row${state.selectedPageId === pageId ? " is-selected" : ""}`,
+      "data-favorite-id": pageId
+    });
+    row.append(typeGlyph(page.type));
+    const title = h("button", { class: "favorite-title", type: "button", text: page.title || "Untitled" });
+    title.addEventListener("click", () => {
+      if (state.selectedPageId !== pageId) select(pageId);
+    });
+    row.append(title);
+    row.append(
+      h("span", { class: "page-actions" }, [
+        rowButton(`Remove ${page.title || "page"} from favorites`, "star", "unfavorite", () =>
+          actions.favorite?.(pageId, false)
+        )
+      ])
+    );
+    return row;
   }
 
   /**
@@ -246,11 +399,14 @@ export function createSidebar(workspace, actions) {
   function applyDrop(dragId, target) {
     const plan = planDrop(workspace, dragId, target);
     state.draggingPageId = null;
-    if (plan) actions.move(dragId, plan);
+    if (plan) {
+      if (plan.newParentId) state.collapsed.delete(plan.newParentId);
+      actions.move(dragId, plan);
+    }
   }
 
   function render() {
-    clear(element);
+    clear(content);
 
     const titleText = h("span", { class: "workspace-title-text", text: workspace.title || "Untitled workspace" });
     const titleRow = h("div", { class: "workspace-title" }, [titleText]);
@@ -287,21 +443,43 @@ export function createSidebar(workspace, actions) {
       input.addEventListener("blur", commit);
       titleRow.append(input);
     }
-    element.append(titleRow);
 
-    const newButtons = h("div", { class: "new-page-buttons" });
-    for (const type of /** @type {PageType[]} */ (["document", "sheet", "presentation"])) {
-      const button = h("button", {
-        class: "new-page",
-        type: "button",
-        title: `New ${TYPE_LABEL[type]}`,
-        text: `${TYPE_GLYPH[type]}`
-      });
-      button.append(h("span", { class: "new-page-label", text: TYPE_LABEL[type] }));
-      button.addEventListener("click", () => actions.create(type));
-      newButtons.append(button);
+    const newPage = h("button", {
+      class: "new-page-trigger",
+      type: "button",
+      title: "New page",
+      "aria-label": "New page",
+      "data-action": "new-page"
+    });
+    newPage.append(icon("plus", { size: 16 }));
+    newPage.addEventListener("click", () => openTypePicker(newPage));
+    content.append(h("div", { class: "sidebar-header" }, [titleRow, newPage]));
+
+    const search = h("button", {
+      class: "sidebar-search",
+      type: "button",
+      "aria-label": "Search pages",
+      "data-action": "quick-find"
+    });
+    search.append(
+      icon("search", { size: 15 }),
+      h("span", { class: "sidebar-search-text", text: "Search" }),
+      h("kbd", { text: "⌘K" })
+    );
+    search.addEventListener("click", () => actions.openQuickFind?.());
+    content.append(search);
+
+    const favorites = workspace.getFavorites();
+    if (favorites.length > 0) {
+      const section = h("div", { class: "sidebar-section sidebar-favorites" }, [
+        h("div", { class: "sidebar-section-label", text: "Favorites" })
+      ]);
+      for (const pageId of favorites) {
+        const row = renderFavorite(pageId);
+        if (row) section.append(row);
+      }
+      content.append(section);
     }
-    element.append(newButtons);
 
     const tree = h("div", { class: "page-tree" });
     const rootChildren = workspace.getChildren(null);
@@ -309,9 +487,9 @@ export function createSidebar(workspace, actions) {
       tree.append(renderRow(pageId, 0));
     }
     if (rootChildren.length === 0) {
-      tree.append(h("p", { class: "empty-hint", text: "No pages yet — create one above." }));
+      tree.append(h("p", { class: "empty-hint", text: "No pages yet — use + to create one." }));
     }
-    element.append(tree);
+    content.append(h("div", { class: "sidebar-section-label", text: "Pages" }), tree);
 
     // Root drop zone: dropping here moves a page to the top level.
     const rootZone = h("div", { class: "root-drop-zone", text: "Drop here to place at top level" });
@@ -327,10 +505,11 @@ export function createSidebar(workspace, actions) {
       rootZone.classList.remove("is-active");
       applyDrop(state.draggingPageId, { type: "root" });
     });
-    element.append(rootZone);
+    content.append(rootZone);
   }
 
   function refresh() {
+    popovers.close();
     render();
   }
 
