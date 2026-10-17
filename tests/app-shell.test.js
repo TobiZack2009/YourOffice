@@ -111,9 +111,9 @@ describe("contextual ribbon", () => {
     );
     expect(query(root, '[data-action="new-slide"]')).toBeTruthy();
     query(root, '.ribbon-tab[data-tab="animations"]')?.click();
-    const seam = /** @type {HTMLButtonElement} */ (query(root, '[data-action="add-animation"]'));
-    expect(seam.disabled).toBe(true);
-    expect(seam.title).toContain("later pass");
+    const appear = /** @type {HTMLButtonElement} */ (query(root, '[data-action="animation-appear"]'));
+    expect(appear.disabled).toBe(true);
+    expect(appear.title).toContain("Select an object");
   });
 
   it("shows disabled embed seams on the document Insert tab", () => {
@@ -502,6 +502,64 @@ describe("presentation pages", () => {
     style.value = "fade";
     style.dispatchEvent(new Event("change", { bubbles: true }));
     expect(content().slides[content().slideOrder[0]].transition.style).toBe("fade");
+  });
+
+  it("shows the animation timeline only while the Animations tab is open", () => {
+    const { root } = openDeck();
+    const editor = () => query(root, ".presentation-editor");
+    expect(editor()?.classList.contains("show-timeline")).toBe(false);
+    query(root, '.ribbon-tab[data-tab="animations"]')?.click();
+    expect(editor()?.classList.contains("show-timeline")).toBe(true);
+    expect(query(root, '[data-role="animation-timeline"]')).toBeTruthy();
+    query(root, '.ribbon-tab[data-tab="home"]')?.click();
+    expect(editor()?.classList.contains("show-timeline")).toBe(false);
+  });
+
+  it("adds, retimes, reorders and removes animations from the Animations tab", () => {
+    const { root, app, content } = openDeck();
+    const slide = () => content().slides[content().slideOrder[0]];
+    query(root, '.ribbon-tab[data-tab="animations"]')?.click();
+    const editor = app.getPresentationEditor();
+    editor?.selectAll();
+    query(root, '[data-action="animation-fade-in"]')?.click();
+    const count = slide().animationOrder.length;
+    expect(count).toBeGreaterThan(0);
+    expect(query(root, '[data-role="timeline-count"]')?.textContent).toBe(String(count));
+    expect(slide().animations[slide().animationOrder[0]]).toMatchObject({ effect: "fade-in", trigger: "click" });
+
+    // Slide in from the menu picks a direction.
+    editor?.selectAll();
+    query(root, '[data-action="animation-slide-in"]')?.click();
+    /** @type {HTMLElement | null} */ (document.querySelector('[data-action="animation-slide-in-item"][data-direction="right"]'))?.click();
+    expect(Object.values(slide().animations).some((a) => a.effect === "slide-in" && a.direction === "right")).toBe(true);
+
+    // The newest animation is selected, so Timing edits it.
+    const selectedId = editor?.getSelectedAnimation()?.id;
+    const delay = /** @type {HTMLInputElement} */ (query(root, '[data-action="animation-delay"]'));
+    expect(delay.disabled).toBe(false);
+    delay.value = "250";
+    delay.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(slide().animations[selectedId].delay).toBe(250);
+
+    const trigger = /** @type {HTMLSelectElement} */ (query(root, '[data-action="animation-trigger"]'));
+    trigger.value = "after";
+    trigger.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(slide().animations[selectedId].trigger).toBe("after");
+
+    const before = slide().animationOrder.indexOf(selectedId);
+    query(root, '[data-action="animation-earlier"]')?.click();
+    expect(slide().animationOrder.indexOf(selectedId)).toBe(before - 1);
+
+    query(root, '[data-action="animation-remove"]')?.click();
+    expect(slide().animations[selectedId]).toBeUndefined();
+  });
+
+  it("keeps the timeline open across undo while the Animations tab is active", () => {
+    const { root, app } = openDeck();
+    query(root, '.ribbon-tab[data-tab="animations"]')?.click();
+    app.getPresentationEditor()?.newSlide("blank");
+    query(root, '[data-action="undo"]')?.click();
+    expect(query(root, ".presentation-editor")?.classList.contains("show-timeline")).toBe(true);
   });
 
   it("toggles the inspector from the View tab, and keeps the current slide across undo", () => {

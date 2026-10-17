@@ -95,6 +95,14 @@ export function createSlideStrip(options) {
           title: `Transition: ${slide.transition.style}`
         }, [icon("transition", { size: 12 })]));
       }
+      const animationCount = slide.animationOrder?.length ?? 0;
+      if (animationCount > 0) {
+        wrap.append(h("span", {
+          class: `animation-badge${slide.transition.style !== "none" ? " has-transition" : ""}`,
+          "data-role": "animation-badge",
+          title: `${animationCount} animation${animationCount === 1 ? "" : "s"}`
+        }, [icon("animation", { size: 12 })]));
+      }
 
       wrap.addEventListener("click", () => options.onSelect(slideId));
       wrap.addEventListener("contextmenu", (event) => {

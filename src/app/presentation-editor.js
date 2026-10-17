@@ -6,7 +6,7 @@
  * insert tool, an in-place text edit, and the mouse gesture in flight) and turns
  * user intent into validated commands.
  *
- * Mouse gestures (`move | resize | rotate | marquee | draw`) preview directly on
+ * Mouse gestures (`move | resize | rotate | marquee | draw | path`) preview directly on
  * the live DOM while the button is down and dispatch ONE command on release, so a
  * drag is a single undo step. The stage is the slide drawn at its logical size and
  * scaled with a CSS transform; pointer coordinates are converted back with
@@ -32,6 +32,7 @@ import {
   centerOf
 } from "../presentation/geometry.js";
 import {
+  ANIM_MAX_OFFSET,
   MAX_IMAGE_BYTES,
   OBJECT_DEFAULTS,
   SIZE_LIMITS,
@@ -41,6 +42,8 @@ import {
   ensurePresentationContent
 } from "../presentation/model.js";
 import { renderObject, renderSlide } from "../presentation/render.js";
+import { createPreview } from "./animation-preview.js";
+import { createAnimationTimeline } from "./animation-timeline.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { parseInlineRuns, runsEqual } from "./inline.js";
@@ -52,6 +55,7 @@ import { createSlideStrip } from "./slide-strip.js";
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../presentation/model.js").SlideObject} SlideObject */
 /** @typedef {import("../presentation/model.js").Slide} Slide */
+/** @typedef {import("../presentation/model.js").Animation} Animation */
 /** @typedef {import("../presentation/model.js").PresentationContent} PresentationContent */
 /** @typedef {import("./marks.js").Mark} Mark */
 /** @typedef {{ x: number, y: number, width: number, height: number }} Rect */
@@ -64,6 +68,7 @@ import { createSlideStrip } from "./slide-strip.js";
  * @property {boolean} inspector Show the right-hand inspector.
  * @property {boolean} snap Snap moves to guides (slide edges/centre, other objects).
  * @property {boolean} grid Snap moves to a 10px grid and show it.
+ * @property {boolean} [timeline] Show the animation timeline under the stage.
  *
  * @typedef {object} PresentationEditorOptions
  * @property {() => void} [onChange] Called after the editor re-rendered from a model change.
@@ -82,6 +87,18 @@ const DEFAULT_IMAGE_BOX = { width: 480, height: 270 };
 const ROTATE_STEP = 15;
 const STAGE_PADDING = 64;
 const MAX_STAGE_SCALE = 3;
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * @param {string} tag
+ * @param {Record<string, string | number>} attrs
+ * @returns {SVGElement}
+ */
+function svgNode(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, String(value));
+  return /** @type {SVGElement} */ (el);
+}
 
 /** @param {SlideObject} o */
 const textCapable = (o) => o.type === "text" || o.type === "shape";
@@ -191,7 +208,7 @@ function runsFromHost(host) {
  */
 export function createPresentationEditor(workspace, pageId, options = {}) {
   /** @type {View} */
-  const view = options.view ?? { inspector: true, snap: true, grid: false };
+  const view = options.view ?? { inspector: true, snap: true, grid: false, timeline: false };
   const clipboard = options.clipboard ?? { objects: [], pastes: 0 };
 
   const popovers = createPopoverHost(document.body);
@@ -225,12 +242,16 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   let noticeTimer = null;
   /** @type {ResizeObserver | null} */
   let resizeObserver = null;
+  /** @type {string | null} */
+  let selectedAnimationId = null;
+  /** @type {import("./animation-preview.js").PreviewHandle | null} */
+  let previewHandle = null;
 
   /**
    * What the live gesture is showing, drawn into the overlay.
-   * @type {{ rects: Map<string, Partial<SlideObject>>, guides: import("../presentation/geometry.js").Guide[], marquee: Rect | null, draw: { tool: Tool, rect: Rect } | null }}
+   * @type {{ rects: Map<string, Partial<SlideObject>>, guides: import("../presentation/geometry.js").Guide[], marquee: Rect | null, draw: { tool: Tool, rect: Rect } | null, path: { animationId: string, from: { x: number, y: number }, to: { x: number, y: number } } | null }}
    */
-  const preview = { rects: new Map(), guides: [], marquee: null, draw: null };
+  const preview = { rects: new Map(), guides: [], marquee: null, draw: null, path: null };
   /** @type {any} */
   let gesture = null;
 
@@ -342,7 +363,18 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   };
   const inspector = createInspector(inspectorApi);
 
-  root.append(strip.element, stageArea, inspector.element, imageInput);
+  const timeline = createAnimationTimeline({
+    getSlide,
+    getSelectedId: () => selectedAnimationId,
+    isPreviewing: () => previewHandle !== null,
+    onSelect: (id) => selectAnimation(id),
+    onMove: (id, index) => moveAnimation(id, index),
+    onUpdate: (id, patch) => updateAnimation(patch, id),
+    onDelete: (id) => removeAnimation(id),
+    onTogglePreview: () => (previewHandle ? stopPreview() : void startPreview())
+  });
+
+  root.append(strip.element, stageArea, timeline.element, inspector.element, imageInput);
 
   // -- stage rendering ------------------------------------------------------------
 
@@ -419,11 +451,78 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     return el;
   }
 
+  /**
+   * Numbered tags on animated objects, and the path of each motion animation.
+   * @param {Slide} slide
+   */
+  function renderAnimationOverlay(slide) {
+    if (!overlay || !view.timeline || previewHandle) return;
+    const size = getSize();
+    const selectedAnim = selectedAnimationId ? slide.animations[selectedAnimationId] : null;
+    const selectedObject = selectedAnim ? slide.objects[selectedAnim.objectId] : null;
+    if (selectedObject) {
+      const bounds = rotatedBounds(selectedObject);
+      const box = h("div", { class: "animation-target", "data-role": "animation-target" });
+      box.style.left = `${bounds.x}px`;
+      box.style.top = `${bounds.y}px`;
+      box.style.width = `${bounds.width}px`;
+      box.style.height = `${bounds.height}px`;
+      overlay.append(box);
+    }
+
+    const paths = svgNode("svg", { class: "motion-paths", width: size.width, height: size.height });
+    const handles = [];
+    /** @type {Map<string, number>} */
+    const perObject = new Map();
+    slide.animationOrder.forEach((id, index) => {
+      const animation = slide.animations[id];
+      const object = animation && slide.objects[animation.objectId];
+      if (!animation || !object) return;
+
+      const slot = perObject.get(object.id) ?? 0;
+      perObject.set(object.id, slot + 1);
+      const bounds = rotatedBounds(object);
+      const tag = h("div", {
+        class: `animation-tag${id === selectedAnimationId ? " is-selected" : ""}`,
+        "data-animation-id": id,
+        text: String(index + 1)
+      });
+      tag.style.left = `${bounds.x + slot * 24 * (1 / scale)}px`;
+      tag.style.top = `${bounds.y}px`;
+      overlay?.append(tag);
+
+      if (animation.effect !== "motion" || !animation.path) return;
+      const path = preview.path?.animationId === id ? preview.path : animation.path;
+      const centre = centerOf(object);
+      const from = { x: centre.x + path.from.x, y: centre.y + path.from.y };
+      const to = { x: centre.x + path.to.x, y: centre.y + path.to.y };
+      const isSelected = id === selectedAnimationId;
+      paths.append(svgNode("line", {
+        class: `motion-line${isSelected ? " is-selected" : ""}`,
+        "data-animation-id": id,
+        x1: from.x,
+        y1: from.y,
+        x2: to.x,
+        y2: to.y
+      }));
+      if (isSelected) {
+        for (const [which, point] of /** @type {const} */ ([["from", from], ["to", to]])) {
+          const handle = h("div", { class: `path-handle path-handle-${which}`, "data-path-handle": which, "data-animation-id": id });
+          handle.style.left = `${point.x}px`;
+          handle.style.top = `${point.y}px`;
+          handles.push(handle);
+        }
+      }
+    });
+    overlay.prepend(paths);
+    overlay.append(...handles);
+  }
+
   function renderOverlay() {
     if (!overlay) return;
     clear(overlay);
     const slide = getSlide();
-    if (!slide) return;
+    if (!slide || previewHandle) return;
 
     const objects = getSelectedObjects().map((o) => /** @type {SlideObject} */ ({ ...o, ...(preview.rects.get(o.id) ?? {}) }));
     const single = objects.length === 1;
@@ -461,6 +560,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     };
     if (preview.marquee) overlay.append(rectBox(preview.marquee, "marquee"));
     if (preview.draw) overlay.append(rectBox(preview.draw.rect, "draw-preview"));
+    renderAnimationOverlay(slide);
   }
 
   function clearPreview() {
@@ -468,6 +568,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     preview.guides = [];
     preview.marquee = null;
     preview.draw = null;
+    preview.path = null;
   }
 
   /**
@@ -488,6 +589,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   /** Everything derived from the model: strip, stage, inspector. */
   function refresh() {
     if (destroyed) return;
+    stopPreview({ quiet: true });
     cached = null;
     const content = getContent();
     if (!currentSlideId || !content.slides[currentSlideId]) {
@@ -500,10 +602,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     }
     const slide = getSlide();
     selectedIds = selectedIds.filter((id) => slide?.objects[id]);
+    if (selectedAnimationId && !slide?.animations?.[selectedAnimationId]) selectedAnimationId = null;
     editing = null;
     gesture = null;
     clearPreview();
     strip.render();
+    timeline.render();
     renderStage();
     inspector.render();
     options.onChange?.();
@@ -538,8 +642,10 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
 
   /** @param {string | null} slideId */
   function setCurrent(slideId) {
+    stopPreview({ quiet: true });
     currentSlideId = slideId;
     selectedIds = [];
+    selectedAnimationId = null;
     options.onSlideChange?.(slideId);
   }
 
@@ -791,6 +897,159 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       newIds,
       offset: 24 * clipboard.pastes
     }));
+  }
+
+  // -- animations ----------------------------------------------------------------------------------
+
+  /** @returns {Animation[]} The current slide's animations in playback order. */
+  function getAnimations() {
+    const slide = getSlide();
+    if (!slide) return [];
+    return slide.animationOrder.map((id) => slide.animations[id]).filter(Boolean);
+  }
+
+  /** @returns {Animation | null} */
+  function getSelectedAnimation() {
+    return (selectedAnimationId && getSlide()?.animations?.[selectedAnimationId]) || null;
+  }
+
+  /** @param {string | null} id */
+  function selectAnimation(id) {
+    const next = id && getSlide()?.animations?.[id] ? id : null;
+    if (next === selectedAnimationId) return;
+    selectedAnimationId = next;
+    timeline.select();
+    renderOverlay();
+    options.onSelectionChange?.();
+  }
+
+  /**
+   * Animate the selected objects (one animation each). The first starts on click, the
+   * rest start with it, so a multi-selection plays together.
+   * @param {Animation["effect"]} effect
+   * @param {{ direction?: Animation["direction"], trigger?: Animation["trigger"] }} [opts]
+   * @returns {boolean}
+   */
+  function addAnimation(effect, opts = {}) {
+    const slideId = currentSlideId;
+    const objects = getSelectedObjects();
+    if (!slideId || objects.length === 0) return false;
+    stopPreview({ quiet: true });
+    finishEdit(true);
+    const ids = objects.map(() => createId("anim"));
+    selectedAnimationId = ids[ids.length - 1];
+    return run(() => {
+      workspace.transact("add animation", () => {
+        objects.forEach((object, i) => {
+          send("addAnimation", {
+            slideId,
+            animation: {
+              id: ids[i],
+              objectId: object.id,
+              effect,
+              trigger: opts.trigger ?? (i === 0 ? "click" : "with"),
+              ...(opts.direction ? { direction: opts.direction } : {})
+            }
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * Change fields of an animation (the selected one by default).
+   * @param {Record<string, unknown>} patch
+   * @param {string | null} [id]
+   * @returns {boolean}
+   */
+  function updateAnimation(patch, id = selectedAnimationId) {
+    if (!currentSlideId || !id) return false;
+    stopPreview({ quiet: true });
+    return run(() => send("updateAnimation", { slideId: currentSlideId, animationId: id, patch }));
+  }
+
+  /**
+   * Remove an animation (the selected one by default); the next row takes the selection.
+   * @param {string | null} [id]
+   * @returns {boolean}
+   */
+  function removeAnimation(id = selectedAnimationId) {
+    const slide = getSlide();
+    if (!currentSlideId || !slide || !id || !slide.animations[id]) return false;
+    stopPreview({ quiet: true });
+    if (id === selectedAnimationId) {
+      const rest = slide.animationOrder.filter((other) => other !== id);
+      const at = slide.animationOrder.indexOf(id);
+      selectedAnimationId = rest[Math.min(at, rest.length - 1)] ?? null;
+    }
+    return run(() => send("deleteAnimation", { slideId: currentSlideId, animationId: id }));
+  }
+
+  /**
+   * @param {string} id
+   * @param {number} index Position once the animation is lifted out of the order.
+   * @returns {boolean}
+   */
+  function moveAnimation(id, index) {
+    const slide = getSlide();
+    if (!currentSlideId || !slide || !slide.animations[id]) return false;
+    stopPreview({ quiet: true });
+    const clamped = Math.max(0, Math.min(slide.animationOrder.length - 1, index));
+    return run(() => send("moveAnimation", { slideId: currentSlideId, animationId: id, index: clamped }));
+  }
+
+  /**
+   * Move the selected animation earlier (-1) or later (1).
+   * @param {number} delta
+   * @returns {boolean}
+   */
+  function moveSelectedAnimation(delta) {
+    const slide = getSlide();
+    if (!slide || !selectedAnimationId) return false;
+    return moveAnimation(selectedAnimationId, slide.animationOrder.indexOf(selectedAnimationId) + delta);
+  }
+
+  const isPreviewing = () => previewHandle !== null;
+
+  /**
+   * Play the current slide's animations on the stage.
+   * @returns {boolean} false when there is nothing to play
+   */
+  function startPreview() {
+    const slide = getSlide();
+    if (!slide || slide.animationOrder.length === 0) return false;
+    stopPreview({ quiet: true });
+    finishEdit(true);
+    if (!slideEl) return false;
+    popovers.close();
+    const handle = createPreview({
+      slideEl,
+      slide,
+      size: getSize(),
+      onDone: () => {
+        if (previewHandle === handle) stopPreview();
+      }
+    });
+    previewHandle = handle;
+    root.classList.add("is-previewing");
+    renderOverlay();
+    timeline.render();
+    options.onSelectionChange?.();
+    handle.start();
+    return true;
+  }
+
+  /** @param {{ quiet?: boolean }} [opts] quiet: the caller re-renders everything anyway. */
+  function stopPreview(opts = {}) {
+    const handle = previewHandle;
+    if (!handle) return;
+    previewHandle = null;
+    handle.stop();
+    root.classList.remove("is-previewing");
+    if (opts.quiet) return;
+    renderOverlay();
+    timeline.render();
+    options.onSelectionChange?.();
   }
 
   // -- tools + insert -----------------------------------------------------------------------
@@ -1118,6 +1377,11 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     const target = /** @type {Element} */ (event.target);
     if (editing && editing.host.contains(target)) return;
     if (closest(target, ".stage-notice, .stage-empty")) return;
+    if (previewHandle) {
+      event.preventDefault();
+      stopPreview();
+      return;
+    }
     if (editing) finishEdit(true);
 
     // Pointer-down on the stage never starts a native text selection or drag.
@@ -1128,6 +1392,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     const point = toSlide(event.clientX, event.clientY);
     const slide = getSlide();
     if (!slide || !stage) return;
+
+    const pathHandle = closest(target, "[data-path-handle]");
+    if (pathHandle) {
+      beginPathGesture(/** @type {HTMLElement} */ (pathHandle), point, event);
+      return;
+    }
 
     const handle = closest(target, "[data-handle]");
     if (handle) {
@@ -1219,6 +1489,30 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     startDocumentListeners();
   }
 
+  /**
+   * Drag one end of a motion path.
+   * @param {HTMLElement} handleEl
+   * @param {{ x: number, y: number }} point
+   * @param {MouseEvent} event
+   */
+  function beginPathGesture(handleEl, point, event) {
+    const animationId = handleEl.dataset.animationId ?? "";
+    const animation = getSlide()?.animations?.[animationId];
+    const which = handleEl.dataset.pathHandle === "from" ? "from" : "to";
+    if (!animation?.path) return;
+    gesture = {
+      type: "path",
+      animationId,
+      which,
+      start: point,
+      startClient: { x: event.clientX, y: event.clientY },
+      path: structuredClone(animation.path),
+      moved: false,
+      hideHandles: false
+    };
+    startDocumentListeners();
+  }
+
   function startDocumentListeners() {
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -1300,6 +1594,14 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       if (event.shiftKey) degrees = normalizeAngle(Math.round(degrees / ROTATE_STEP) * ROTATE_STEP);
       previewObject(gesture.id, { rotation: Math.round(degrees) % 360 });
       renderOverlay();
+    } else if (gesture.type === "path") {
+      if (!gesture.moved && !pastThreshold(gesture.startClient, event)) return;
+      gesture.moved = true;
+      const clampOffset = (/** @type {number} */ n) => Math.max(-ANIM_MAX_OFFSET, Math.min(ANIM_MAX_OFFSET, round(n, 0)));
+      const origin = gesture.path[gesture.which];
+      const next = { ...gesture.path, [gesture.which]: { x: clampOffset(origin.x + point.x - gesture.start.x), y: clampOffset(origin.y + point.y - gesture.start.y) } };
+      preview.path = { animationId: gesture.animationId, from: next.from, to: next.to };
+      renderOverlay();
     } else if (gesture.type === "marquee") {
       if (!gesture.moved && !pastThreshold(gesture.startClient, event)) return;
       gesture.moved = true;
@@ -1331,6 +1633,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     const slideId = currentSlideId;
     const drawn = preview.draw;
     const finalRects = new Map(preview.rects);
+    const finalPath = preview.path;
     clearPreview();
     if (!slideId) return;
 
@@ -1356,6 +1659,13 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       else {
         renderStage();
         afterStateChange();
+      }
+    } else if (active.type === "path") {
+      const unchanged = finalPath && JSON.stringify({ from: finalPath.from, to: finalPath.to }) === JSON.stringify(active.path);
+      if (active.moved && finalPath && !unchanged) {
+        updateAnimation({ path: { from: finalPath.from, to: finalPath.to } }, active.animationId);
+      } else {
+        renderOverlay();
       }
     } else if (active.type === "marquee") {
       renderOverlay();
@@ -1493,7 +1803,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
     const target = /** @type {Element} */ (event.target);
-    if (closest(target, "input, select, textarea, [contenteditable='true'], .slide-strip, .inspector, .popover")) return;
+    if (event.key === "Escape" && previewHandle) {
+      event.preventDefault();
+      stopPreview();
+      return;
+    }
+    if (closest(target, "input, select, textarea, [contenteditable='true'], .slide-strip, .inspector, .animation-timeline, .popover")) return;
     const mod = event.metaKey || event.ctrlKey;
     const key = event.key;
 
@@ -1576,6 +1891,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     resizeObserver = new ResizeObserver(() => {
       if (destroyed || gesture || editing) return;
       if (Math.abs(computeScale() - scale) > 0.001) {
+        stopPreview();
         renderStage();
       }
     });
@@ -1586,13 +1902,19 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   function setView(patch) {
     Object.assign(view, patch);
     root.classList.toggle("hide-inspector", !view.inspector);
+    root.classList.toggle("show-timeline", Boolean(view.timeline));
     stage?.classList.toggle("show-grid", view.grid);
+    if (!view.timeline) stopPreview({ quiet: true });
+    renderOverlay();
+    timeline.render();
     options.onSelectionChange?.();
   }
 
   root.classList.toggle("hide-inspector", !view.inspector);
+  root.classList.toggle("show-timeline", Boolean(view.timeline));
   if (!currentSlideId || !getContent().slides[currentSlideId]) currentSlideId = getContent().slideOrder[0] ?? null;
   strip.render();
+  timeline.render();
   renderStage();
   inspector.render();
 
@@ -1601,6 +1923,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     refresh,
     destroy() {
       destroyed = true;
+      stopPreview({ quiet: true });
       stopDocumentListeners();
       document.removeEventListener("selectionchange", onSelectionChange);
       unsubscribe();
@@ -1639,6 +1962,18 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     applyTransitionToAll,
     requestSlideSize,
     setSlideSize,
+    // animations
+    getAnimations,
+    getSelectedAnimation,
+    selectAnimation,
+    addAnimation,
+    updateAnimation,
+    removeAnimation,
+    moveAnimation,
+    moveSelectedAnimation,
+    startPreview,
+    stopPreview: () => stopPreview(),
+    isPreviewing,
     // objects
     copy: copySelected,
     cut: cutSelected,

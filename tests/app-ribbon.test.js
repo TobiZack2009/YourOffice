@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Workspace } from "../src/workspace/store.js";
-import { defaultTabId, getTabs, EMBED_REASON, ANIMATION_REASON, THEME_REASON } from "../src/app/ribbon-tabs.js";
+import { defaultTabId, getTabs, EMBED_REASON, THEME_REASON } from "../src/app/ribbon-tabs.js";
 import { createRibbon } from "../src/app/ribbon.js";
 
 const ids = (/** @type {any[]} */ list) => list.map((item) => item.id);
@@ -64,11 +64,10 @@ describe("getTabs", () => {
         expect(control.enabled?.(ctx), control.id).toBe(false);
       }
     }
-    const seams = allControls("presentation").filter((control) => control.disabledReason);
-    expect(Object.fromEntries(seams.map((control) => [control.id, control.disabledReason]))).toEqual({
-      theme: THEME_REASON,
-      "add-animation": ANIMATION_REASON
-    });
+    const controls = allControls("presentation");
+    expect(controls.find((control) => control.id === "theme")?.disabledReason).toBe(THEME_REASON);
+    // Animations are real now: the old seam is gone.
+    expect(ids(controls)).not.toContain("add-animation");
   });
 
   it("offers the presentation view toggles instead of canvas zoom", () => {
@@ -221,7 +220,7 @@ describe("createRibbon", () => {
     ribbon.selectTab("animations");
     const control = /** @type {HTMLButtonElement} */ (ribbon.element.querySelector(".ribbon-panel .ribbon-button"));
     expect(control.disabled).toBe(true);
-    expect(control.title).toBe(ANIMATION_REASON);
+    expect(control.title).toBe("Select an object to animate");
   });
 
   it("enables Merge from the editor's state", () => {

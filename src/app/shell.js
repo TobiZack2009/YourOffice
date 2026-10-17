@@ -74,7 +74,7 @@ export function mountApp(root, workspace, options = {}) {
   /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, zoom: number }} */
   const state = { selectedPageId: null, editor: null, sheetEditor: null, presentationEditor: null, zoom: 100 };
   // Presentation UI state that must survive the editor being rebuilt on undo/redo.
-  const presentationView = { inspector: true, snap: true, grid: false };
+  const presentationView = { inspector: true, snap: true, grid: false, timeline: false };
   const presentationClipboard = { objects: /** @type {any[]} */ ([]), pastes: 0 };
   /** @type {Map<string, string>} */
   const lastSlideByPage = new Map();
@@ -169,7 +169,13 @@ export function mountApp(root, workspace, options = {}) {
     };
   }
 
-  const ribbon = createRibbon(getContext);
+  // The animation timeline shows only while the Animations tab is open.
+  const ribbon = createRibbon(getContext, {
+    onTabChange: (tabId) => {
+      presentationView.timeline = tabId === "animations";
+      state.presentationEditor?.setView({ timeline: presentationView.timeline });
+    }
+  });
 
   // Hidden file input behind File > Import.
   const fileInput = /** @type {HTMLInputElement} */ (
@@ -278,6 +284,7 @@ export function mountApp(root, workspace, options = {}) {
       state.sheetEditor = sheetEditor;
       canvas.append(pageHeader, sheetEditor.element);
     } else {
+      presentationView.timeline = ribbon.getActiveTab() === "animations";
       const presentationEditor = createPresentationEditor(workspace, page.id, {
         onChange: () => updateChrome(),
         onSelectionChange: () => ribbon.update(),

@@ -71,8 +71,7 @@ labelled groups) → canvas.
   the shell calls it wherever editor or workspace state changes. Buttons cancel
   `mousedown` so the editor selection survives.
 - Contextual tabs: document (Home, Insert), sheet (Home, Insert), presentation
-  (Home, Insert, Design, Transitions, Animations, View; Animations and Theme stay disabled
-  seams), File and View on everything. `data-page-type`
+  (Home, Insert, Design, Transitions, Animations, View; Theme stays a disabled seam), File and View on everything. `data-page-type`
   on `.app` drives the accent (document blue, sheet green, presentation orange).
 - `popover.js` (positioned popovers + `buildMenu`) is shared by the ribbon and the
   sidebar. `icons.js` builds inline SVG icons from the Lucide pack (`lucide` on npm, named imports
@@ -461,7 +460,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     all exercised. Bugs found and fixed: unrounded drag/draw geometry; an inspector
     number field re-committed on blur and swallowed the next click (the change event
     fires on blur after Enter); a heavy focus outline around the sheet canvas.
-  - Deferred: Animations (disabled seam), slideshow playback and transition playback,
+  - Deferred: slideshow playback and transition playback,
     themes, embedding slides in documents (Phase 6), image assets in the registry
     (Phase 7), resize/rotate of multi-selections.
 - **Sidebar click target and Lucide icons:**
@@ -477,6 +476,44 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     send-backward. Block "Delete" in the document context menu uses `trash`.
   - Restored the page title input in the header (`pageHeader.append(titleInput)`), which
     an earlier removal of the page-kind badge had dropped along with it.
+- **Presentation animations:**
+  - **Model.** A slide gains `animations: { [id]: Animation }` and `animationOrder: string[]`
+    (identity apart from order, like `objects`/`objectOrder`). `Animation = { id (anim_...),
+    objectId, effect: appear | fade-in | slide-in | motion, trigger: click | with | after,
+    delay, duration (ms), direction? (slide-in: where it comes from), path? (motion:
+    `{from, to}` offsets from the resting position) }`. `createAnimation`/`validateAnimation`
+    live in `model.js`; `validateSlide` tolerates slides without the fields and
+    `ensurePresentationContent` backfills them (no schema bump). "After previous" is what the
+    user called "before previous".
+  - **Commands.** `addAnimation`, `updateAnimation` (whitelisted patch; switching effect
+    adds/removes `direction`/`path`), `deleteAnimation`, `moveAnimation`. `deleteObjects`
+    removes the objects' animations, `duplicateSlide` remaps animation and object ids,
+    `setSlideSize` with `scaleContent` scales path offsets. Duplicating or pasting objects
+    does not copy animations.
+  - **Pure logic (`presentation/animation.js`).** `planTimeline` (a click starts a step; step
+    0 auto-plays; `with` anchors to the previous anchor, `after` to the previous end),
+    `planPreview` (steps run back to back with a 400 ms pause), `initiallyHidden` (entrance
+    effects hide their object), `slideInOffset`, `effectKeyframes`. Movement uses the
+    individual CSS `translate` property so it composes with the inline rotation.
+  - **UI.** `animation-timeline.js` is an ordered list under the stage whose rows edit in place (Start and Effect selects, a
+    Direction select for slide-in, Delay/Duration ms inputs; `effectPatch` carries the new
+    effect's default duration only if the old default was untouched, a refused edit reverts the
+    row). Focus is restored after the re-render each edit causes, `select()` re-marks the
+    selected row without a rebuild so open dropdowns survive, and Backspace/Delete inside a
+    field never deletes the animation. Shown only while the
+    Animations ribbon tab is active (`View.timeline`, set by the shell from
+    `ribbon.getActiveTab()` and `createRibbon(..., { onTabChange })`). Rows reorder by drag
+    (`planSlideReorder`) and by up/down buttons. The stage overlay shows numbered tags, and a
+    dashed line with draggable endpoints for the selected motion animation (a `path` gesture
+    that commits one `updateAnimation` on mouseup). `animation-preview.js` plays the current
+    slide with the Web Animations API (feature-detected; without it objects are revealed on
+    schedule and motion objects park at the end), auto-advancing click steps, and restores
+    the resting state. Any model change, slide switch, Escape or stage click stops it.
+    The slide strip shows an `animation-badge`. The Animations tab has Animation (Appear,
+    Fade in, Slide in menu, Motion path), Timing (Start, Delay, Duration, Direction), Order
+    and Preview groups; Delay/Duration are in ms like the transition duration field.
+  - Browser smoke (playwright-core, system Chrome): add/retime/reorder/preview, motion
+    endpoint drag, tab switch hiding the timeline, no console errors.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
@@ -484,8 +521,9 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`, `app-ribbon`,
   `app-quick-find`, `app-popover`, `document-nesting`, `presentation-model`,
   `presentation-commands`, `presentation-geometry`, `presentation-render`,
-  `app-presentation-editor`, `app-marks`. **693 tests green across 36 files**; the
-  single-file build inlines JS + CSS into one ~251 kB HTML.
+  `app-presentation-editor`, `app-marks`, `app-animations`, `presentation-animation`.
+  **746 tests green across 38 files**; the single-file build inlines JS + CSS into one
+  ~278 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
@@ -503,7 +541,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
    dragging, fill-handle / drag-to-move, incremental recalc, cross-table visual polish.
 5. **Phase 5 — presentation** (done): slides on a shared, editable canvas size
    (default 1280×720), stable object IDs, text/image/shape/line, stored transitions.
-   Ordered animations and playback are deferred.
+   Ordered animations landed afterwards (see the status log); slideshow playback is deferred.
 6. **Phase 6 — references/sections:** typed source locators, reference instances,
    live cross-editor embeds, parameters, conditional visibility (small AST language),
    source-vs-instance editing, section dep cycles and invalidation.

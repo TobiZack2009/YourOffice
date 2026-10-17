@@ -27,9 +27,11 @@ import { defaultTabId, getTabs } from "./ribbon-tabs.js";
 
 /**
  * @param {() => RibbonContext} getContext Fresh context on every call.
+ * @param {{ onTabChange?: (tabId: string) => void }} [options] `onTabChange` fires when the
+ *   user picks a tab (not when `setPage` swaps the tab set).
  * @returns {RibbonHandle}
  */
-export function createRibbon(getContext) {
+export function createRibbon(getContext, options = {}) {
   const element = h("div", { class: "ribbon" });
   const tabStrip = h("div", { class: "ribbon-tabs", role: "tablist" });
   const panel = h("div", { class: "ribbon-panel", role: "tabpanel" });
@@ -232,6 +234,7 @@ export function createRibbon(getContext) {
     renderTabs();
     renderPanel();
     update();
+    options.onTabChange?.(tabId);
   }
 
   function update() {

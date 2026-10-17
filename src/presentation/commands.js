@@ -16,13 +16,16 @@ import { touchPage } from "../workspace/commands.js";
 import { scaleObject } from "./geometry.js";
 import { DEFAULT_LAYOUT, getLayout } from "./layouts.js";
 import {
+  ANIMATION_DEFAULTS,
   SIZE_LIMITS,
   TRANSITION_DIRECTIONS,
   TRANSITION_STYLES,
+  createAnimation,
   createSlide,
   createTextBody,
   ensurePresentationContent,
   isColor,
+  validateAnimation,
   validateObject,
   validateSize
 } from "./model.js";
@@ -32,6 +35,7 @@ import {
 /** @typedef {import("./model.js").PresentationContent} PresentationContent */
 /** @typedef {import("./model.js").Slide} Slide */
 /** @typedef {import("./model.js").SlideObject} SlideObject */
+/** @typedef {import("./model.js").Animation} Animation */
 
 /** How far pasted/duplicated objects are nudged so they do not hide their source. */
 const COPY_OFFSET = 24;
@@ -117,6 +121,53 @@ function requireObjectIds(slide, ids) {
   }
   for (const id of ids) requireObject(slide, id);
   return [...new Set(/** @type {string[]} */ (ids))];
+}
+
+/** Fields `updateAnimation` may change; identity and the target object are never patchable. */
+const ANIMATION_PATCHABLE = new Set(["effect", "trigger", "delay", "duration", "direction", "path"]);
+
+/**
+ * @param {Slide} slide
+ * @param {unknown} animationId
+ * @returns {Animation}
+ */
+function requireAnimation(slide, animationId) {
+  const id = requireString(animationId, "animationId", "invalidAnimation");
+  const animation = slide.animations[id];
+  if (!animation) throw new CommandError(`animation does not exist: ${id}`, "unknownAnimation");
+  return animation;
+}
+
+/**
+ * Apply a whitelisted patch to an animation. Switching effect swaps the
+ * effect-specific fields (direction for slide-in, path for motion), then the
+ * result is validated.
+ * @param {Animation} animation
+ * @param {unknown} patch
+ */
+function applyAnimationPatch(animation, patch) {
+  if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
+    throw new CommandError("patch must be an object", "invalidPatch");
+  }
+  const p = /** @type {Record<string, unknown>} */ (patch);
+  for (const key of Object.keys(p)) {
+    if (!ANIMATION_PATCHABLE.has(key)) throw new CommandError(`"${key}" cannot be changed`, "invalidPatch");
+  }
+  const target = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (animation));
+  for (const [key, value] of Object.entries(p)) target[key] = typeof value === "object" ? structuredClone(value) : value;
+
+  if (animation.effect === "slide-in") {
+    if (animation.direction === undefined) animation.direction = /** @type {"left"} */ (ANIMATION_DEFAULTS.direction);
+  } else {
+    delete animation.direction;
+  }
+  if (animation.effect === "motion") {
+    if (animation.path === undefined) animation.path = structuredClone(ANIMATION_DEFAULTS.path);
+  } else {
+    delete animation.path;
+  }
+  const errors = validateAnimation(animation);
+  if (errors.length > 0) throw new CommandError(`invalid animation: ${errors.join("; ")}`, "invalidAnimation");
 }
 
 /**
@@ -236,6 +287,13 @@ export const presentationCommands = {
       const sy = size.height / content.size.height;
       for (const slide of Object.values(content.slides)) {
         for (const id of slide.objectOrder) slide.objects[id] = scaleObject(slide.objects[id], sx, sy);
+        for (const animation of Object.values(slide.animations ?? {})) {
+          if (!animation.path) continue;
+          for (const point of [animation.path.from, animation.path.to]) {
+            point.x = Math.round(point.x * sx * 100) / 100;
+            point.y = Math.round(point.y * sy * 100) / 100;
+          }
+        }
       }
     }
     content.size = size;
@@ -283,13 +341,27 @@ export const presentationCommands = {
     if (content.slides[copy.id]) throw new CommandError(`slide id already in use: ${copy.id}`, "duplicateSlide");
     /** @type {Record<string, SlideObject>} */
     const objects = {};
+    /** @type {Map<string, string>} */
+    const idMap = new Map();
     copy.objectOrder = copy.objectOrder.map((oldId) => {
       const object = copy.objects[oldId];
       object.id = createId("obj");
+      idMap.set(oldId, object.id);
       objects[object.id] = object;
       return object.id;
     });
     copy.objects = objects;
+    // Animations follow their objects to the new ids and get ids of their own.
+    /** @type {Record<string, Animation>} */
+    const animations = {};
+    copy.animationOrder = (copy.animationOrder ?? []).map((oldId) => {
+      const animation = copy.animations[oldId];
+      animation.id = createId("anim");
+      animation.objectId = /** @type {string} */ (idMap.get(animation.objectId));
+      animations[animation.id] = animation;
+      return animation.id;
+    });
+    copy.animations = animations;
     content.slides[copy.id] = copy;
     content.slideOrder.splice(content.slideOrder.indexOf(source.id) + 1, 0, copy.id);
     touchPage(tx, page);
@@ -472,6 +544,10 @@ export const presentationCommands = {
     const ids = new Set(requireObjectIds(slide, p.objectIds));
     for (const id of ids) delete slide.objects[id];
     slide.objectOrder = slide.objectOrder.filter((id) => !ids.has(id));
+    for (const [animationId, animation] of Object.entries(slide.animations)) {
+      if (ids.has(animation.objectId)) delete slide.animations[animationId];
+    }
+    slide.animationOrder = slide.animationOrder.filter((id) => slide.animations[id]);
     touchPage(tx, page);
   },
 
@@ -516,6 +592,82 @@ export const presentationCommands = {
       typeof p.offset === "number" ? p.offset : COPY_OFFSET
     );
     for (const copy of copies) addObject(slide, copy);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Add an animation to a slide (at the end of the playback order unless `index` is given).
+   * Missing fields are filled from the effect's defaults.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, slideId: string, animation: Partial<Animation> & { objectId: string }, index?: number }} payload
+   */
+  addAnimation(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requirePresentationPage(store, p.pageId);
+    const slide = requireSlide(content, p.slideId);
+    if (typeof p.animation !== "object" || p.animation === null || Array.isArray(p.animation)) {
+      throw new CommandError("animation must be an object", "invalidAnimation");
+    }
+    const input = /** @type {Partial<Animation> & { objectId: string }} */ (p.animation);
+    requireObject(slide, input.objectId);
+    const index = p.index === undefined ? slide.animationOrder.length : requireInsertIndex(p.index, "index");
+    if (index > slide.animationOrder.length) throw new CommandError("index is out of range", "invalidIndex");
+    const animation = createAnimation(input);
+    const errors = validateAnimation(animation);
+    if (errors.length > 0) throw new CommandError(`invalid animation: ${errors.join("; ")}`, "invalidAnimation");
+    if (slide.animations[animation.id]) throw new CommandError(`animation id already in use: ${animation.id}`, "duplicateAnimation");
+    slide.animations[animation.id] = animation;
+    slide.animationOrder.splice(index, 0, animation.id);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Change fields of one animation.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, slideId: string, animationId: string, patch: Record<string, unknown> }} payload
+   */
+  updateAnimation(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requirePresentationPage(store, p.pageId);
+    const slide = requireSlide(content, p.slideId);
+    applyAnimationPatch(requireAnimation(slide, p.animationId), p.patch);
+    touchPage(tx, page);
+  },
+
+  /**
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, slideId: string, animationId: string }} payload
+   */
+  deleteAnimation(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requirePresentationPage(store, p.pageId);
+    const slide = requireSlide(content, p.slideId);
+    const animation = requireAnimation(slide, p.animationId);
+    delete slide.animations[animation.id];
+    slide.animationOrder = slide.animationOrder.filter((id) => id !== animation.id);
+    touchPage(tx, page);
+  },
+
+  /**
+   * Move an animation to an index (position once it is lifted out of the order).
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, slideId: string, animationId: string, index: number }} payload
+   */
+  moveAnimation(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requirePresentationPage(store, p.pageId);
+    const slide = requireSlide(content, p.slideId);
+    const animation = requireAnimation(slide, p.animationId);
+    const index = requireInsertIndex(p.index, "index");
+    const rest = slide.animationOrder.filter((id) => id !== animation.id);
+    if (index > rest.length) throw new CommandError("index is out of range", "invalidIndex");
+    rest.splice(index, 0, animation.id);
+    if (rest.every((id, i) => id === slide.animationOrder[i])) return;
+    slide.animationOrder = rest;
     touchPage(tx, page);
   },
 

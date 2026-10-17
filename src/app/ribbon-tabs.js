@@ -80,7 +80,8 @@ import { SIZE_PRESETS } from "../presentation/geometry.js";
  * @typedef {{ id: string, label: string, groups: Group[] }} Tab
  */
 
-export const ANIMATION_REASON = "Animations arrive in a later pass";
+const ANIMATION_SELECT_REASON = "Select an object to animate";
+const ANIMATION_PICK_REASON = "Select an animation in the timeline";
 export const THEME_REASON = "Themes arrive later";
 export const EMBED_REASON = "Embeds arrive with references (Phase 6)";
 
@@ -954,6 +955,69 @@ function slideSizeField(axis) {
   };
 }
 
+const ANIMATION_TRIGGER_OPTIONS = [
+  { value: "click", label: "On click" },
+  { value: "with", label: "With previous" },
+  { value: "after", label: "After previous" }
+];
+
+/** @param {RibbonContext} ctx */
+const hasAnimation = (ctx) => Boolean(ctx.presentationEditor?.getSelectedAnimation());
+
+/**
+ * Position of the selected animation in the slide's order, or -1.
+ * @param {RibbonContext} ctx
+ * @returns {number}
+ */
+function animationIndex(ctx) {
+  const editor = ctx.presentationEditor;
+  const selected = editor?.getSelectedAnimation();
+  return selected && editor ? editor.getAnimations().findIndex((animation) => animation.id === selected.id) : -1;
+}
+
+/**
+ * A button that animates the selected objects with one effect.
+ * @param {"appear" | "fade-in" | "motion"} effect
+ * @param {string} label
+ * @param {string} title
+ * @param {string} iconName
+ * @returns {Control}
+ */
+function animationEffectButton(effect, label, title, iconName) {
+  return button({
+    id: `animation-${effect}`,
+    label,
+    title,
+    icon: iconName,
+    attrs: { "data-action": `animation-${effect}` },
+    enabled: hasObjects,
+    disabledReason: ANIMATION_SELECT_REASON,
+    action: (ctx) => ctx.presentationEditor?.addAnimation(effect)
+  });
+}
+
+/**
+ * Number field for the selected animation's delay or duration (milliseconds).
+ * @param {"delay" | "duration"} key
+ * @param {string} label
+ * @param {number} min
+ * @returns {Control}
+ */
+function animationTimeField(key, label, min) {
+  return {
+    id: `animation-${key}`,
+    kind: "field",
+    label,
+    icon: "transition",
+    min,
+    attrs: { "data-action": `animation-${key}` },
+    enabled: hasAnimation,
+    disabledReason: ANIMATION_PICK_REASON,
+    value: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.[key] ?? "",
+    apply: (ctx, value) => ctx.presentationEditor?.updateAnimation({ [key]: value })
+  };
+}
+
 /** @returns {Tab[]} */
 function presentationTabs() {
   return [
@@ -1237,7 +1301,122 @@ function presentationTabs() {
         {
           id: "animation",
           label: "Animation",
-          controls: [seam({ id: "add-animation", label: "Add animation", icon: "animation", attrs: { "data-action": "add-animation" } }, ANIMATION_REASON)]
+          controls: [
+            animationEffectButton("appear", "Appear", "Appear: the object shows up when it starts", "animation"),
+            animationEffectButton("fade-in", "Fade in", "Fade the object in", "transition"),
+            button({
+              id: "animation-slide-in",
+              kind: "menu",
+              label: "Slide in",
+              title: "Slide the object in from an edge",
+              icon: "slide",
+              attrs: { "data-action": "animation-slide-in" },
+              enabled: hasObjects,
+              disabledReason: ANIMATION_SELECT_REASON,
+              items: (ctx) =>
+                TRANSITION_DIRECTION_OPTIONS.map((option) => ({
+                  label: option.label,
+                  attrs: { "data-action": "animation-slide-in-item", "data-direction": option.value },
+                  action: () => ctx.presentationEditor?.addAnimation("slide-in", { direction: /** @type {any} */ (option.value) })
+                }))
+            }),
+            animationEffectButton("motion", "Motion path", "Move the object from one point to another", "motion-path")
+          ]
+        },
+        {
+          id: "animation-timing",
+          label: "Timing",
+          controls: [
+            {
+              id: "animation-trigger",
+              kind: "select",
+              label: "Start",
+              icon: "on-click",
+              size: "large",
+              attrs: { "data-action": "animation-trigger" },
+              options: ANIMATION_TRIGGER_OPTIONS,
+              enabled: hasAnimation,
+              disabledReason: ANIMATION_PICK_REASON,
+              value: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.trigger ?? "click",
+              onSelect: (ctx, value) => ctx.presentationEditor?.updateAnimation({ trigger: value })
+            },
+            animationTimeField("delay", "Delay (ms)", 0),
+            animationTimeField("duration", "Duration (ms)", 0),
+            {
+              id: "animation-direction",
+              kind: "select",
+              label: "Direction",
+              icon: "transition",
+              size: "large",
+              attrs: { "data-action": "animation-direction" },
+              options: TRANSITION_DIRECTION_OPTIONS,
+              enabled: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.effect === "slide-in",
+              disabledReason: "Direction applies to Slide in animations",
+              value: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.direction ?? "left",
+              onSelect: (ctx, value) => ctx.presentationEditor?.updateAnimation({ direction: value })
+            }
+          ]
+        },
+        {
+          id: "animation-order",
+          label: "Order",
+          controls: [
+            button({
+              id: "animation-earlier",
+              size: "small",
+              label: "Move earlier",
+              icon: "move-up",
+              attrs: { "data-action": "animation-earlier" },
+              enabled: (ctx) => animationIndex(ctx) > 0,
+              disabledReason: ANIMATION_PICK_REASON,
+              action: (ctx) => ctx.presentationEditor?.moveSelectedAnimation(-1)
+            }),
+            button({
+              id: "animation-later",
+              size: "small",
+              label: "Move later",
+              icon: "move-down",
+              attrs: { "data-action": "animation-later" },
+              enabled: (ctx) => {
+                const index = animationIndex(ctx);
+                return index >= 0 && index < (ctx.presentationEditor?.getAnimations().length ?? 0) - 1;
+              },
+              disabledReason: ANIMATION_PICK_REASON,
+              action: (ctx) => ctx.presentationEditor?.moveSelectedAnimation(1)
+            }),
+            button({
+              id: "animation-remove",
+              size: "small",
+              label: "Remove animation",
+              icon: "trash",
+              attrs: { "data-action": "animation-remove" },
+              enabled: hasAnimation,
+              disabledReason: ANIMATION_PICK_REASON,
+              action: (ctx) => ctx.presentationEditor?.removeAnimation()
+            })
+          ]
+        },
+        {
+          id: "animation-preview",
+          label: "Preview",
+          controls: [
+            button({
+              id: "animation-preview",
+              kind: "toggle",
+              label: "Preview",
+              title: "Play this slide's animations",
+              icon: "play",
+              attrs: { "data-action": "animation-preview" },
+              enabled: (ctx) => Boolean(ctx.presentationEditor?.isPreviewing() || ctx.presentationEditor?.getAnimations().length),
+              disabledReason: "This slide has no animations",
+              active: (ctx) => Boolean(ctx.presentationEditor?.isPreviewing()),
+              action: (ctx) => {
+                const editor = ctx.presentationEditor;
+                if (editor?.isPreviewing()) editor.stopPreview();
+                else editor?.startPreview();
+              }
+            })
+          ]
         }
       ]
     }

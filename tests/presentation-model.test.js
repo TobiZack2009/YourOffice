@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANIMATION_DEFAULTS,
+  createAnimation,
   createObject,
   createPresentationContent,
   createSlide,
   ensurePresentationContent,
   isColor,
+  validateAnimation,
   validateObject,
   validatePresentationContent,
   validateSlide
@@ -140,5 +143,71 @@ describe("isColor", () => {
     expect(isColor("#1d6fdc")).toBe(true);
     expect(isColor("red")).toBe(false);
     expect(isColor("url(x)")).toBe(false);
+  });
+});
+
+describe("animations", () => {
+  it("createAnimation fills defaults per effect", () => {
+    const fade = createAnimation({ objectId: "obj_1", effect: "fade-in" });
+    expect(fade).toMatchObject({ trigger: "click", delay: 0, duration: ANIMATION_DEFAULTS.duration["fade-in"] });
+    expect(fade.id).toMatch(/^anim_/);
+    expect(createAnimation({ objectId: "o", effect: "appear" }).duration).toBe(0);
+    expect(createAnimation({ objectId: "o", effect: "slide-in" }).direction).toBe("left");
+    const motion = createAnimation({ objectId: "o", effect: "motion" });
+    expect(motion.path).toEqual({ from: { x: 0, y: 0 }, to: { x: 240, y: 0 } });
+    expect(motion.duration).toBe(1000);
+    expect(validateAnimation(motion)).toEqual([]);
+  });
+
+  it("deep-copies its input", () => {
+    const path = { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } };
+    const motion = createAnimation({ objectId: "o", effect: "motion", path });
+    path.from.x = 99;
+    expect(motion.path.from.x).toBe(1);
+  });
+
+  it("validates fields and effect-specific extras", () => {
+    const ok = createAnimation({ objectId: "o", effect: "slide-in" });
+    expect(validateAnimation(ok)).toEqual([]);
+    expect(validateAnimation({ ...ok, effect: "spin" }).join()).toMatch(/effect/);
+    expect(validateAnimation({ ...ok, trigger: "hover" }).join()).toMatch(/trigger/);
+    expect(validateAnimation({ ...ok, delay: -1 }).join()).toMatch(/delay/);
+    expect(validateAnimation({ ...ok, duration: 31000 }).join()).toMatch(/duration/);
+    expect(validateAnimation({ ...ok, direction: "sideways" }).join()).toMatch(/direction/);
+    expect(validateAnimation({ ...ok, path: { from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } }).join()).toMatch(/only motion/);
+    const fade = createAnimation({ objectId: "o", effect: "fade-in" });
+    expect(validateAnimation({ ...fade, direction: "left" }).join()).toMatch(/only slide-in/);
+    const motion = createAnimation({ objectId: "o", effect: "motion" });
+    expect(validateAnimation({ ...motion, path: { from: { x: 0, y: 0 } } }).join()).toMatch(/path/);
+    expect(validateAnimation(null)).toHaveLength(1);
+  });
+
+  it("slides carry matching animation map and order", () => {
+    const shape = createObject("shape");
+    const slide = createSlide({ objects: [shape] });
+    expect(slide.animations).toEqual({});
+    expect(slide.animationOrder).toEqual([]);
+    const anim = createAnimation({ objectId: shape.id });
+    slide.animations[anim.id] = anim;
+    expect(validateSlide(slide).join()).toMatch(/not in animationOrder/);
+    slide.animationOrder.push(anim.id, anim.id);
+    expect(validateSlide(slide).join()).toMatch(/twice/);
+    slide.animationOrder = ["anim_ghost", anim.id];
+    expect(validateSlide(slide).join()).toMatch(/missing animation/);
+    slide.animationOrder = [anim.id];
+    expect(validateSlide(slide)).toEqual([]);
+    anim.objectId = "obj_ghost";
+    expect(validateSlide(slide).join()).toMatch(/missing object/);
+  });
+
+  it("accepts slides written before animations existed, and backfills them", () => {
+    const slide = createSlide();
+    delete slide.animations;
+    delete slide.animationOrder;
+    expect(validateSlide(slide)).toEqual([]);
+    const page = { id: "p", type: "presentation", content: { size: { width: 1280, height: 720 }, slideOrder: [slide.id], slides: { [slide.id]: slide } } };
+    const content = ensurePresentationContent(page);
+    expect(content.slides[slide.id].animations).toEqual({});
+    expect(content.slides[slide.id].animationOrder).toEqual([]);
   });
 });

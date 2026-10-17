@@ -299,3 +299,125 @@ describe("objects", () => {
     expect(slide().objects[id].x).toBe(7);
   });
 });
+
+describe("animations", () => {
+  const anim = (objectId, extra = {}) => ({ objectId, effect: "fade-in", ...extra });
+
+  it("adds animations in order with defaults, and is undoable", () => {
+    const { ws, pageId, slideId, slide, add } = setup();
+    const a = add();
+    const b = add();
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a) });
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(b, { effect: "slide-in", trigger: "with" }) });
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a, { effect: "appear" }), index: 0 });
+    const order = slide().animationOrder;
+    expect(order).toHaveLength(3);
+    expect(slide().animations[order[0]].effect).toBe("appear");
+    expect(slide().animations[order[2]]).toMatchObject({ trigger: "with", direction: "left", duration: 500 });
+    expect(validatePresentationContent(ws.getPage(pageId).content)).toEqual([]);
+    ws.undo();
+    expect(slide().animationOrder).toHaveLength(2);
+  });
+
+  it("rejects unknown objects, bad fields, bad indexes and duplicate ids", () => {
+    const { ws, pageId, slideId, add } = setup();
+    const a = add();
+    const send = (animation, index) => () => ws.dispatch("addAnimation", { pageId, slideId, animation, index });
+    expect(code(send(anim("obj_ghost")))).toBe("unknownObject");
+    expect(code(send(anim(a, { effect: "spin" })))).toBe("invalidAnimation");
+    expect(code(send(anim(a, { duration: -5 })))).toBe("invalidAnimation");
+    expect(code(send(anim(a), 5))).toBe("invalidIndex");
+    expect(code(send(null))).toBe("invalidAnimation");
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a, { id: "anim_fixed" }) });
+    expect(code(send(anim(a, { id: "anim_fixed" })))).toBe("duplicateAnimation");
+  });
+
+  it("updates whitelisted fields and swaps effect-specific data", () => {
+    const { ws, pageId, slideId, slide, add } = setup();
+    const a = add();
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a) });
+    const id = slide().animationOrder[0];
+    const update = (patch) => ws.dispatch("updateAnimation", { pageId, slideId, animationId: id, patch });
+    update({ delay: 250, trigger: "after" });
+    expect(slide().animations[id]).toMatchObject({ delay: 250, trigger: "after" });
+    update({ effect: "motion" });
+    expect(slide().animations[id].path).toEqual({ from: { x: 0, y: 0 }, to: { x: 240, y: 0 } });
+    update({ path: { from: { x: 0, y: 0 }, to: { x: 5, y: 6 } } });
+    expect(slide().animations[id].path.to).toEqual({ x: 5, y: 6 });
+    update({ effect: "slide-in", direction: "up" });
+    expect(slide().animations[id].path).toBeUndefined();
+    expect(slide().animations[id].direction).toBe("up");
+    update({ effect: "appear" });
+    expect(slide().animations[id].direction).toBeUndefined();
+    expect(validatePresentationContent(ws.getPage(pageId).content)).toEqual([]);
+
+    expect(code(() => update({ objectId: "x" }))).toBe("invalidPatch");
+    expect(code(() => update({ id: "x" }))).toBe("invalidPatch");
+    expect(code(() => update({ delay: -1 }))).toBe("invalidAnimation");
+    expect(code(() => update({ effect: "wiggle" }))).toBe("invalidAnimation");
+    expect(code(() => ws.dispatch("updateAnimation", { pageId, slideId, animationId: "anim_ghost", patch: {} }))).toBe("unknownAnimation");
+  });
+
+  it("deletes and moves animations", () => {
+    const { ws, pageId, slideId, slide, add } = setup();
+    const a = add();
+    for (const effect of ["appear", "fade-in", "slide-in"]) {
+      ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a, { effect }) });
+    }
+    const [first, second, third] = slide().animationOrder;
+    ws.dispatch("moveAnimation", { pageId, slideId, animationId: third, index: 0 });
+    expect(slide().animationOrder).toEqual([third, first, second]);
+    ws.dispatch("moveAnimation", { pageId, slideId, animationId: third, index: 0 });
+    expect(code(() => ws.dispatch("moveAnimation", { pageId, slideId, animationId: third, index: 9 }))).toBe("invalidIndex");
+    expect(code(() => ws.dispatch("moveAnimation", { pageId, slideId, animationId: "anim_ghost", index: 0 }))).toBe("unknownAnimation");
+    ws.dispatch("deleteAnimation", { pageId, slideId, animationId: first });
+    expect(slide().animationOrder).toEqual([third, second]);
+    expect(slide().animations[first]).toBeUndefined();
+    ws.undo();
+    expect(slide().animationOrder).toEqual([third, first, second]);
+  });
+
+  it("deleting an object removes its animations", () => {
+    const { ws, pageId, slideId, slide, add } = setup();
+    const a = add();
+    const b = add();
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a) });
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(b) });
+    ws.dispatch("deleteObjects", { pageId, slideId, objectIds: [a] });
+    expect(slide().animationOrder).toHaveLength(1);
+    expect(Object.values(slide().animations)[0].objectId).toBe(b);
+    expect(validatePresentationContent(ws.getPage(pageId).content)).toEqual([]);
+    ws.undo();
+    expect(slide().animationOrder).toHaveLength(2);
+  });
+
+  it("duplicating a slide remaps animation and object ids; duplicating objects does not copy them", () => {
+    const { ws, pageId, slideId, content, slide, add } = setup();
+    const a = add();
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a) });
+    const original = slide().animationOrder[0];
+    ws.dispatch("duplicateSlide", { pageId, slideId });
+    const copy = content().slides[content().slideOrder[1]];
+    expect(copy.animationOrder).toHaveLength(1);
+    const copied = copy.animations[copy.animationOrder[0]];
+    expect(copied.id).not.toBe(original);
+    expect(copy.objects[copied.objectId]).toBeDefined();
+    expect(copied.objectId).not.toBe(a);
+    expect(slide().animations[original].objectId).toBe(a);
+    expect(validatePresentationContent(content())).toEqual([]);
+
+    ws.dispatch("duplicateObjects", { pageId, slideId, objectIds: [a] });
+    ws.dispatch("pasteObjects", { pageId, slideId, objects: [slide().objects[a]] });
+    expect(slide().animationOrder).toHaveLength(1);
+  });
+
+  it("scales motion offsets with the slide size", () => {
+    const { ws, pageId, slideId, slide, add } = setup();
+    const a = add();
+    ws.dispatch("addAnimation", { pageId, slideId, animation: anim(a, { effect: "motion", path: { from: { x: 0, y: 0 }, to: { x: 200, y: 100 } } }) });
+    ws.dispatch("setSlideSize", { pageId, width: 640, height: 360, scaleContent: true });
+    expect(Object.values(slide().animations)[0].path.to).toEqual({ x: 100, y: 50 });
+    ws.dispatch("setSlideSize", { pageId, width: 320, height: 360 });
+    expect(Object.values(slide().animations)[0].path.to).toEqual({ x: 100, y: 50 });
+  });
+});

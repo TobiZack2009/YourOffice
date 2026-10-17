@@ -6,7 +6,8 @@
  * separate `objectOrder` array (bottom to top), so z-order is never identity.
  *
  *   content = { size: { width, height }, slideOrder: string[], slides: { [id]: Slide } }
- *   Slide   = { id, layout, background: { color }, transition, objectOrder, objects }
+ *   Slide   = { id, layout, background: { color }, transition, objectOrder, objects,
+ *               animationOrder, animations }
  *
  * The size lives on the presentation, never on a slide. Everything here is pure:
  * validators return error lists and never throw.
@@ -31,6 +32,9 @@ export const OBJECT_TYPES = ["text", "shape", "line", "image"];
 export const SHAPES = ["rect", "ellipse", "triangle", "roundRect", "arrow"];
 export const TRANSITION_STYLES = ["none", "fade", "wipe"];
 export const TRANSITION_DIRECTIONS = ["left", "right", "up", "down"];
+export const ANIMATION_EFFECTS = ["appear", "fade-in", "slide-in", "motion"];
+export const ANIMATION_TRIGGERS = ["click", "with", "after"];
+export const ANIMATION_DIRECTIONS = ["left", "right", "up", "down"];
 export const ALIGNS = ["left", "center", "right"];
 export const VALIGNS = ["top", "middle", "bottom"];
 export const LINK_KINDS = ["url", "page", "slide"];
@@ -48,6 +52,19 @@ export const OBJECT_DEFAULTS = {
   lineStroke: { color: "#1d1d1f", width: 3 }
 };
 
+/** Default timing (ms) and geometry per animation effect. */
+export const ANIMATION_DEFAULTS = {
+  duration: { appear: 0, "fade-in": 500, "slide-in": 500, motion: 1000 },
+  direction: "left",
+  path: { from: { x: 0, y: 0 }, to: { x: 240, y: 0 } }
+};
+
+/** Upper bound for an animation's delay and duration, in milliseconds. */
+export const ANIM_MAX_MS = 30000;
+
+/** Largest motion-path offset (logical px) either way. */
+export const ANIM_MAX_OFFSET = 20000;
+
 export const MIN_FONT_SIZE = 4;
 export const MAX_FONT_SIZE = 600;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -59,6 +76,18 @@ const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
  * @property {"none" | "fade" | "wipe"} style
  * @property {"left" | "right" | "up" | "down"} direction
  * @property {number} duration Milliseconds.
+ *
+ * @typedef {{ x: number, y: number }} Point
+ *
+ * @typedef {object} Animation
+ * @property {string} id
+ * @property {string} objectId
+ * @property {"appear" | "fade-in" | "slide-in" | "motion"} effect
+ * @property {"click" | "with" | "after"} trigger
+ * @property {number} delay Milliseconds, relative to the trigger.
+ * @property {number} duration Milliseconds.
+ * @property {"left" | "right" | "up" | "down"} [direction] Slide-in only.
+ * @property {{ from: Point, to: Point }} [path] Motion only; offsets from the resting position.
  *
  * @typedef {object} TextBody
  * @property {InlineRun[]} runs
@@ -93,6 +122,8 @@ const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
  * @property {Transition} transition
  * @property {string[]} objectOrder Z-order, bottom to top.
  * @property {Record<string, SlideObject>} objects
+ * @property {string[]} animationOrder Playback order.
+ * @property {Record<string, Animation>} animations
  *
  * @typedef {{ size: { width: number, height: number }, slideOrder: string[], slides: Record<string, Slide> }} PresentationContent
  */
@@ -189,7 +220,9 @@ export function createSlide(fields = {}) {
     background: { color: fields.background?.color ?? SLIDE_DEFAULTS.background },
     transition: { ...defaultTransition(), ...(fields.transition ?? {}) },
     objectOrder: [],
-    objects: {}
+    objects: {},
+    animationOrder: [],
+    animations: {}
   };
   if (Array.isArray(fields.objects)) {
     for (const object of fields.objects) {
@@ -198,6 +231,31 @@ export function createSlide(fields = {}) {
     }
   }
   return slide;
+}
+
+/**
+ * Build an animation with defaults for its effect. Input is deep-copied.
+ * @param {Partial<Animation> & { objectId: string }} fields
+ * @returns {Animation}
+ */
+export function createAnimation(fields) {
+  const copy = structuredClone(fields);
+  const effect = copy.effect ?? "fade-in";
+  /** @type {Animation} */
+  const animation = {
+    id: typeof copy.id === "string" && copy.id ? copy.id : createId("anim"),
+    objectId: copy.objectId,
+    effect,
+    trigger: copy.trigger ?? "click",
+    delay: copy.delay ?? 0,
+    duration: copy.duration ?? ANIMATION_DEFAULTS.duration[effect] ?? 500
+  };
+  if (effect === "slide-in") {
+    animation.direction = copy.direction ?? /** @type {"left"} */ (ANIMATION_DEFAULTS.direction);
+  } else if (effect === "motion") {
+    animation.path = copy.path ?? structuredClone(ANIMATION_DEFAULTS.path);
+  }
+  return animation;
 }
 
 /** @returns {PresentationContent} */
@@ -342,6 +400,62 @@ export function validateTransition(transition) {
 }
 
 /**
+ * @param {unknown} point
+ * @returns {boolean}
+ */
+function isOffset(point) {
+  return (
+    isPlainObject(point) &&
+    isFiniteNumber(point.x) &&
+    isFiniteNumber(point.y) &&
+    Math.abs(/** @type {number} */ (point.x)) <= ANIM_MAX_OFFSET &&
+    Math.abs(/** @type {number} */ (point.y)) <= ANIM_MAX_OFFSET
+  );
+}
+
+/**
+ * Validate one animation's own fields (not whether its object exists).
+ * @param {unknown} animation
+ * @returns {string[]}
+ */
+export function validateAnimation(animation) {
+  if (!isPlainObject(animation)) return ["animation must be an object"];
+  /** @type {string[]} */
+  const errors = [];
+  if (typeof animation.id !== "string" || animation.id.length === 0) errors.push("animation.id must be a non-empty string");
+  if (typeof animation.objectId !== "string" || animation.objectId.length === 0) {
+    errors.push("animation.objectId must be a non-empty string");
+  }
+  if (typeof animation.effect !== "string" || !ANIMATION_EFFECTS.includes(animation.effect)) {
+    errors.push(`animation.effect must be one of ${ANIMATION_EFFECTS.join(", ")}`);
+  }
+  if (typeof animation.trigger !== "string" || !ANIMATION_TRIGGERS.includes(animation.trigger)) {
+    errors.push(`animation.trigger must be one of ${ANIMATION_TRIGGERS.join(", ")}`);
+  }
+  for (const field of ["delay", "duration"]) {
+    const value = animation[field];
+    if (!isFiniteNumber(value) || /** @type {number} */ (value) < 0 || /** @type {number} */ (value) > ANIM_MAX_MS) {
+      errors.push(`animation.${field} must be 0–${ANIM_MAX_MS} ms`);
+    }
+  }
+  if (animation.effect === "slide-in") {
+    if (typeof animation.direction !== "string" || !ANIMATION_DIRECTIONS.includes(animation.direction)) {
+      errors.push(`animation.direction must be one of ${ANIMATION_DIRECTIONS.join(", ")}`);
+    }
+  } else if (animation.direction !== undefined) {
+    errors.push("only slide-in animations carry a direction");
+  }
+  if (animation.effect === "motion") {
+    if (!isPlainObject(animation.path) || !isOffset(animation.path.from) || !isOffset(animation.path.to)) {
+      errors.push("animation.path must be { from: {x, y}, to: {x, y} }");
+    }
+  } else if (animation.path !== undefined) {
+    errors.push("only motion animations carry a path");
+  }
+  return errors;
+}
+
+/**
  * Validate one slide.
  * @param {unknown} slide
  * @returns {string[]} error messages (empty when valid).
@@ -378,6 +492,38 @@ export function validateSlide(slide) {
       if (!seen.has(id)) errors.push(`slide.objects["${id}"] is not in objectOrder`);
       if (isPlainObject(object) && object.id !== id) errors.push(`slide.objects["${id}"].id does not match its key`);
       errors.push(...validateObject(object).map((m) => `slide.objects["${id}"]: ${m}`));
+    }
+  }
+
+  // Animations are optional on disk (older slides): absent means none.
+  const hasAnimations = slide.animations !== undefined || slide.animationOrder !== undefined;
+  if (hasAnimations) {
+    if (!Array.isArray(slide.animationOrder)) errors.push("slide.animationOrder must be an array");
+    if (!isPlainObject(slide.animations)) errors.push("slide.animations must be an object");
+    if (Array.isArray(slide.animationOrder) && isPlainObject(slide.animations)) {
+      const seen = new Set();
+      for (const id of slide.animationOrder) {
+        if (typeof id !== "string") {
+          errors.push("slide.animationOrder must hold string ids");
+          continue;
+        }
+        if (seen.has(id)) errors.push(`slide.animationOrder lists "${id}" twice`);
+        seen.add(id);
+        if (!slide.animations[id]) errors.push(`slide.animationOrder references missing animation "${id}"`);
+      }
+      for (const [id, animation] of Object.entries(slide.animations)) {
+        if (!seen.has(id)) errors.push(`slide.animations["${id}"] is not in animationOrder`);
+        if (isPlainObject(animation) && animation.id !== id) errors.push(`slide.animations["${id}"].id does not match its key`);
+        errors.push(...validateAnimation(animation).map((m) => `slide.animations["${id}"]: ${m}`));
+        if (
+          isPlainObject(animation) &&
+          isPlainObject(slide.objects) &&
+          typeof animation.objectId === "string" &&
+          !slide.objects[animation.objectId]
+        ) {
+          errors.push(`slide.animations["${id}"] references missing object "${animation.objectId}"`);
+        }
+      }
     }
   }
   return errors;
@@ -434,6 +580,8 @@ export function ensurePresentationContent(page) {
     if (!Array.isArray(slide.objectOrder)) slide.objectOrder = Object.keys(slide.objects);
     if (!isPlainObject(slide.background)) slide.background = { color: SLIDE_DEFAULTS.background };
     if (!isPlainObject(slide.transition)) slide.transition = defaultTransition();
+    if (!isPlainObject(slide.animations)) slide.animations = {};
+    if (!Array.isArray(slide.animationOrder)) slide.animationOrder = Object.keys(slide.animations);
   }
   return content;
 }
