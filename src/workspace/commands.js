@@ -32,11 +32,12 @@ function isNonEmptyString(value, field, reason, ErrorType) {
 }
 
 /**
- * Bump a page's modifiedAt and record it in the transaction.
+ * Bump a page's modifiedAt and record it in the transaction. Shared with other
+ * command modules (e.g. document blocks).
  * @param {Transaction} tx
  * @param {import("./schema.js").PageEnvelope} page
  */
-function touchPage(tx, page) {
+export function touchPage(tx, page) {
   page.modifiedAt = new Date().toISOString();
   tx.pageIds.add(page.id);
 }
