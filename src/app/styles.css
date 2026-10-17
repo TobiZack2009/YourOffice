@@ -1320,16 +1320,14 @@ svg.icon {
 .slide-thumb-wrap {
   position: relative;
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 6px;
-  padding: 4px;
-  border-radius: 8px;
   cursor: pointer;
 }
 
 .slide-thumb-wrap.is-current {
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--accent);
+
+  box-shadow: 0px 0px 0px 1px var(--accent);
 }
 
 .slide-thumb-wrap.is-dragging {
@@ -1366,8 +1364,8 @@ svg.icon {
 .slide-thumb {
   position: relative;
   flex: none;
+  padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   pointer-events: none;
