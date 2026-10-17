@@ -1,0 +1,942 @@
+YourOffice: PRODUCT AND TECHNICAL SPECIFICATION
+
+1. PRODUCT OVERVIEW
+
+YourOffice is a lightweight, privacy-focused office suite that combines document editing, spreadsheets, presentations, and a shared reference system in one application.
+
+The application should be distributable as a single standalone HTML file containing the application code, styles, necessary libraries, workspace data, and embedded assets. It must work without a required backend or network connection.
+
+The three primary editors are:
+- Documents
+- Spreadsheets
+- Presentations
+
+These are not isolated applications. They share a common workspace, page hierarchy, asset registry, history system, and reference system. Content created in one editor can be referenced, embedded, or reused in another without duplicating the underlying content.
+
+The application should favour vanilla JavaScript, HTML, and CSS, with minimal dependencies. Development may use JavaScript modules, but the production application should be bundled into a single HTML file.
+
+2. CORE PRODUCT PRINCIPLES
+
+2.1 Local-first and privacy-focused
+
+- No server is required for core functionality.
+- No network connection is required for normal editing, viewing, importing, or exporting of self-contained workspaces.
+- Workspace content remains under the user's control.
+- External assets may be supported as an optional convenience, but embedded assets are the default.
+- Saving must be explicit and understandable. The application must not claim that data is safely persisted when it exists only in memory or a browser cache.
+- Imported content and exported workspaces must be handled locally wherever possible.
+
+2.2 Standalone distribution
+
+The application must support exporting a complete workspace as a new standalone HTML file.
+
+Two export modes are required:
+- Editable: includes the editors and the ability to modify and re-export the workspace.
+- Read-only: allows navigation, viewing, embedded content, and presentation playback without normal editing capabilities.
+
+The exported file must contain the application shell, workspace data, and all required embedded assets. It must not depend on the original application instance, server, or browser cache.
+
+2.3 Unified content model
+
+Documents, sheets, slides, sections, and references must belong to a shared workspace model. The DOM is a rendering surface, not the authoritative data store.
+
+Content changes must be performed through validated commands against the underlying model. Direct DOM mutations must not be the source of truth.
+
+2.4 Stable identity
+
+Pages, sections, blocks, tables, cells where necessary, slides, objects, assets, and reference instances should have stable identifiers appropriate to their lifecycle.
+
+Names, titles, positions, and display order must not serve as identity. Renaming or repositioning an object must not silently break references to it.
+
+2.5 Separation of content and presentation
+
+The source content and each reference instance's appearance must be independently editable.
+
+Changing source content updates its references. Changing the width, height, alignment, crop, or other local display settings of a reference instance must not modify the source.
+
+3. WORKSPACE AND PAGE HIERARCHY
+
+The application uses a nested page hierarchy similar to Notion for organisation.
+
+A workspace contains pages and shared resources. Pages can be nested under other pages for navigation and organisation.
+
+The initial page types are:
+- Document
+- Sheet
+- Presentation
+
+Pages are independent objects. Their placement in the hierarchy does not determine their identity or ownership of embedded content.
+
+A page may be referenced from multiple locations. Moving or reorganising a page must not break references to it.
+
+Page ordering and hierarchy are organisational properties, separate from the underlying content model.
+
+The workspace maintains:
+- Workspace metadata
+- Page registry and hierarchy
+- Page content
+- Named section registry
+- Assets
+- Workspace settings
+- Optional saved view or application state, where necessary
+
+Transient interface state, such as open menus, cursor positions, and temporary selections, should not be persisted unless a specific feature requires it.
+
+4. SHARED WORKSPACE MODEL
+
+A canonical workspace format is required. The initial proposal is a versioned JSON format named YourOffice-workspace.
+
+Illustrative structure:
+
+{
+  "format": "YourOffice-workspace",
+  "schemaVersion": 1,
+  "metadata": {
+    "id": "workspace_01",
+    "title": "My Workspace",
+    "createdAt": "2026-10-17T10:00:00.000Z",
+    "modifiedAt": "2026-10-17T10:00:00.000Z"
+  },
+  "rootPageId": "doc_01",
+  "pageOrder": [
+    "doc_01",
+    "sheet_01",
+    "pres_01"
+  ],
+  "pages": {},
+  "sections": {},
+  "assets": {},
+  "settings": {
+    "defaultFont": "Arial",
+    "locale": "en-GB"
+  }
+}
+
+This is an illustrative initial schema, not a complete or frozen specification.
+
+Pages are stored by stable identifier. Each page has a common envelope containing its ID, type, title, creation and modification timestamps, and type-specific content.
+
+Timestamps use ISO 8601 UTC strings.
+
+The page registry and ordering must be separate from page content. The exact representation of nested hierarchy, including parent relationships, must be defined in the schema.
+
+5. DOCUMENT EDITOR
+
+5.1 Layout
+
+Documents use an infinite-scroll, vertically flowing block structure rather than fixed printed pages.
+
+Printing and PDF export may introduce pagination, but pagination is not the primary editing model.
+
+5.2 Block model
+
+Documents consist of ordered blocks. The initial block types should include:
+
+- Paragraph
+- Heading
+- List
+- Quote
+- Code block
+- Divider
+- Image
+- Page link
+- Section reference
+- Sheet embed
+- Presentation or slide reference
+
+Additional block types can be introduced without changing the fundamental model.
+
+Every block should have a stable ID. Ordering should be represented independently of block identity.
+
+5.3 Embedding
+
+An embedded object is a reference to another object, not a duplicate of its data.
+
+For example, embedding a sheet in a document must point to the original sheet or a section of that sheet. Multiple embeds can point to the same source.
+
+An embed may have local presentation settings, such as:
+- Compact or expanded view
+- Width and height
+- Alignment
+- Display options
+
+Removing an embed removes that placement, not the source content.
+
+Editing the underlying content updates every live reference to it.
+
+5.4 Export
+
+Individual blocks or appropriate block selections should be exportable independently, in addition to exporting an entire document or workspace.
+
+6. SPREADSHEET EDITOR
+
+6.1 Overall model
+
+A spreadsheet is an independent page object.
+
+Its canvas resembles Apple Numbers: a fixed coordinate-based workspace containing multiple independently positioned tables.
+
+It is not one enormous conventional worksheet.
+
+The canvas may expand automatically as tables are positioned beyond its initial boundaries.
+
+6.2 Tables
+
+Each table has:
+- Stable ID
+- Name
+- Canvas position
+- Row and column counts
+- Default row height and column width
+- Sparse cell storage
+- Row-specific overrides
+- Column-specific overrides
+- Merged cell ranges
+- Styling information
+
+Tables can be moved independently. Moving a table changes its position on the canvas, not the coordinates of its cells.
+
+Tables have their own local cell coordinates, such as A1, B2, and C3.
+
+Rows and columns can be inserted and deleted dynamically.
+
+Tables may overlap on the canvas unless later design decisions prohibit it.
+
+6.3 Sparse storage
+
+Only cells with meaningful content or formatting should normally be stored. The implementation must not allocate a large two-dimensional array for every possible cell.
+
+Computed formula results should be runtime caches rather than the authoritative formula representation.
+
+6.4 Formula compatibility
+
+The formula engine should follow Excel syntax and behaviour as closely as practical, with functions implemented incrementally.
+
+The initial compatibility target includes:
+- A1-style cell references
+- Relative references
+- Absolute references such as $A$1
+- Mixed references such as $A1 and A$1
+- Standard operator precedence
+- Arithmetic and comparison operators
+- Formula functions
+- Range references
+- Excel-like error behaviour
+
+An initial function set should include SUM, IF, AVERAGE, MIN, MAX, and COUNT, followed by additional functions as needed.
+
+The initial error model should include familiar spreadsheet errors such as:
+#REF!
+#DIV/0!
+#VALUE!
+#NAME?
+#NUM!
+#N/A
+
+Cycle detection is required. The exact representation of circular-reference errors should be decided with compatibility in mind rather than introducing a nonstandard error unnecessarily.
+
+6.5 Formula engine architecture
+
+The formula engine should:
+- Parse formulas into an expression representation or abstract syntax tree.
+- Resolve references to cells and ranges.
+- Maintain a dependency graph.
+- Recalculate affected cells incrementally.
+- Queue dirty cells for recalculation.
+- Detect circular dependencies.
+- Invalidate stale results when source values or formulas change.
+- Update references correctly when rows or columns are inserted or deleted.
+- Preserve formulas as the authoritative source of calculated values.
+
+The formula engine must not rely on JavaScript eval() to execute formula text.
+
+6.6 Multiple tables and references
+
+Tables have local coordinates, but formulas may eventually need to reference cells and ranges in other tables.
+
+A candidate syntax is:
+
+=SUM(Expenses!B2:B20)
+
+This syntax is illustrative. The final grammar for cross-table references, table names, and ranges must be specified before implementation.
+
+References to cells, ranges, entire tables, formula results, and charts should be representable as named sections or other appropriate reference targets.
+
+7. PRESENTATION EDITOR
+
+7.1 Slides and coordinate system
+
+A presentation is an independent page containing an ordered sequence of slides.
+
+Each slide has a stable ID. The initial design uses a 1280 by 720 logical coordinate system, with the rendered slide scaled to fit the available viewport while preserving its aspect ratio.
+
+Slide identity must be independent of its position in the presentation.
+
+7.2 Slide objects
+
+Initial object types:
+- Text
+- Image
+- Shape
+- Line
+- Optional grouped objects
+
+Each object should have a stable ID, position, dimensions, rotation where appropriate, content, styling, and optional reference or link target.
+
+Object identity and visual stacking order must be stored separately.
+
+Text should eventually support structured rich-text runs rather than only a single plain string.
+
+7.3 Links and references
+
+Objects may link to:
+- A workspace page
+- A particular slide
+- A named section
+- Another supported reference target
+
+The reference system must make it possible to display source content on a slide without duplicating the content itself.
+
+7.4 Animations
+
+Animations use a PowerPoint-like ordered animation list.
+
+Each animation identifies a target object and defines its effect, trigger, timing, duration, delay, easing, and any effect-specific options.
+
+The planned trigger modes are:
+- On click
+- With previous
+- After previous
+
+Initial effects may include:
+- Appear
+- Fade
+- Move
+- Scale
+- Disappear
+
+Animation records must target stable object IDs so that changing the visual order of objects does not detach their animations.
+
+7.5 Transitions
+
+Basic slide transitions should be supported, including:
+- None
+- Fade
+- Directional wipe
+
+Transition duration should be configurable.
+
+A reduced-motion setting should be available.
+
+7.6 Embedded slides
+
+An embedded slide should default to a static rendering of its final state. Animation playback may be available as an optional behaviour.
+
+Presentation rendering must not be assumed to provide a meaningful scalar value for spreadsheet calculations. Only explicitly defined data-bearing objects, such as a chart linked to a sheet, should expose appropriate structured data.
+
+8. SHARED REFERENCE AND SECTION SYSTEM
+
+8.1 Fundamental concept
+
+The application is organised around references.
+
+Users can select content anywhere in the workspace, define it as a named section, and reference that section elsewhere.
+
+Examples include:
+- Naming a paragraph and embedding it in a presentation.
+- Referencing a document section from another document.
+- Embedding an entire sheet in a document.
+- Embedding a subset of a sheet in a slide.
+- Exposing a single spreadsheet cell as a value.
+- Referencing a table range from another editor.
+- Referencing a slide, object, or group from another location.
+- Conditionally displaying content according to variables or parameters.
+
+The source remains authoritative. A reference should not create an independent copy unless the user explicitly requests a snapshot.
+
+8.2 Three separate concepts
+
+The model must distinguish three concepts.
+
+A. Section definition
+
+A section definition gives a piece of content a stable identity. It may have a human-readable name, a typed source locator, parameters, and other metadata.
+
+B. Reference instance
+
+A reference instance describes one particular use of a section. It identifies the target section and can contain instance-specific parameters, conditions, and presentation overrides.
+
+C. Rendered view
+
+A rendered view is the result of resolving a reference and displaying the source content in a destination context.
+
+The rendered view is not a separate authoritative copy of the source.
+
+8.3 Named sections
+
+A user should be able to select content and make it a named section.
+
+A section should have:
+- Stable section ID
+- Optional human-readable name
+- Typed source locator
+- Optional parameter definitions
+- Optional section-level display or conditional rules
+
+Names are for usability and formula syntax. Stable IDs provide identity.
+
+Illustrative section definition:
+
+{
+  "id": "section_summary",
+  "name": "project.summary",
+  "source": {
+    "pageId": "doc_01",
+    "blockId": "block_07"
+  },
+  "parameters": {
+    "showBudget": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}
+
+The exact schema and source-locator formats remain to be finalised.
+
+8.4 Source locator types
+
+Different content types require different locators.
+
+Examples:
+- A document block or a contiguous range of blocks.
+- A spreadsheet cell.
+- A spreadsheet range.
+- An entire table.
+- A formula result.
+- A chart or other structured data object.
+- A presentation slide.
+- A presentation object or group.
+
+A generic section must not assume every target is plain text.
+
+The section system must define how to identify multi-block selections, non-contiguous spreadsheet selections, and grouped presentation objects. Stable named ranges or typed locators are the proposed approach.
+
+8.5 Reference modes
+
+The reference system should support several distinct behaviours.
+
+Link reference:
+Navigates to the source without embedding its content.
+
+Embed reference:
+Renders the source content in the destination.
+
+Value reference:
+Resolves a source to a scalar value suitable for formulas or text substitution.
+
+Range reference:
+Resolves a source to a structured cell range or table.
+
+Conditional reference:
+Includes or excludes content according to a condition.
+
+Parameterised reference:
+Resolves the same source differently according to explicitly supplied parameters.
+
+These behaviours may share a common underlying reference model, but their semantics must remain distinct.
+
+8.6 Source editing versus instance styling
+
+Editing referenced content changes the source and propagates to live references.
+
+Changing a reference instance's presentation changes only that instance.
+
+For example, if a document section is embedded in a slide:
+- Editing the source paragraph changes the text displayed in the slide.
+- Changing the destination text box's width does not resize or reformat the source document.
+- Changing destination alignment does not change the source paragraph's alignment.
+- Source semantic formatting remains part of the source unless the destination explicitly applies a documented rendering override.
+
+The UI should clearly indicate whether the user is editing the source, editing the reference instance's presentation, or simply viewing the reference.
+
+8.7 Reference picker and formula syntax
+
+A reference picker and a textual formula or reference expression must resolve to the same underlying reference model.
+
+The picker is a user-friendly way to create a reference. Formula syntax is a more direct way to express one.
+
+Candidate syntax includes:
+
+REF("section_01")
+
+or:
+
+REF("project.summary")
+
+These are examples only. The final syntax, quoting rules, name resolution, and interaction with the spreadsheet formula grammar have not been finalised.
+
+Names must resolve to stable IDs rather than being the sole means of identifying content.
+
+8.8 Conditional visibility
+
+Pages and individual reference instances should be able to conditionally show or hide sections.
+
+Two types of conditions must be distinguished:
+- Source-level conditions that belong to the section definition.
+- Instance-level conditions that determine whether a particular use of the section is displayed.
+
+The same section may therefore be displayed in one location and hidden in another.
+
+Conditions must use a small, explicitly defined expression language parsed into an AST. Arbitrary JavaScript execution and eval() are not permitted.
+
+8.9 Variables and parameters
+
+Variables may be used to control which content a reference displays or how it behaves.
+
+Variable scopes should be explicit. The proposed scopes are:
+- Workspace variables
+- Page variables
+- Section parameters and defaults
+- Reference-instance overrides
+
+Reference instances may provide their own values, such as:
+
+{
+  "type": "section-reference",
+  "targetSectionId": "section_summary",
+  "parameters": {
+    "showBudget": false,
+    "currency": "NGN"
+  },
+  "presentation": {
+    "width": 640,
+    "height": 300
+  }
+}
+
+The proposed parameter resolution order is:
+1. Reference-instance overrides
+2. Section defaults
+3. Page or workspace values only when explicitly declared as permitted fallbacks
+
+The system must not give every section implicit access to every variable. Parameter types, defaults, allowed scopes, and missing-value behaviour must be defined.
+
+8.10 Spreadsheet section semantics
+
+Spreadsheet sections should expose data according to their declared type.
+
+Examples:
+- A single cell resolves to a scalar.
+- A cell range resolves to a structured range.
+- An entire table resolves to a table-like object.
+- A formula result resolves to a scalar or supported value type.
+- A chart resolves to a chart or visual object, not automatically to a scalar.
+
+Live references are the default.
+
+A snapshot mode may be offered for historical reports or static documents. A snapshot intentionally stops following subsequent source changes and must be distinguishable from a live reference.
+
+8.11 Lifecycle and deletion
+
+Removing a section definition should remove its named identity without automatically deleting the source content.
+
+Deleting source content is a separate operation and should warn about references that may become invalid.
+
+Moving source content should preserve its section ID when the underlying content identity remains valid. The source locator must be updated accordingly.
+
+If the source can no longer be resolved, the application should report a broken reference clearly rather than silently substituting unrelated content.
+
+9. DEPENDENCY AND RENDERING SYSTEMS
+
+The application should maintain separate but coordinated dependency systems.
+
+Data dependency graph:
+Tracks spreadsheet formulas, referenced values, variables, and conditions that depend on other data.
+
+Rendering dependency graph:
+Tracks views that need to be rerendered when source content, parameters, or presentation properties change.
+
+Keeping these concepts distinct makes it easier to recalculate values without unnecessarily rerendering the entire workspace, and to update a view without recalculating unrelated formulas.
+
+The application should:
+- Invalidate only affected data and views where practical.
+- Cache resolved references and rendered output when safe.
+- Key caches by relevant source revision and parameter values.
+- Detect circular formula and section dependencies.
+- Report cycles explicitly.
+- Avoid recursive rendering loops.
+- Update all live references when their source changes.
+
+10. ASSET MANAGEMENT
+
+Assets are stored in a workspace-level registry.
+
+Embedded assets are the default because they make workspaces portable and allow standalone HTML export.
+
+Optional external assets may be supported for large projects.
+
+Asset records should include:
+- Stable ID
+- Asset kind
+- MIME type
+- Original filename
+- Size
+- Storage mode
+- Embedded data or validated external path
+- Optional content hash
+
+Illustrative embedded asset:
+
+{
+  "id": "asset_01",
+  "kind": "image",
+  "mimeType": "image/png",
+  "name": "diagram.png",
+  "size": 183420,
+  "storage": {
+    "mode": "embedded",
+    "data": "BASE64_DATA"
+  }
+}
+
+Asset handling should include:
+- Content-hash-based deduplication where practical.
+- Lazy decoding for large assets.
+- Runtime-only object URLs.
+- Revocation of object URLs when no longer needed.
+- Validation of external paths to prevent path traversal.
+- Embedding of all required assets during standalone HTML export.
+
+Blob URLs must never be persisted as stable asset identities.
+
+For large workspaces, a ZIP package containing workspace JSON and assets may be offered as an additional interchange format.
+
+11. STORAGE, HISTORY, AND RECOVERY
+
+The canonical in-memory workspace model is the source of truth during an editing session.
+
+All mutations should pass through validated, typed commands. Compound operations should be grouped into transactions.
+
+Examples:
+- Inserting a spreadsheet row and updating affected formulas should form one logical transaction.
+- Moving a source block should update section locators and affected views as one logical operation.
+- Editing content should update dirty state and invalidate dependent references.
+
+Undo and redo should operate on logical transactions rather than arbitrary DOM changes.
+
+IndexedDB may be used for autosaving and recovery when available. It is an optional persistence mechanism, not the only portable copy of the workspace.
+
+The application should provide:
+- Dirty-state tracking
+- Explicit workspace export
+- Recovery from the last known good state where possible
+- Clear indication of save and export outcomes
+- Warnings about unsaved changes
+- Protection against partially applied or malformed imports
+
+A browser cache must not be treated as a portable or guaranteed durable save.
+
+12. WORKSPACE FORMAT AND INTERCHANGE
+
+The primary interchange format is versioned JSON.
+
+The application should support:
+- Importing a workspace JSON file.
+- Exporting a workspace JSON file.
+- Exporting individual supported content blocks.
+- Markdown-based folder interchange.
+- CSV import and export for appropriate spreadsheet data.
+- PDF export where practical.
+- Limited DOCX, XLSX, and PPTX import/export.
+
+Full Office compatibility is not a core requirement because these formats have extensive and complex specifications.
+
+Importers should validate incoming data, identify unsupported features, and avoid silently discarding content.
+
+The schema must be versioned from the beginning. Migrations should convert older workspace versions into the current model where possible.
+
+Markdown interchange should preserve useful document structure and references where the format allows it. Features that Markdown cannot represent must be documented rather than silently flattened without warning.
+
+13. STANDALONE HTML EXPORT
+
+13.1 Pristine application shell
+
+The application shell used for export must be the pristine template before workspace initialisation or user interaction.
+
+The requirement is not to snapshot the current workspace UI.
+
+A build-time HTML template is preferred because serialising document.documentElement.outerHTML only captures the current DOM representation. It does not guarantee preservation of the original source bytes or uninitialised markup.
+
+The shell should have a known location for the embedded workspace payload.
+
+13.2 Export pipeline
+
+The export process should:
+1. Flush pending edits and finish necessary asset reads.
+2. Obtain a consistent snapshot of the workspace model.
+3. Serialize the workspace and required assets.
+4. Start from the pristine application shell.
+5. Embed the workspace payload and required assets.
+6. Set the requested export mode.
+7. Produce the new HTML file.
+8. Validate the resulting file by reopening it in a fresh application instance.
+
+13.3 Workspace payload
+
+A data-only script element may be used:
+
+<script id="workspace-data" type="application/json">
+{"format":"YourOffice-workspace","schemaVersion":1,"pages":{},"assets":{}}
+</script>
+
+When JSON is embedded inside HTML, characters such as <, >, and & should be escaped appropriately, especially to prevent a payload containing </script> from terminating the script element.
+
+On startup, the application reads the element's text content, parses the JSON, and validates the schema before using it.
+
+13.4 Editable export
+
+Editable HTML should include:
+- Document editing
+- Spreadsheet editing
+- Presentation editing
+- Workspace navigation
+- Reference editing and resolution
+- Import and export features that are supported in standalone mode
+- The ability to export an updated standalone HTML file
+
+13.5 Read-only export
+
+Read-only HTML should include:
+- Workspace navigation
+- Document and sheet viewing
+- Reference rendering
+- Embedded content
+- Presentation playback where supported
+
+Normal mutation commands must be disabled at the command layer, not merely hidden from the interface.
+
+Read-only mode is intended to prevent ordinary editing. It is not a security boundary against someone who deliberately modifies the HTML or JavaScript.
+
+13.6 Local-file behaviour
+
+Browser behaviour for file:// URLs, local storage, downloads, and IndexedDB may vary.
+
+Therefore:
+- Embedded JSON must remain the portable source of truth.
+- The application must not depend on the original browser's cache.
+- A clear export or save workflow must exist.
+- The user should be able to download an updated standalone HTML file.
+- The user should also be able to export the workspace JSON separately.
+- Unsaved changes should be reported before leaving the application.
+
+14. APPLICATION ARCHITECTURE
+
+The initial architecture should use vanilla JavaScript modules with clear boundaries.
+
+Proposed modules:
+
+app:
+Application startup, shell, routing, and high-level UI.
+
+workspace:
+Workspace state, page registry, metadata, transactions, dirty state, and validation.
+
+document:
+Document blocks, rich text, ordering, and document rendering.
+
+sheet:
+Tables, sparse cell storage, row/column operations, formulas, dependencies, and spreadsheet rendering.
+
+presentation:
+Slides, objects, animations, transitions, and presentation rendering.
+
+references:
+Section definitions, source locators, reference instances, name resolution, parameters, conditions, and dependency handling.
+
+assets:
+Asset registry, embedded storage, external paths, deduplication, and runtime asset URLs.
+
+history:
+Undo, redo, transaction grouping, and recovery support.
+
+storage:
+IndexedDB integration, import/export persistence, and recovery.
+
+formats:
+Workspace JSON, Markdown, CSV, PDF, and limited Office conversion.
+
+standalone:
+Pristine-shell handling, payload injection, export modes, asset embedding, and output validation.
+
+These are logical responsibilities. The final physical file layout may differ.
+
+The development build can use modules and source files. The production build should bundle the application into a single HTML file.
+
+15. API DIRECTION
+
+The public API should expose model-level operations rather than requiring callers to manipulate the DOM.
+
+Illustrative example:
+
+const workspace = Workspace.create({
+  title: "My Workspace"
+});
+
+const document = workspace.createPage("document", {
+  title: "Notes"
+});
+
+const sheet = workspace.createPage("sheet", {
+  title: "Budget"
+});
+
+const presentation = workspace.createPage("presentation", {
+  title: "Project Pitch"
+});
+
+workspace.insertBlock(document.id, {
+  type: "sheet-embed",
+  targetPageId: sheet.id
+});
+
+workspace.renamePage(sheet.id, "Project Budget");
+
+const json = await workspace.exportJSON();
+
+const html = await workspace.exportHTML({
+  mode: "editable"
+});
+
+This API is illustrative. Exact method signatures, return types, error handling, and transaction semantics remain to be designed.
+
+16. IMPLEMENTATION PRIORITIES
+
+A practical implementation sequence is:
+
+Phase 1: Workspace foundation
+- Versioned JSON schema
+- Stable IDs
+- Page registry and nested hierarchy
+- Command-based mutation
+- Basic history and dirty-state tracking
+- Import and export of workspace JSON
+
+Phase 2: Document editor
+- Ordered blocks
+- Basic rich text
+- Page links
+- Images
+- Source content identity
+
+Phase 3: Spreadsheet foundation
+- Canvas and multiple independent tables
+- Sparse cell storage
+- Dynamic rows and columns
+- Basic formula parser and evaluator
+- Dependency graph
+- Incremental recalculation
+
+Phase 4: Presentation foundation
+- Slides and stable object IDs
+- Text, images, shapes, and lines
+- Positioning and rendering
+- Basic links and transitions
+- Ordered animation system
+
+Phase 5: Reference and section system
+- Named sections
+- Typed source locators
+- Reference instances
+- Cross-editor embedding
+- Source-versus-instance editing
+- Parameters and conditional visibility
+- Cycle detection and invalidation
+
+Phase 6: Persistence and interchange
+- IndexedDB autosave where available
+- Recovery
+- Markdown and CSV support
+- PDF export
+- Limited Office-format conversion
+
+Phase 7: Standalone distribution
+- Pristine HTML shell
+- Editable and read-only export
+- Asset embedding
+- Export validation
+- Updated-HTML download
+- Compatibility testing across browsers
+
+The exact order may change if early prototypes reveal dependencies that make another sequence more efficient.
+
+17. OPEN DESIGN QUESTIONS
+
+The following points have not yet been conclusively finalised.
+
+17.1 Section boundaries
+
+How should a section represent:
+- Multiple contiguous document blocks?
+- Non-contiguous spreadsheet cells?
+- A subset of a table that changes size?
+- A group of presentation objects?
+- Content that moves between pages or tables?
+
+The proposed direction is a typed source locator with stable identity and explicitly defined range semantics.
+
+17.2 Reference syntax
+
+The formula and reference grammar is still open. It must distinguish spreadsheet cell and range references from named sections and other reference types without creating ambiguity.
+
+17.3 Cross-table formulas
+
+The syntax and semantics for referencing tables on the same sheet, tables on different sheets, and named section values need to be specified.
+
+17.4 Variable resolution
+
+The exact rules for workspace variables, page variables, section parameters, defaults, and reference-instance overrides need to be formalised.
+
+17.5 Conditional language
+
+The allowed operators, functions, types, truthiness rules, error behaviour, and access restrictions for conditional expressions remain to be specified.
+
+17.6 Section identity during edits
+
+The application needs rules for preserving section identity when source blocks are split, merged, moved, deleted, or replaced.
+
+17.7 Compatibility boundaries
+
+The exact supported subset of Excel formulas, document formats, presentation features, and export behaviours should be documented as the implementation develops.
+
+17.8 Persistence and large assets
+
+The limits for embedded asset sizes, external asset support, ZIP packages, and browser storage need to be determined empirically.
+
+18. SUMMARY OF ESTABLISHED DECISIONS
+
+The following are established product directions:
+- One integrated application for documents, spreadsheets, and presentations.
+- Local-first operation with no required backend.
+- A single-HTML distribution and export target.
+- A versioned JSON workspace format.
+- Nested page organisation.
+- Infinite-scroll document blocks.
+- A fixed spreadsheet canvas containing independently positioned tables.
+- Dynamic table rows and columns with local cell coordinates.
+- Excel-like formula syntax and behaviour implemented incrementally.
+- Presentations with stable slide and object identities.
+- PowerPoint-like ordered animations with click and automatic timing.
+- Basic slide transitions.
+- Editable and read-only standalone HTML exports.
+- Embedded assets by default, with optional external assets.
+- A shared reference-oriented content model.
+- Named sections that can be referenced across editor types.
+- Source content separated from per-reference presentation settings.
+- Parameters and conditional section visibility.
+- Live references by default, with optional snapshots where appropriate.
+- Explicit source deletion and section removal semantics.
+- Separate data dependency and rendering dependency systems.
+- Vanilla JavaScript modules during development and a bundled single-HTML production output.
+
+The reference grammar, complete schemas, exact Office compatibility targets, and several edge cases remain open design work. They should be settled through explicit specifications and small prototypes before being treated as permanent requirements.
