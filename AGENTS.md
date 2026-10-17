@@ -171,11 +171,52 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     calls `markSaved`), image insert is omitted because the asset registry lands in
     Phase 7, and sheet/presentation pages render a stub.
   - `src/main.js` — seeds a welcome document and calls `mountApp`.
+- **Phase 4 in progress — sheet editor (spec §6):**
+  - `src/sheet/model.js` — sparse table model: `{ tables: { [id]: Table }, tableOrder }`;
+    each table carries stable id, name, canvas `position`, `rowCount`/`columnCount`,
+    default `rowHeight`/`columnWidth`, sparse `cells` keyed `"col,row"` (0-based,
+    matching the engine), `rowOverrides`/`columnOverrides`, `merges`, and
+    `validateTable` / `validateSheetContent` / `createTable` / `ensureSheetContent`.
+    A cell holds either a literal `value` or a `formula` (never both) — computed
+    results live only in the engine (spec §6.3).
+  - `src/sheet/shift.js` — index-shift algebra for row/column insert/delete:
+    `shiftRef` (absolute markers do **not** exempt a reference — Excel shifts them
+    on structural edits), `shiftFormulaReferences` (token-level rewrite that
+    preserves the user's spacing/strings and emits `#REF!` for deleted targets),
+    `shiftCells` / `shiftOverrides` / `shiftMerges` (merges inside a deleted band
+    are dropped, straddling ones clamped).
+  - `src/sheet/commands.js` — `createTable`, `deleteTable`, `renameTable`,
+    `moveTable`, `setCell` (promotes `"=…"` strings to formulas, grows the table to
+    fit a position, clears on null/empty), `insertRow`/`deleteRow`,
+    `insertColumn`/`deleteColumn`, `setRowHeight`/`setColumnWidth`,
+    `mergeCells`/`unmergeCells` (overlap rejected). Registered with
+    `registerSheetCommands(store)`.
+  - `src/sheet/table-engine.js` — `TableEngines`: **one `RecalcEngine` per table**
+    (the Phase 4 decision). The engine speaks 1-based A1 positions; the model is
+    0-based, and that conversion lives only here. Engines are rebuilt from the
+    sparse store on change (correct over clever; incremental deltas are the
+    planned optimisation, tracked below).
+  - `src/sheet/render.js` — pure canvas → DOM: `renderSheet` / `renderTable` /
+    `resolveCell` / `tableExtent` / `columnWidthOf` / `rowHeightOf`. One
+    absolutely-positioned `<table>` per table, header row/column, `colgroup`
+    widths, row heights, merges as `colspan`/`rowspan` with covered cells skipped,
+    selection highlight, and a "New table"/row/column action bar.
+  - `src/app/sheet-editor.js` — `createSheetEditor(workspace, pageId, options)`:
+    cell selection (mousedown), formula bar (`parseCellInput` turns numeric text
+    into numbers, `TRUE`/`FALSE` into booleans, `"=…"` into formulas), Enter/Tab
+    commit-and-move, arrow/Delete keys, row/column insert/delete at the selection,
+    and Add table. Sheet pages no longer render a stub; only presentations do.
+  - Deliberate gaps: no range selection (so the `mergeCells`/`unmergeCells`
+    commands and merge rendering are not yet reachable from the UI), no table drag
+    on the canvas (positions are set by command only), and cross-table references
+    remain Phase 6.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
-  `document-commands`, `document-render`, `app-inline`, `app-sidebar`,
-  `app-block-editor`, `app-shell`. **269 tests green across 18 files**; the
-  single-file build inlines JS + CSS into one ~57 kB HTML.
+  `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
+  `sheet-commands`, `sheet-table-engine`, `sheet-render`, `app-inline`,
+  `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`.
+  **347 tests green across 24 files**; the single-file build inlines JS + CSS into
+  one ~95 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
@@ -186,8 +227,10 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
    mixed refs, SUM/IF/AVERAGE/MIN/MAX/COUNT, Excel error values.
 3. **Phase 3 — document editor** (done): ordered blocks, rich text runs, page links,
    images, pure DOM renderer. Block export still outstanding.
-4. **Phase 4 — sheet editor** (in progress — next): Numbers-style canvas, independent
-   tables, sparse storage, row/col ops wired to the engine.
+4. **Phase 4 — sheet editor** (in progress — core landed): Numbers-style canvas,
+   independent tables, sparse storage, row/col ops wired to the engine, table
+   renderer and an interactive editor. Remaining: range selection + merge UI,
+   canvas dragging, incremental recalc, cross-table visual polish.
 5. **Phase 5 — presentation:** 1280×720 slides, stable object IDs, text/image/shape/
    line, transitions, ordered animations.
 6. **Phase 6 — references/sections:** typed source locators, reference instances,
@@ -203,13 +246,12 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
 
 (From spec §17 — decide with small prototypes + tests as each phase starts.)
 
-- **Phase 4 next steps:** the `RecalcEngine` is table-agnostic and keyed by
-  `col,row`. Phase 4 needs a sheet page model (`{ tables: { [id]: Table } }` with
-  canvas position, row/col counts, sparse cells, overrides, merges), commands for
-  table/row/column operations that shift references, and a renderer over the canvas.
-  Decide how a table's cell addresses map into the engine (per-table engine vs one
-  engine with prefixed keys) — candidate: one engine per table, with cross-table
-  references (`Expenses!B2`) resolved by name in Phase 6.
+- **Phase 4 engine mapping — settled:** one `RecalcEngine` per table, with
+  cross-table references (`Expenses!B2`) deferred to Phase 6 name resolution.
+  `RecalcEngine` positions are 1-based (A1 = `"1,1"`); the sheet model is 0-based
+  and converts in `TableEngines` only. Remaining Phase 4 work: range selection so
+  merges are reachable from the UI, canvas table dragging, and incremental engine
+  updates instead of a rebuild per change.
 
 - Section locator shapes and range semantics (multi-block, non-contiguous cells).
 - Reference/section expression grammar and how it meets the spreadsheet parser.
