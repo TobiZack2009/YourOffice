@@ -1594,7 +1594,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
       item("Insert paragraph below", "paragraph", "ctx-insert-paragraph", () => insertAfterActive({ type: "paragraph" })),
       item("Insert divider below", "divider", "ctx-insert-divider", () => insertAfterActive({ type: "divider" })),
       { separator: true },
-      item(sel && selectedKeys().length > 1 ? "Delete blocks" : "Delete block", "clear", "ctx-delete", () => deleteActive(), {
+      item(sel && selectedKeys().length > 1 ? "Delete blocks" : "Delete block", "trash", "ctx-delete", () => deleteActive(), {
         danger: true,
         disabled: !info.blockId
       })

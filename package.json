@@ -17,5 +17,8 @@
     "vite": "^8.3.4",
     "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "lucide": "^1.59.0"
   }
 }

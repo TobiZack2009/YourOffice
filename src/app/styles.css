@@ -200,7 +200,7 @@ svg.icon {
   min-height: 28px;
   padding: 2px 4px 2px calc(4px + var(--depth, 0) * 14px);
   border-radius: 6px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .favorite-row {

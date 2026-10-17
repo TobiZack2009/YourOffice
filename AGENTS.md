@@ -75,7 +75,8 @@ labelled groups) → canvas.
   seams), File and View on everything. `data-page-type`
   on `.app` drives the accent (document blue, sheet green, presentation orange).
 - `popover.js` (positioned popovers + `buildMenu`) is shared by the ribbon and the
-  sidebar. `icons.js` builds inline SVG icons. `quick-find.js` is the Cmd/Ctrl+K
+  sidebar. `icons.js` builds inline SVG icons from the Lucide pack (`lucide` on npm, named imports
+  so unused icons are tree-shaken; a few icons with no Lucide equivalent are drawn locally). `quick-find.js` is the Cmd/Ctrl+K
   overlay (`findPages` is the pure filter).
 - Embedding sheets/slides in documents is deferred: the document Insert tab shows
   disabled "Sheet"/"Slide" seams (Phase 6).
@@ -463,6 +464,19 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   - Deferred: Animations (disabled seam), slideshow playback and transition playback,
     themes, embedding slides in documents (Phase 6), image assets in the registry
     (Phase 7), resize/rotate of multi-selections.
+- **Sidebar click target and Lucide icons:**
+  - The whole `.page-row` / `.favorite-row` selects its page (`selectFromRow`), not just
+    the title button. Clicks on the caret, `.page-actions` and the rename input are
+    ignored by the row handler; double-click-to-rename and drag-and-drop are unchanged.
+    Rows use `cursor: pointer`.
+  - `icons.js` now maps each icon name to a Lucide icon node (named imports from
+    `lucide`, so the bundle only carries what is used, about +6 kB). The `icon()` /
+    `hasIcon()` API and the `icon icon-<name>` / `data-icon` attributes are unchanged.
+    The letter glyph icons (B/I/U/S/H1-3) are now Lucide icons; hand-drawn nodes remain
+    only for table-new, row/column delete, shift-*, fill-all, rect, bring-forward and
+    send-backward. Block "Delete" in the document context menu uses `trash`.
+  - Restored the page title input in the header (`pageHeader.append(titleInput)`), which
+    an earlier removal of the page-kind badge had dropped along with it.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
@@ -470,8 +484,8 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`, `app-ribbon`,
   `app-quick-find`, `app-popover`, `document-nesting`, `presentation-model`,
   `presentation-commands`, `presentation-geometry`, `presentation-render`,
-  `app-presentation-editor`, `app-marks`. **690 tests green across 36 files**; the
-  single-file build inlines JS + CSS into one ~245 kB HTML.
+  `app-presentation-editor`, `app-marks`. **693 tests green across 36 files**; the
+  single-file build inlines JS + CSS into one ~251 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 

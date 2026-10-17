@@ -305,9 +305,6 @@ export function createSidebar(workspace, actions) {
         type: "button",
         text: page.title || "Untitled"
       });
-      title.addEventListener("click", () => {
-        if (state.selectedPageId !== pageId) select(pageId);
-      });
       title.addEventListener("dblclick", () => startRename(pageId));
       row.append(title);
     }
@@ -322,6 +319,9 @@ export function createSidebar(workspace, actions) {
         )
       ])
     );
+
+    // The whole row is the click target, not just the title text.
+    row.addEventListener("click", (event) => selectFromRow(event, pageId));
 
     // Drag and drop wiring.
     row.addEventListener("dragstart", (event) => {
@@ -368,6 +368,18 @@ export function createSidebar(workspace, actions) {
     return h("div", { class: "page-node" }, [row, ...children]);
   }
 
+  /**
+   * Row-level click: selects the page unless the click landed on an interactive
+   * child (caret, row actions, rename input) that handles itself.
+   * @param {Event} event
+   * @param {string} pageId
+   */
+  function selectFromRow(event, pageId) {
+    const target = /** @type {Element} */ (event.target);
+    if (target.closest(".page-caret, .page-actions, .rename-input")) return;
+    if (state.selectedPageId !== pageId) select(pageId);
+  }
+
   /** @param {string} pageId */
   function renderFavorite(pageId) {
     const page = workspace.getPage(pageId);
@@ -377,11 +389,8 @@ export function createSidebar(workspace, actions) {
       "data-favorite-id": pageId
     });
     row.append(typeGlyph(page.type));
-    const title = h("button", { class: "favorite-title", type: "button", text: page.title || "Untitled" });
-    title.addEventListener("click", () => {
-      if (state.selectedPageId !== pageId) select(pageId);
-    });
-    row.append(title);
+    row.append(h("button", { class: "favorite-title", type: "button", text: page.title || "Untitled" }));
+    row.addEventListener("click", (event) => selectFromRow(event, pageId));
     row.append(
       h("span", { class: "page-actions" }, [
         rowButton(`Remove ${page.title || "page"} from favorites`, "star", "unfavorite", () =>

@@ -103,6 +103,21 @@ describe("createSidebar", () => {
     expect(sidebar.element.querySelector(`[data-page-id="${b}"]`)?.classList.contains("is-selected")).toBe(true);
   });
 
+  it("selects a page when the row itself is clicked, not only its title", () => {
+    const { sidebar, actions, b } = mount();
+    const row = /** @type {HTMLElement} */ (sidebar.element.querySelector(`.page-row[data-page-id="${b}"]`));
+    row.click();
+    expect(actions.select).toHaveBeenCalledWith(b);
+  });
+
+  it("does not select when the row's caret or actions are clicked", () => {
+    const { sidebar, actions, a } = mount();
+    const row = sidebar.element.querySelector(`.page-row[data-page-id="${a}"]`);
+    /** @type {HTMLElement} */ (row?.querySelector(".page-actions")).click();
+    /** @type {HTMLElement | null} */ (row?.querySelector(".page-caret"))?.click();
+    expect(actions.select).not.toHaveBeenCalled();
+  });
+
   it("renames a page with a double-click and Enter", () => {
     const { sidebar, actions, a } = mount();
     const title = sidebar.element.querySelector(`[data-page-id="${a}"] .page-title`);

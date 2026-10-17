@@ -261,6 +261,7 @@ export function mountApp(root, workspace, options = {}) {
       }
     });
     titleInput.addEventListener("blur", commitTitle);
+    pageHeader.append(titleInput);
 
     if (page.type === "document") {
       const editor = createDocumentEditor(workspace, page.id, {
