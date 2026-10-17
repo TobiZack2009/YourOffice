@@ -70,8 +70,26 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
 
 ## Status log
 
-- Scaffolding started: package.json (Vite, Vitest, JSDoc/checkJs), vite config with
-  `vite-plugin-singlefile`, jsconfig, placeholder shell, git init.
+- Scaffolding started: package.json (Vite + `vite-plugin-singlefile`, Vitest, JSDoc),
+  vite config, shell, git init. Verification path: `npm test` + `npm run build`.
+  Vitest runs with the jsdom environment; most suites are environment-agnostic.
+- **Phase 1 complete (all 56 tests green, single-file build verified):**
+  - `src/core/` — `ids.js` (stable prefixed IDs), `events.js` (pub/sub), `errors.js`
+    (`WorkspaceFormatError`, `CommandError` with machine-readable `reason`).
+  - `src/workspace/schema.js` — versioned `YourOffice-workspace` format, standalone
+    `validateWorkspace()` (never throws; returns error list), migration registry +
+    `migrateWorkspace()`, `PAGE_TYPES` = document/sheet/presentation.
+  - `src/workspace/store.js` — `Workspace` class: command dispatch inside
+    transactions (nested `transact` joins outer), snapshot rollback on throw,
+    per-transaction snapshot undo/redo, dirty state, `change` events carrying
+    `{kind, transactionId, label, commands, pages}`.
+  - `src/workspace/commands.js` — built-in commands: `createPage`, `renamePage`,
+    `deletePage` (cascade guard, refuses to orphan children), `movePage`
+    (cycle-prevention: can't move under own descendant), `renameWorkspace`,
+    `setPageContent` (deep-copied content on the page envelope).
+  - `src/workspace/format.js` — `exportWorkspaceJSON` / `importWorkspaceJSON`,
+    round-trip tested; rejects malformed/invalid input via `WorkspaceFormatError`.
+  - `src/main.js` — placeholder shell wired to a real `Workspace` instance.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
