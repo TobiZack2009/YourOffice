@@ -22,19 +22,8 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* Per-page-type accent, driven by data-page-type on the app root. */
-.app[data-page-type="document"] {
-  --accent: #1d6fdc;
-  --accent-soft: #e6f0ff;
-}
-
-.app[data-page-type="sheet"] {
-  --accent: #2f8f4e;
-  --accent-soft: #e5f4ea;
-}
-
-.app[data-page-type="presentation"] {
-  --accent: #c05621;
+.app {
+  --accent: --var(--text-muted);
   --accent-soft: #fdeee3;
 }
 
@@ -281,17 +270,6 @@ svg.icon {
   color: var(--text-muted);
 }
 
-.type-glyph.type-document {
-  color: #1d6fdc;
-}
-
-.type-glyph.type-sheet {
-  color: #2f8f4e;
-}
-
-.type-glyph.type-presentation {
-  color: #c05621;
-}
 
 .page-title,
 .favorite-title {
