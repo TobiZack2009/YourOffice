@@ -176,6 +176,73 @@ describe("addListItem", () => {
   });
 });
 
+describe("changeBlockType", () => {
+  it("converts a paragraph to a heading, preserving text", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "Title" }] } });
+    const blockId = content(ws, pageId).blockOrder[0];
+    ws.dispatch("changeBlockType", { pageId, blockId, type: "heading" });
+    const block = content(ws, pageId).blocks[blockId];
+    expect(block.id).toBe(blockId);
+    expect(block.type).toBe("heading");
+    expect(block.level).toBe(1);
+    expect(block.runs).toEqual([{ text: "Title" }]);
+  });
+
+  it("converts a paragraph to code, flattening runs to text", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("insertBlock", {
+      pageId,
+      block: { type: "paragraph", runs: [{ text: "a" }, { text: "b", marks: { bold: true } }] }
+    });
+    const blockId = content(ws, pageId).blockOrder[0];
+    ws.dispatch("changeBlockType", { pageId, blockId, type: "code" });
+    const block = content(ws, pageId).blocks[blockId];
+    expect(block.type).toBe("code");
+    expect(block.text).toBe("ab");
+  });
+
+  it("converts code back to a paragraph run", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("insertBlock", { pageId, block: { type: "code", text: "let x = 1" } });
+    const blockId = content(ws, pageId).blockOrder[0];
+    ws.dispatch("changeBlockType", { pageId, blockId, type: "paragraph" });
+    expect(content(ws, pageId).blocks[blockId].runs).toEqual([{ text: "let x = 1" }]);
+  });
+
+  it("converts a paragraph to a list with one item", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "milk" }] } });
+    const blockId = content(ws, pageId).blockOrder[0];
+    ws.dispatch("changeBlockType", { pageId, blockId, type: "list" });
+    const block = content(ws, pageId).blocks[blockId];
+    expect(block.type).toBe("list");
+    expect(block.items).toHaveLength(1);
+    expect(block.items[0].runs).toEqual([{ text: "milk" }]);
+  });
+
+  it("converts to a divider, dropping content", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "x" }] } });
+    const blockId = content(ws, pageId).blockOrder[0];
+    ws.dispatch("changeBlockType", { pageId, blockId, type: "divider" });
+    const block = content(ws, pageId).blocks[blockId];
+    expect(block.type).toBe("divider");
+    expect(block.runs).toBeUndefined();
+  });
+
+  it("is a no-op when the type is unchanged and rejects unknown types", () => {
+    const { ws, pageId } = setup();
+    ws.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "x" }] } });
+    const blockId = content(ws, pageId).blockOrder[0];
+    ws.dispatch("changeBlockType", { pageId, blockId, type: "paragraph" });
+    expect(content(ws, pageId).blocks[blockId].type).toBe("paragraph");
+    expect(() => ws.dispatch("changeBlockType", { pageId, blockId, type: "video" })).toThrow(
+      CommandError
+    );
+  });
+});
+
 describe("document commands integrate with transactions and history", () => {
   it("undo restores block edits", () => {
     const { ws, pageId } = setup();

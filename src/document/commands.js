@@ -13,6 +13,7 @@ import { CommandError } from "../core/errors.js";
 import { createId } from "../core/ids.js";
 import { touchPage } from "../workspace/commands.js";
 import {
+  BLOCK_TYPES,
   createBlock,
   ensureDocumentContent,
   validateBlock,
@@ -25,6 +26,34 @@ import {
 /** @typedef {import("./model.js").InlineRun} InlineRun */
 
 const RUN_BLOCK_TYPES = new Set(["paragraph", "heading", "quote"]);
+
+/**
+ * Extract plain-text runs from any block, for type conversion.
+ * @param {Block} block
+ * @returns {InlineRun[]}
+ */
+function textRunsOf(block) {
+  if (Array.isArray(block.runs)) return structuredClone(block.runs);
+  if (block.type === "code" && block.text) return [{ text: block.text }];
+  if (Array.isArray(block.items)) {
+    return block.items.flatMap((item) => structuredClone(item.runs));
+  }
+  return [];
+}
+
+/**
+ * Flatten any block to plain text.
+ * @param {Block} block
+ * @returns {string}
+ */
+function plainTextOf(block) {
+  if (Array.isArray(block.runs)) return block.runs.map((run) => run.text).join("");
+  if (block.type === "code") return block.text ?? "";
+  if (Array.isArray(block.items)) {
+    return block.items.map((item) => item.runs.map((run) => run.text).join("")).join("\n");
+  }
+  return "";
+}
 
 /**
  * @param {unknown} value
@@ -145,6 +174,47 @@ export const documentCommands = {
       throw new CommandError(`invalid block update: ${errors.join("; ")}`, "invalidBlock");
     }
     content.blocks[existing.id] = candidate;
+    touchPage(tx, page);
+  },
+
+  /**
+   * Change a block's type, converting its content sensibly (runs ↔ code text ↔
+   * list items ↔ nothing). Identity is preserved.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockId: string, type: string, fields?: Record<string, unknown> }} payload
+   */
+  changeBlockType(store, tx, payload) {
+    const p = /** @type {Record<string, unknown>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    const existing = requireBlock(content, p.blockId);
+    const type = requireString(p.type, "type", "invalidBlock");
+    if (!BLOCK_TYPES.includes(type)) {
+      throw new CommandError(`unknown block type: ${type}`, "invalidBlock");
+    }
+    if (type === existing.type) return;
+
+    const runs = textRunsOf(existing);
+    const fields = /** @type {Record<string, unknown>} */ (
+      p.fields && typeof p.fields === "object" ? { ...p.fields } : {}
+    );
+
+    if (RUN_BLOCK_TYPES.has(type)) {
+      if (fields.runs === undefined) fields.runs = runs;
+      if (type === "heading" && fields.level === undefined) fields.level = 1;
+    } else if (type === "list") {
+      if (fields.ordered === undefined) {
+        fields.ordered = typeof existing.ordered === "boolean" ? existing.ordered : false;
+      }
+      if (fields.items === undefined) {
+        fields.items = runs.length > 0 ? [{ id: createId("item"), runs }] : [];
+      }
+    } else if (type === "code") {
+      if (fields.text === undefined) fields.text = plainTextOf(existing);
+    }
+
+    const created = createBlock(type, fields);
+    content.blocks[existing.id] = { ...created, id: existing.id };
     touchPage(tx, page);
   },
 
