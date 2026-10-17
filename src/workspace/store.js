@@ -277,6 +277,15 @@ export class Workspace {
   }
 
   /**
+   * Whether a command type is registered.
+   * @param {string} type
+   * @returns {boolean}
+   */
+  hasCommand(type) {
+    return this._commands.has(type);
+  }
+
+  /**
    * Validate then apply a command. Inside an open transaction it is grouped;
    * otherwise it runs as its own single-command transaction.
    *
@@ -302,6 +311,16 @@ export class Workspace {
   }
 
   // -- history ----------------------------------------------------------------
+
+  /** @returns {boolean} Whether there is a transaction to undo. */
+  get canUndo() {
+    return this._history.length > 0;
+  }
+
+  /** @returns {boolean} Whether there is a transaction to redo. */
+  get canRedo() {
+    return this._redo.length > 0;
+  }
 
   /**
    * Undo the most recent transaction.
