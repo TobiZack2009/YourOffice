@@ -421,6 +421,30 @@ export function setCell(table, col, row, cell) {
 }
 
 /**
+ * Normalised merge rectangle from two corners (0-based, inclusive).
+ * @param {{ col: number, row: number }} a
+ * @param {{ col: number, row: number }} b
+ * @returns {Merge}
+ */
+export function normaliseMerge(a, b) {
+  return {
+    start: { col: Math.min(a.col, b.col), row: Math.min(a.row, b.row) },
+    end: { col: Math.max(a.col, b.col), row: Math.max(a.row, b.row) }
+  };
+}
+
+/**
+ * @param {Merge} merge
+ * @returns {{ cols: number, rows: number }}
+ */
+export function mergeBounds(merge) {
+  return {
+    cols: merge.end.col - merge.start.col + 1,
+    rows: merge.end.row - merge.start.row + 1
+  };
+}
+
+/**
  * The merge covering a position, if any.
  * @param {Table} table
  * @param {number} col
