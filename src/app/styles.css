@@ -872,15 +872,7 @@ svg.icon {
   border-color: var(--border);
 }
 
-.page-kind {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 2px 8px;
-}
+
 
 .page-body {
   flex: 1;
