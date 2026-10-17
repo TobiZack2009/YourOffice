@@ -7,8 +7,10 @@
  */
 
 import { registerDocumentCommands } from "../document/commands.js";
+import { registerSheetCommands } from "../sheet/commands.js";
 import { createSidebar } from "./sidebar.js";
 import { createDocumentEditor } from "./block-editor.js";
+import { createSheetEditor } from "./sheet-editor.js";
 import { clear, h } from "./dom.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
@@ -59,9 +61,10 @@ const INSERT_ITEMS = [
  */
 export function mountApp(root, workspace, options = {}) {
   if (!workspace.hasCommand("insertBlock")) registerDocumentCommands(workspace);
+  if (!workspace.hasCommand("createTable")) registerSheetCommands(workspace);
 
-  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null }} */
-  const state = { selectedPageId: null, editor: null };
+  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null }} */
+  const state = { selectedPageId: null, editor: null, sheetEditor: null };
 
   clear(root);
   const shell = h("div", { class: "app" });
@@ -313,6 +316,8 @@ export function mountApp(root, workspace, options = {}) {
   function renderMain() {
     state.editor?.destroy();
     state.editor = null;
+    state.sheetEditor?.destroy();
+    state.sheetEditor = null;
     closePopover();
     clear(canvas);
 
@@ -359,6 +364,10 @@ export function mountApp(root, workspace, options = {}) {
       });
       state.editor = editor;
       canvas.append(pageHeader, h("div", { class: "page-body" }, [editor.element]));
+    } else if (page.type === "sheet") {
+      const sheetEditor = createSheetEditor(workspace, page.id, { onChange: () => updateToolbar() });
+      state.sheetEditor = sheetEditor;
+      canvas.append(pageHeader, sheetEditor.element);
     } else {
       canvas.append(pageHeader, renderStub(page.type));
     }
@@ -372,7 +381,6 @@ export function mountApp(root, workspace, options = {}) {
    */
   function renderStub(type) {
     const messages = {
-      sheet: ["Spreadsheet", "The Numbers-style canvas arrives in Phase 4."],
       presentation: ["Presentation", "1280×720 slides arrive in Phase 5."]
     };
     const [title, detail] = messages[type] ?? ["Coming soon", "This page type is not editable yet."];
@@ -420,6 +428,16 @@ export function mountApp(root, workspace, options = {}) {
             workspace.dispatch("insertBlock", {
               pageId: created,
               block: { type: "paragraph", runs: [] }
+            });
+          }
+          if (type === "sheet" && created) {
+            workspace.dispatch("createTable", {
+              pageId: created,
+              name: "Table 1",
+              rows: 12,
+              columns: 6,
+              x: 32,
+              y: 32
             });
           }
         });
@@ -539,6 +557,8 @@ export function mountApp(root, workspace, options = {}) {
       document.removeEventListener("keydown", onGlobalKeydown);
       state.editor?.destroy();
       state.editor = null;
+      state.sheetEditor?.destroy();
+      state.sheetEditor = null;
       clear(root);
     },
     /** @param {string} pageId */
@@ -547,6 +567,8 @@ export function mountApp(root, workspace, options = {}) {
     },
     /** @returns {import("./block-editor.js").EditorHandle | null} */
     getEditor: () => state.editor,
+    /** @returns {import("./sheet-editor.js").SheetEditorHandle | null} */
+    getSheetEditor: () => state.sheetEditor,
     /** @returns {string | null} */
     getSelection: () => selection()
   };

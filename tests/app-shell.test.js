@@ -50,17 +50,24 @@ describe("mountApp layout", () => {
     expect(query(root, ".page-title-input")?.value).toBe("Doc");
   });
 
-  it("renders a stub for non-document pages", () => {
+  it("renders a sheet editor for sheet pages and a stub for presentations", () => {
     const { ws, root } = setup();
     ws.dispatch("createPage", { type: "sheet", title: "Sheet" });
     const sheetId = ws.getChildren(null).slice(-1)[0];
-    query(root, ".sidebar");
-    const button = /** @type {HTMLElement} */ (
+    const sheetRow = /** @type {HTMLElement} */ (
       root.querySelector(`.page-row[data-page-id="${sheetId}"] .page-title`)
     );
-    button.click();
-    expect(query(root, ".stub")?.textContent).toContain("Spreadsheet");
+    sheetRow.click();
+    expect(query(root, ".sheet-editor")).toBeTruthy();
     expect(query(root, ".document-editor")).toBeNull();
+
+    ws.dispatch("createPage", { type: "presentation", title: "Deck" });
+    const deckId = ws.getChildren(null).slice(-1)[0];
+    /** @type {HTMLElement} */ (
+      root.querySelector(`.page-row[data-page-id="${deckId}"] .page-title`)
+    ).click();
+    expect(query(root, ".stub")?.textContent).toContain("Presentation");
+    expect(query(root, ".sheet-editor")).toBeNull();
   });
 });
 
@@ -152,13 +159,17 @@ describe("sidebar integration", () => {
     expect(query(root, ".document-editor")).toBeTruthy();
   });
 
-  it("creates sheet pages that show the stub", () => {
+  it("creates sheet pages with a starter table and selects them", () => {
     const { ws, root, app } = setup();
     /** @type {HTMLElement} */ (root.querySelectorAll(".new-page")[1]).click();
     const created = ws.getChildren(null).slice(-1)[0];
     expect(ws.getPage(created)?.type).toBe("sheet");
     expect(app.getSelection()).toBe(created);
-    expect(query(root, ".stub")).toBeTruthy();
+    expect(app.getSheetEditor()).toBeTruthy();
+    expect(query(root, ".sheet-grid")).toBeTruthy();
+    const content = /** @type {any} */ (ws.getPage(created)?.content);
+    expect(content.tableOrder).toHaveLength(1);
+    expect(content.tables[content.tableOrder[0]].rowCount).toBe(12);
   });
 
   it("deletes a page after confirmation and reselects", () => {
