@@ -23,7 +23,7 @@
 }
 
 .app {
-  --accent: --var(--text-muted);
+  --accent: #1dc6dc;
   --accent-soft: #fdeee3;
 }
 
