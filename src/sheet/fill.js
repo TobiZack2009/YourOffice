@@ -14,7 +14,7 @@
  */
 
 import { MAX_COLUMN, MAX_ROW, formatA1, parseA1 } from "./references.js";
-import { tokenize } from "./tokenizer.js";
+import { rewriteFormula } from "./refscan.js";
 
 /** @typedef {import("./model.js").Cell} Cell */
 /** @typedef {{ col: number, row: number }} Position */
@@ -24,36 +24,32 @@ import { tokenize } from "./tokenizer.js";
  * @param {string} text Formula text (with or without "=").
  * @param {number} deltaCol
  * @param {number} deltaRow
+ * @param {{ target?: (segments: string[]) => boolean }} [options] Which references move (default: all, qualified or not).
  * @returns {string} The formula with relative references moved. Malformed text is returned unchanged.
  */
-export function offsetFormulaReferences(text, deltaCol, deltaRow) {
+export function offsetFormulaReferences(text, deltaCol, deltaRow, options = {}) {
   if (deltaCol === 0 && deltaRow === 0) return text;
-  const body = text.startsWith("=") ? text.slice(1) : text;
-  let tokens;
-  try {
-    tokens = tokenize(text).filter((token) => token.type !== "eof");
-  } catch {
-    return text;
-  }
-
-  let output = "=";
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    const next = tokens[i + 1];
-    const raw = body.slice(token.pos, next ? next.pos : body.length);
-    const word = typeof token.value === "string" ? token.value : "";
-    const ref = token.type === "word" ? parseA1(word) : null;
-
-    if (ref) {
-      const col = ref.absCol ? ref.col : ref.col + deltaCol;
-      const row = ref.absRow ? ref.row : ref.row + deltaRow;
-      const inside = col >= 1 && col <= MAX_COLUMN && row >= 1 && row <= MAX_ROW;
-      output += (inside ? formatA1({ ...ref, col, row }) : "#REF!") + raw.slice(word.length);
-    } else {
-      output += raw;
+  const target = options.target ?? (() => true);
+  return rewriteFormula(text, ({ units }) => {
+    /** @type {import("./refscan.js").Edit[]} */
+    const edits = [];
+    for (const unit of units) {
+      if (unit.kind !== "address" || !target(unit.segments)) continue;
+      for (const [ref, index] of [[unit.first, unit.firstToken], [unit.second, unit.secondToken]]) {
+        if (!ref) continue;
+        const col = ref.absCol ? ref.col : ref.col + deltaCol;
+        const row = ref.absRow ? ref.row : ref.row + deltaRow;
+        if (col === ref.col && row === ref.row) continue;
+        const inside = col >= 1 && col <= MAX_COLUMN && row >= 1 && row <= MAX_ROW;
+        edits.push({
+          from: /** @type {number} */ (index),
+          to: /** @type {number} */ (index),
+          text: inside ? formatA1({ ...ref, col, row }) : "#REF!"
+        });
+      }
     }
-  }
-  return output;
+    return edits;
+  });
 }
 
 /**

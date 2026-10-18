@@ -15,7 +15,8 @@
 
 import { MAX_COLUMN, MAX_ROW, formatA1, parseA1 } from "./references.js";
 import { parseCellKey } from "./model.js";
-import { tokenize } from "./tokenizer.js";
+import { rewriteFormula, isLocalReference } from "./refscan.js";
+import { formatPath } from "../references/scope.js";
 
 /** @typedef {import("./model.js").Cell} Cell */
 /** @typedef {import("./model.js").Merge} Merge */
@@ -94,77 +95,61 @@ export function shiftPosition(position, shift) {
  * was deleted becomes `#REF!`. Malformed text is returned unchanged.
  * @param {string} text Formula text (with or without "=").
  * @param {CellRegionShift} shift
+ * @param {{ target?: (segments: string[]) => boolean }} [options] Which references point into the shifted table.
  * @returns {string}
  */
-export function shiftRegionReferences(text, shift) {
-  const body = text.startsWith("=") ? text.slice(1) : text;
-  let tokens;
-  try {
-    tokens = tokenize(text).filter((token) => token.type !== "eof");
-  } catch {
-    return text;
-  }
-
-  const rawOf = (/** @type {number} */ i) =>
-    body.slice(tokens[i].pos, tokens[i + 1] ? tokens[i + 1].pos : body.length);
-  const wordOf = (/** @type {number} */ i) => (typeof tokens[i].value === "string" ? tokens[i].value : "");
-  const refAt = (/** @type {number} */ i) =>
-    tokens[i] && tokens[i].type === "word" ? parseA1(wordOf(i)) : null;
+export function shiftRegionReferences(text, shift, options = {}) {
+  const target = options.target ?? isLocalReference;
   const toPosition = (/** @type {{ col: number, row: number }} */ ref) => ({ col: ref.col - 1, row: ref.row - 1 });
   const valid = (/** @type {{ col: number, row: number }} */ ref) =>
     ref.col >= 1 && ref.col <= MAX_COLUMN && ref.row >= 1 && ref.row <= MAX_ROW;
 
-  let output = "=" + (tokens.length > 0 ? body.slice(0, tokens[0].pos) : "");
-  for (let i = 0; i < tokens.length; i++) {
-    const first = refAt(i);
-    if (!first) {
-      output += rawOf(i);
-      continue;
-    }
+  return rewriteFormula(text, ({ units }) => {
+    /** @type {import("./refscan.js").Edit[]} */
+    const edits = [];
+    for (const unit of units) {
+      if (unit.kind !== "address" || !target(unit.segments)) continue;
+      const first = /** @type {NonNullable<typeof unit.first>} */ (unit.first);
 
-    // `A1:B2` — handle both ends together so the range keeps its shape.
-    const second = tokens[i + 1]?.type === "colon" ? refAt(i + 2) : null;
-    if (second) {
-      const a = toPosition(first);
-      const b = toPosition(second);
-      const inside = inBand(a, shift) && inBand(b, shift);
-      let replaced = null;
-      if (inside) {
+      // `A1:B2` — handle both ends together so the range keeps its shape.
+      if (unit.second) {
+        const second = unit.second;
+        const a = toPosition(first);
+        const b = toPosition(second);
+        if (!(inBand(a, shift) && inBand(b, shift))) continue;
         const axisOf = (/** @type {{ col: number, row: number }} */ p) => (shift.axis === "row" ? p.row : p.col);
         const lo = Math.min(axisOf(a), axisOf(b));
         const hi = Math.max(axisOf(a), axisOf(b));
         const span = slideSpan(lo, hi, shift);
         if (!span) {
-          output += "#REF!" + rawOf(i + 2).slice(wordOf(i + 2).length);
-          i += 2;
+          edits.push({ from: unit.from, to: unit.secondToken, text: "#REF!" });
           continue;
         }
         const reversed = axisOf(a) > axisOf(b);
         const [newLo, newHi] = span;
         const place = (/** @type {typeof first} */ ref, /** @type {number} */ value) =>
           shift.axis === "row" ? { ...ref, row: value + 1 } : { ...ref, col: value + 1 };
-        replaced = [place(first, reversed ? newHi : newLo), place(second, reversed ? newLo : newHi)];
+        const newFirst = place(first, reversed ? newHi : newLo);
+        const newSecond = place(second, reversed ? newLo : newHi);
+        if (!valid(newFirst) || !valid(newSecond)) {
+          edits.push({ from: unit.from, to: unit.secondToken, text: "#REF!" });
+        } else {
+          edits.push({ from: unit.firstToken, to: unit.firstToken, text: formatA1(newFirst) });
+          edits.push({ from: unit.secondToken, to: unit.secondToken, text: formatA1(newSecond) });
+        }
+        continue;
       }
-      const [newFirst, newSecond] = replaced ?? [first, second];
-      if (!valid(newFirst) || !valid(newSecond)) {
-        output += "#REF!" + rawOf(i + 2).slice(wordOf(i + 2).length);
-      } else {
-        output +=
-          (replaced ? formatA1(newFirst) : wordOf(i)) +
-          rawOf(i).slice(wordOf(i).length) +
-          rawOf(i + 1) +
-          (replaced ? formatA1(newSecond) : wordOf(i + 2)) +
-          rawOf(i + 2).slice(wordOf(i + 2).length);
-      }
-      i += 2;
-      continue;
-    }
 
-    const moved = shiftPosition(toPosition(first), shift);
-    const next = moved ? { ...first, col: moved.col + 1, row: moved.row + 1 } : null;
-    output += (next && valid(next) ? formatA1(next) : "#REF!") + rawOf(i).slice(wordOf(i).length);
-  }
-  return output;
+      const moved = shiftPosition(toPosition(first), shift);
+      const next = moved ? { ...first, col: moved.col + 1, row: moved.row + 1 } : null;
+      const replacement = next && valid(next) ? formatA1(next) : "#REF!";
+      if (replacement !== formatA1(first)) {
+        const broken = replacement === "#REF!";
+        edits.push({ from: broken ? unit.from : unit.firstToken, to: unit.firstToken, text: replacement });
+      }
+    }
+    return edits;
+  });
 }
 
 /**
@@ -178,22 +163,14 @@ export function shiftRegionReferences(text, shift) {
  * @param {{ start: { col: number, row: number }, end: { col: number, row: number } }} block
  * @param {number} deltaCol
  * @param {number} deltaRow
+ * @param {{ target?: (segments: string[]) => boolean, relocate?: string[] }} [options]
+ *   `target`: which references point into the source table. `relocate`: when the
+ *   block moves to another table, the qualifier (page/table names, empty for the
+ *   formula's own table) that now reaches it; moved references are respelled with it.
  * @returns {string}
  */
-export function retargetMovedReferences(text, block, deltaCol, deltaRow) {
-  const body = text.startsWith("=") ? text.slice(1) : text;
-  let tokens;
-  try {
-    tokens = tokenize(text).filter((token) => token.type !== "eof");
-  } catch {
-    return text;
-  }
-
-  const rawOf = (/** @type {number} */ i) =>
-    body.slice(tokens[i].pos, tokens[i + 1] ? tokens[i + 1].pos : body.length);
-  const wordOf = (/** @type {number} */ i) => (typeof tokens[i].value === "string" ? tokens[i].value : "");
-  const refAt = (/** @type {number} */ i) =>
-    tokens[i] && tokens[i].type === "word" ? parseA1(wordOf(i)) : null;
+export function retargetMovedReferences(text, block, deltaCol, deltaRow, options = {}) {
+  const target = options.target ?? isLocalReference;
   const inBlock = (/** @type {{ col: number, row: number }} */ ref) =>
     ref.col - 1 >= block.start.col &&
     ref.col - 1 <= block.end.col &&
@@ -206,37 +183,41 @@ export function retargetMovedReferences(text, block, deltaCol, deltaRow) {
   });
   const valid = (/** @type {{ col: number, row: number }} */ ref) =>
     ref.col >= 1 && ref.col <= MAX_COLUMN && ref.row >= 1 && ref.row <= MAX_ROW;
+  const relocate = options.relocate;
+  const qualifier = relocate && relocate.length > 0 ? `${formatPath(relocate)}!` : "";
 
-  let output = "=" + (tokens.length > 0 ? body.slice(0, tokens[0].pos) : "");
-  for (let i = 0; i < tokens.length; i++) {
-    const first = refAt(i);
-    if (!first) {
-      output += rawOf(i);
-      continue;
-    }
-    const second = tokens[i + 1]?.type === "colon" ? refAt(i + 2) : null;
-    if (second) {
-      if (inBlock(first) && inBlock(second)) {
+  return rewriteFormula(text, ({ units }) => {
+    /** @type {import("./refscan.js").Edit[]} */
+    const edits = [];
+    for (const unit of units) {
+      if (unit.kind !== "address" || !target(unit.segments)) continue;
+      const first = /** @type {NonNullable<typeof unit.first>} */ (unit.first);
+      if (unit.second) {
+        if (!(inBlock(first) && inBlock(unit.second))) continue;
         const a = moved(first);
-        const b = moved(second);
-        output +=
-          (valid(a) && valid(b)
-            ? formatA1(a) + rawOf(i).slice(wordOf(i).length) + rawOf(i + 1) + formatA1(b)
-            : "#REF!") + rawOf(i + 2).slice(wordOf(i + 2).length);
-      } else {
-        output += rawOf(i) + rawOf(i + 1) + rawOf(i + 2);
+        const b = moved(unit.second);
+        if (valid(a) && valid(b)) {
+          if (relocate) {
+            edits.push({ from: unit.from, to: unit.to, text: `${qualifier}${formatA1(a)}:${formatA1(b)}` });
+          } else {
+            edits.push({ from: unit.firstToken, to: unit.firstToken, text: formatA1(a) });
+            edits.push({ from: unit.secondToken, to: unit.secondToken, text: formatA1(b) });
+          }
+        } else {
+          edits.push({ from: unit.from, to: unit.secondToken, text: "#REF!" });
+        }
+        continue;
       }
-      i += 2;
-      continue;
+      if (!inBlock(first)) continue;
+      const next = moved(first);
+      edits.push({
+        from: relocate || !valid(next) ? unit.from : unit.firstToken,
+        to: unit.firstToken,
+        text: valid(next) ? `${relocate ? qualifier : ""}${formatA1(next)}` : "#REF!"
+      });
     }
-    if (!inBlock(first)) {
-      output += rawOf(i);
-      continue;
-    }
-    const next = moved(first);
-    output += (valid(next) ? formatA1(next) : "#REF!") + rawOf(i).slice(wordOf(i).length);
-  }
-  return output;
+    return edits;
+  });
 }
 
 /**

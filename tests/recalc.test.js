@@ -144,7 +144,7 @@ describe("RecalcEngine — errors and cycles", () => {
     const engine = new RecalcEngine();
     engine.setFormula(at("A1"), "=1+");
     engine.recalculate();
-    expect(engine.getValue(at("A1"))).toBe(ERR.BAD);
+    expect(engine.getValue(at("A1"))).toMatchObject({ code: "#ERROR!", position: 2 });
     expect(engine.getRaw(at("A1"))).toEqual({ kind: "formula", text: "=1+" });
   });
 

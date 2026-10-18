@@ -11,7 +11,7 @@
  */
 
 import { CommandError } from "../core/errors.js";
-import { touchPage } from "../workspace/commands.js";
+import { touchPage, touchContainer } from "../workspace/commands.js";
 import { MAX_COLUMN, MAX_ROW } from "./references.js";
 import {
   SHEET_DEFAULTS,
@@ -25,10 +25,20 @@ import {
   tableExtent,
   validateCell
 } from "./model.js";
-import { mergeBlocksShift, retargetMovedReferences, shiftRegionCells } from "./cell-shift.js";
+import {
+  mergeBlocksShift,
+  retargetMovedReferences,
+  shiftRegionCells,
+  shiftRegionReferences
+} from "./cell-shift.js";
 import { offsetCell, tileSourceFor } from "./fill.js";
+import { nameProblem } from "./names.js";
+import { retargetReferences, snapshotReferences } from "../references/rewrite.js";
+import { rewriteTableReferences } from "../references/cross-table.js";
+import { qualifyToKeepTarget, uniqueName } from "../references/scope.js";
 import {
   shiftCells,
+  shiftFormulaReferences,
   shiftMerges,
   shiftOverrides
 } from "./shift.js";
@@ -72,7 +82,7 @@ function requireIndex(value, field, reason) {
  */
 function requireSheetPage(store, pageId) {
   const id = requireString(pageId, "pageId", "invalidPage");
-  const page = store._data.pages[id];
+  const page = store._data.pages[id] ?? store._data.detached?.[id];
   if (!page) throw new CommandError(`page does not exist: ${id}`, "unknownPage");
   if (page.type !== "sheet") {
     throw new CommandError(`page ${id} is not a sheet page`, "wrongPageType");
@@ -182,6 +192,15 @@ function nextTablePosition(content) {
 }
 
 /**
+ * Refuse names the formula language could not read back.
+ * @param {string} name
+ */
+function requireUsableName(name) {
+  const problem = nameProblem(name);
+  if (problem) throw new CommandError(problem, "invalidName");
+}
+
+/**
  * Shared body of `insertCells` / `deleteCells`.
  * @param {Workspace} store
  * @param {Transaction} tx
@@ -210,6 +229,14 @@ function shiftRegion(store, tx, payload, mode) {
     throw new CommandError("cannot shift cells through merged cells", "mergedCells");
   }
 
+  // Formulas that reach this table by name (here or elsewhere) follow the slide too;
+  // the table's own unqualified references are handled by the cell store below.
+  rewriteTableReferences(
+    store._data,
+    table.id,
+    (text, target) => shiftRegionReferences(text, shift, { target }),
+    { touch: (id) => touchContainer(store, tx, id) }
+  );
   const cells = shiftRegionCells(table.cells, shift);
   for (const key of Object.keys(cells)) {
     const [col, row] = key.split(",").map(Number);
@@ -235,8 +262,11 @@ export const sheetCommands = {
     const { page, content } = requireSheetPage(store, p.pageId);
 
     const free = nextTablePosition(content);
+    const wanted = typeof p.name === "string" ? p.name : `Table ${content.tableOrder.length + 1}`;
+    if (typeof p.name === "string") requireUsableName(p.name);
+    const snapshot = snapshotReferences(store._data);
     const table = createTable({
-      name: typeof p.name === "string" ? p.name : `Table ${content.tableOrder.length + 1}`,
+      name: uniqueName(store._data, page.id, wanted),
       position: {
         x: typeof p.x === "number" ? p.x : free.x,
         y: typeof p.y === "number" ? p.y : free.y
@@ -256,6 +286,7 @@ export const sheetCommands = {
       content.tableOrder.splice(index, 0, table.id);
     }
     touchPage(tx, page);
+    retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
   },
 
   /**
@@ -284,8 +315,13 @@ export const sheetCommands = {
     const { page, content } = requireSheetPage(store, p.pageId);
     const table = requireTable(content, p.tableId);
     if (typeof p.name !== "string") throw new CommandError("name must be a string", "invalidTable");
-    table.name = p.name;
+    requireUsableName(p.name);
+    const name = uniqueName(store._data, page.id, p.name, table.id);
+    if (name === table.name) return;
+    const snapshot = snapshotReferences(store._data);
+    table.name = name;
     touchPage(tx, page);
+    retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
   },
 
   /**
@@ -443,19 +479,33 @@ export const sheetCommands = {
       }
     }
 
-    // Formulas elsewhere in the table that point at the moving cells follow them.
-    // (Cross-table references arrive in Phase 6; until then only this table matters.)
-    if (sourceTable === table) {
-      for (const [key, cell] of Object.entries(table.cells)) {
-        if (typeof cell.formula !== "string") continue;
-        const [col, row] = key.split(",").map(Number);
-        const insideSource =
-          col >= source.start.col && col <= source.end.col && row >= source.start.row && row <= source.end.row;
-        if (insideSource) continue;
-        const retargeted = retargetMovedReferences(cell.formula, source, deltaCol, deltaRow);
-        if (retargeted !== cell.formula) table.cells[key] = { ...cell, formula: retargeted };
-      }
-    }
+    // Formulas anywhere that point at the moving cells follow them. Formulas inside
+    // the moving block travel with it and are offset instead (see offsetCell below).
+    const insideSource = (/** @type {import("../references/rewrite.js").FormulaSite} */ site) =>
+      site.tableId === sourceTable.id &&
+      site.position !== undefined &&
+      site.position.col >= source.start.col &&
+      site.position.col <= source.end.col &&
+      site.position.row >= source.start.row &&
+      site.position.row <= source.end.row;
+    rewriteTableReferences(
+      store._data,
+      sourceTable.id,
+      (text, target, site) => {
+        /** @type {string[] | undefined} */
+        let relocate;
+        if (sourceTable !== table) {
+          const spelled =
+            site.tableId === table.id
+              ? []
+              : qualifyToKeepTarget(store._data, site.pageId, { kind: "table", pageId: page.id, tableId: table.id });
+          if (!spelled) return text;
+          relocate = spelled;
+        }
+        return retargetMovedReferences(text, source, deltaCol, deltaRow, { target, relocate });
+      },
+      { local: true, skip: insideSource, touch: (id) => touchContainer(store, tx, id) }
+    );
 
     for (const { col, row } of moving) writeCell(sourceTable, col, row, null);
     for (let row = source.start.row; row <= source.end.row; row++) {
@@ -606,6 +656,25 @@ export const sheetCommands = {
 };
 
 /**
+ * Keep range sections on a table pointing at the same cells after a row/column edit.
+ * A range wholly inside a deleted band has nothing left to point at, so its section goes.
+ * @param {Record<string, any>} content Sheet page content.
+ * @param {string} tableId
+ * @param {import("./shift.js").IndexShift} shift
+ */
+function shiftSectionRanges(content, tableId, shift) {
+  const sections = content.sections;
+  if (!sections) return;
+  for (const [id, section] of Object.entries(sections)) {
+    const locator = section.locator;
+    if (locator?.tableId !== tableId || !locator.range) continue;
+    const [moved] = shiftMerges([{ start: locator.range.start, end: locator.range.end }], shift);
+    if (moved) locator.range = { start: { ...moved.start }, end: { ...moved.end } };
+    else delete sections[id];
+  }
+}
+
+/**
  * @param {Workspace} store
  * @param {Transaction} tx
  * @param {Record<string, unknown>} payload
@@ -625,6 +694,9 @@ function insertLines(store, tx, payload, axis) {
   if (size + count > limit) throw new CommandError(`${axis} limit exceeded`, "invalidIndex");
 
   const shift = { mode: /** @type {const} */ ("insert"), axis, index, count };
+  rewriteTableReferences(store._data, table.id, (text, target) => shiftFormulaReferences(text, shift, { target }), {
+    touch: (id) => touchContainer(store, tx, id)
+  });
   table.cells = shiftCells(table.cells, shift);
   if (axis === "row") {
     table.rowOverrides = shiftOverrides(table.rowOverrides, shift);
@@ -634,6 +706,7 @@ function insertLines(store, tx, payload, axis) {
     table.columnCount += count;
   }
   table.merges = shiftMerges(table.merges, shift);
+  shiftSectionRanges(content, table.id, shift);
   touchPage(tx, page);
 }
 
@@ -659,6 +732,9 @@ function deleteLines(store, tx, payload, axis) {
   }
 
   const shift = { mode: /** @type {const} */ ("delete"), axis, index, count };
+  rewriteTableReferences(store._data, table.id, (text, target) => shiftFormulaReferences(text, shift, { target }), {
+    touch: (id) => touchContainer(store, tx, id)
+  });
   table.cells = shiftCells(table.cells, shift);
   if (axis === "row") {
     table.rowOverrides = shiftOverrides(table.rowOverrides, shift);
@@ -668,6 +744,7 @@ function deleteLines(store, tx, payload, axis) {
     table.columnCount -= count;
   }
   table.merges = shiftMerges(table.merges, shift);
+  shiftSectionRanges(content, table.id, shift);
   touchPage(tx, page);
 }
 

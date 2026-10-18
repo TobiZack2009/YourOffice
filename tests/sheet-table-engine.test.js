@@ -73,4 +73,19 @@ describe("TableEngines", () => {
     engines.forget(tableId);
     expect(engines.engine(table())).not.toBe(first);
   });
+
+  it("shares one engine across tables when given a data source", () => {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("createTable", { pageId, name: "Other", rows: 3, columns: 3 });
+    const otherId = ws.getPage(pageId).content.tableOrder[1];
+    const other = () => ws.getPage(pageId).content.tables[otherId];
+    ws.dispatch("setCell", { pageId, tableId: otherId, col: 0, row: 0, cell: { value: 99 } });
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { formula: "=Other!A1 + 1" } });
+    const shared = new TableEngines(() => ws._data);
+    shared.refresh();
+    expect(shared.display(table(), 0, 0)).toBe("100");
+    expect(shared.engine(table())).toBe(shared.engine(other()));
+    shared.forget(tableId);
+    expect(shared.display(table(), 0, 0)).toBe("100");
+  });
 });

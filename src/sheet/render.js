@@ -9,6 +9,7 @@
  */
 
 import { displayValue } from "./evaluator.js";
+import { explain, isFormulaError } from "./errors.js";
 import {
   HEADER_HEIGHT,
   HEADER_WIDTH,
@@ -77,7 +78,7 @@ export function rectsIntersect(a, b) {
  * @param {number} col
  * @param {number} row
  * @param {SheetRenderOptions} [options]
- * @returns {{ display: string, kind: "blank" | "literal" | "formula", error: boolean }}
+ * @returns {{ display: string, kind: "blank" | "literal" | "formula", error: boolean, explanation?: string }}
  */
 export function resolveCell(table, col, row, options) {
   const cell = table.cells[cellKey(col, row)];
@@ -87,7 +88,12 @@ export function resolveCell(table, col, row, options) {
     const display = options?.engines
       ? options.engines.display(table, col, row)
       : cell.formula;
-    return { display, kind: "formula", error: display.startsWith("#") };
+    const error = display.startsWith("#");
+    if (error && options?.engines) {
+      const value = options.engines.value(table, col, row);
+      if (isFormulaError(value)) return { display, kind: "formula", error, explanation: explain(value).text };
+    }
+    return { display, kind: "formula", error };
   }
   if (cell.value !== undefined) {
     return { display: displayValue(cell.value), kind: "literal", error: false };
@@ -211,7 +217,10 @@ export function renderTable(table, options) {
 
       const info = resolveCell(table, col, row, options);
       cell.setAttribute("data-kind", info.kind);
-      if (info.error) cell.classList.add("is-error");
+      if (info.error) {
+        cell.classList.add("is-error");
+        if (info.explanation) cell.title = info.explanation;
+      }
       cell.textContent = info.display;
 
       // A merged anchor stands for its whole block when testing selection.

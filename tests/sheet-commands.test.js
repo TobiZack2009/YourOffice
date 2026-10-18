@@ -52,8 +52,8 @@ describe("createTable", () => {
 describe("table metadata", () => {
   it("renames, moves and deletes tables", () => {
     const { ws, pageId, tableId, table } = setup();
-    ws.dispatch("renameTable", { pageId, tableId, name: "Q1" });
-    expect(table().name).toBe("Q1");
+    ws.dispatch("renameTable", { pageId, tableId, name: "Quarter 1" });
+    expect(table().name).toBe("Quarter 1");
     ws.dispatch("moveTable", { pageId, tableId, x: 120, y: 40 });
     expect(table().position).toEqual({ x: 120, y: 40 });
     ws.dispatch("deleteTable", { pageId, tableId });

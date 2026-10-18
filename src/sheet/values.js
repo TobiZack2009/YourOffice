@@ -12,7 +12,13 @@
 import { ERR, FormulaError, isFormulaError } from "./errors.js";
 
 /** @typedef {number | string | boolean | null | FormulaError} Scalar */
-/** @typedef {Scalar | Scalar[]} Value */
+/**
+ * A handle names content that is not a scalar: a run of document blocks or a
+ * slide. Handles flow through `IF`/`IFERROR` untouched; anything else coerces
+ * them (blocks to plain text) or rejects them (`#VALUE!`).
+ * @typedef {{ kind: "blocks" | "slide", sectionId: string }} Handle
+ */
+/** @typedef {Scalar | Scalar[] | Handle} Value */
 
 /**
  * @param {unknown} value
@@ -20,6 +26,52 @@ import { ERR, FormulaError, isFormulaError } from "./errors.js";
  */
 export function isRange(value) {
   return Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Handle}
+ */
+export function isHandle(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    !(value instanceof FormulaError) &&
+    /** @type {any} */ (value).kind !== undefined &&
+    (/** @type {any} */ (value).kind === "blocks" || /** @type {any} */ (value).kind === "slide")
+  );
+}
+
+/**
+ * Build a range value: a row-major array carrying its shape (and optionally the
+ * table cells it came from) as non-enumerable properties. A 1x1 range collapses
+ * to its single scalar.
+ * @param {Scalar[]} values Row-major.
+ * @param {number} rows
+ * @param {number} cols
+ * @param {{ tableId: string, start: {col:number,row:number}, end: {col:number,row:number} } | null} [origin]
+ * @returns {Value}
+ */
+export function makeRange(values, rows, cols, origin = null) {
+  if (rows === 1 && cols === 1 && values.length === 1) return values[0];
+  const range = [...values];
+  Object.defineProperty(range, "rows", { value: rows, enumerable: false });
+  Object.defineProperty(range, "cols", { value: cols, enumerable: false });
+  if (origin) Object.defineProperty(range, "origin", { value: origin, enumerable: false });
+  return range;
+}
+
+/**
+ * Shape of a range value. Plain arrays are treated as a single column.
+ * @param {Scalar[]} range
+ * @returns {{ rows: number, cols: number }}
+ */
+export function rangeDims(range) {
+  const rows = /** @type {any} */ (range).rows;
+  const cols = /** @type {any} */ (range).cols;
+  if (Number.isInteger(rows) && Number.isInteger(cols)) return { rows, cols };
+  return { rows: range.length, cols: 1 };
 }
 
 /**
@@ -32,7 +84,7 @@ export function isRange(value) {
  */
 export function toNumber(value) {
   if (isFormulaError(value)) return value;
-  if (isRange(value)) return ERR.VALUE;
+  if (isRange(value) || isHandle(value)) return ERR.VALUE;
   if (value === null) return 0;
   if (typeof value === "number") return value;
   if (typeof value === "boolean") return value ? 1 : 0;
@@ -50,7 +102,7 @@ export function toNumber(value) {
  */
 export function toText(value) {
   if (isFormulaError(value)) return value;
-  if (isRange(value)) return ERR.VALUE;
+  if (isRange(value) || isHandle(value)) return ERR.VALUE;
   if (value === null) return "";
   if (typeof value === "string") return value;
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
@@ -65,7 +117,7 @@ export function toText(value) {
  */
 export function toBoolean(value) {
   if (isFormulaError(value)) return value;
-  if (isRange(value)) return ERR.VALUE;
+  if (isRange(value) || isHandle(value)) return ERR.VALUE;
   if (value === null) return false;
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -112,6 +164,7 @@ function typeRank(value) {
 export function compareValues(a, b) {
   if (isFormulaError(a)) return a;
   if (isFormulaError(b)) return b;
+  if (isRange(a) || isRange(b) || isHandle(a) || isHandle(b)) return ERR.VALUE;
 
   const rankA = typeRank(a);
   const rankB = typeRank(b);

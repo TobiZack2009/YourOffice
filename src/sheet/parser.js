@@ -12,7 +12,10 @@
  *   unary        := ("+" | "-") unary | postfix
  *   postfix      := primary ("%")*
  *   primary      := number | string | boolean | error | reference | range
- *                 | call | name | "(" expression ")"
+ *                 | call | path | "(" expression ")"
+ *   path         := segment ("!" segment)* ("!" address)?
+ *   segment      := word | 'quoted name'
+ *   address      := A1 | A1:A1            // local to the target named before it
  *
  * Unary minus binds tighter than "^" so `-2^2` is `(-2)^2`, matching Excel.
  */
@@ -155,6 +158,9 @@ class Parser {
       }
       case "word":
         return this.parseWord();
+      case "qname":
+        this.next();
+        return this.parsePath(/** @type {string} */ (token.value), true);
       default:
         throw new FormulaSyntaxError(
           `unexpected ${describe(token)}`,
@@ -191,11 +197,70 @@ class Parser {
       return this.parseCall(word, token.pos);
     }
 
-    // Bare name (named range / section value target).
+    // Name or path (table, section, page target).
     if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(word)) {
       throw new FormulaSyntaxError(`invalid name "${word}"`, token.pos);
     }
-    return { type: "name", name: word };
+    return this.parsePath(word, false);
+  }
+
+  /**
+   * Parse the rest of `segment ("!" segment)* ("!" address)?` after the first segment.
+   * A lone segment stays a `name` node; anything with `!` becomes a `path` node.
+   * @param {string} first
+   * @param {boolean} quoted
+   * @returns {AstNode}
+   */
+  parsePath(first, quoted) {
+    /** @type {string[]} */
+    const segments = [first];
+    /** @type {AstNode | null} */
+    let address = null;
+
+    while (this.peek().type === "bang") {
+      this.next();
+      const token = this.peek();
+      if (token.type === "qname") {
+        this.next();
+        segments.push(/** @type {string} */ (token.value));
+        continue;
+      }
+      if (token.type !== "word") {
+        throw new FormulaSyntaxError(
+          `expected a name or cell after "!", found ${describe(token)}`,
+          token.pos
+        );
+      }
+      this.next();
+      const word = /** @type {string} */ (token.value);
+      const start = parseA1(word);
+      if (start) {
+        if (this.peek().type === "colon") {
+          this.next();
+          const endToken = this.expect("word", "after ':' in range");
+          const end = parseA1(/** @type {string} */ (endToken.value));
+          if (!end) {
+            throw new FormulaSyntaxError(`invalid range end "${endToken.value}"`, endToken.pos);
+          }
+          address = { type: "range", start, end };
+        } else {
+          address = { type: "ref", ref: start };
+        }
+        if (this.peek().type === "bang") {
+          throw new FormulaSyntaxError('nothing can follow a cell address after "!"', this.peek().pos);
+        }
+        break;
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(word)) {
+        throw new FormulaSyntaxError(`invalid name "${word}"`, token.pos);
+      }
+      segments.push(word);
+    }
+
+    if (segments.length === 1 && !address) {
+      return quoted ? { type: "name", name: first, quoted: true } : { type: "name", name: first };
+    }
+    return { type: "path", segments, address };
   }
 
   /**
@@ -248,6 +313,7 @@ class Parser {
  */
 function describe(token) {
   if (token.type === "eof") return "end of formula";
+  if (token.type === "qname") return `'${token.value}'`;
   return `"${token.value}"`;
 }
 

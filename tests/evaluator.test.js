@@ -178,13 +178,14 @@ describe("evaluate — functions", () => {
   });
 
   it("unknown functions are #NAME?", () => {
-    expect(run("NOPE(1)")).toBe(ERR.NAME);
-    expect(run("NOPE()")).toBe(ERR.NAME);
+    expect(run("NOPE(1)").code).toBe(ERR.NAME.code);
+    expect(run("NOPE()")).toMatchObject({ code: "#NAME?", detail: '"NOPE" is not a function.' });
   });
 
   it("rejects wrong argument counts with #VALUE!", () => {
-    expect(run("SUM()")).toBe(ERR.VALUE);
+    expect(run("SUM()").code).toBe(ERR.VALUE.code);
     expect(run("IF(TRUE)")).toBe(ERR.VALUE);
+    expect(run("ROUND(1,2,3)").detail).toBe("ROUND takes 1 to 2 arguments but was given 3.");
   });
 });
 

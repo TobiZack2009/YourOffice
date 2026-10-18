@@ -145,3 +145,43 @@ describe("parseFormula — errors", () => {
     }
   });
 });
+
+describe("parseFormula — names and paths", () => {
+  it("keeps a lone name as a name node", () => {
+    expect(parseFormula("Summary")).toEqual({ type: "name", name: "Summary" });
+    expect(parseFormula("'Q3 Budget'")).toEqual({ type: "name", name: "Q3 Budget", quoted: true });
+  });
+
+  it("parses a qualified cell", () => {
+    const ast = parseFormula("Expenses!B2");
+    expect(ast).toMatchObject({ type: "path", segments: ["Expenses"], address: { type: "ref" } });
+    expect(ast.address.ref).toMatchObject({ col: 2, row: 2 });
+  });
+
+  it("parses a qualified range with several segments", () => {
+    const ast = parseFormula("'Q3 Budget'!Costs!A1:B3");
+    expect(ast.segments).toEqual(["Q3 Budget", "Costs"]);
+    expect(ast.address).toMatchObject({ type: "range" });
+  });
+
+  it("parses a path without an address", () => {
+    expect(parseFormula("Plan!Summary")).toEqual({ type: "path", segments: ["Plan", "Summary"], address: null });
+  });
+
+  it("rejects dangling bangs and anything after an address", () => {
+    expect(() => parseFormula("Plan!")).toThrow(FormulaSyntaxError);
+    expect(() => parseFormula("Plan!A1!B1")).toThrow(FormulaSyntaxError);
+    expect(() => parseFormula("Plan!1")).toThrow(FormulaSyntaxError);
+  });
+
+  it("parses paths inside expressions and calls", () => {
+    const ast = parseFormula("SUM(Expenses!B2:B9) + Rates!Tax");
+    expect(ast.type).toBe("binary");
+    expect(ast.left.args[0].type).toBe("path");
+    expect(ast.right).toMatchObject({ type: "path", segments: ["Rates", "Tax"] });
+  });
+
+  it("parses REF as an ordinary call", () => {
+    expect(parseFormula('REF("sec_1")')).toMatchObject({ type: "call", name: "REF" });
+  });
+});

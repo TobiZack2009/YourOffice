@@ -1,73 +1,97 @@
 /**
  * Table ↔ recalculation binding.
  *
- * One `RecalcEngine` per table (the decision recorded in AGENTS.md): tables have
- * independent local A1 coordinate spaces, so cross-table references are a Phase 6
- * name-resolution problem rather than something the engine has to know about now.
+ * With a data source (`new TableEngines(() => workspace._data)`) there is ONE
+ * `RecalcEngine` for the whole workspace. Cells are keyed by table id plus
+ * position, so a formula in one table can read another (`Expenses!B2`) and the
+ * dependency graph is cell-keyed: `T1!A1 → T2!A1` with `T2!B1 → T1!B1` is
+ * acyclic and calculates, even though the tables refer to each other.
  *
- * The engine is a pure cache over the table's cells: it is rebuilt from the
- * sparse store when the table changes. Rebuilding (rather than applying deltas)
- * keeps the binding trivially correct; an incremental update path is the planned
- * optimisation once table sizes make it worthwhile (see AGENTS.md).
+ * Without a data source (unit tests, previews) each table gets its own engine
+ * and can only see itself.
+ *
+ * The engine is a pure cache over the sparse store, rebuilt wholesale when
+ * something changes. Rebuilding (rather than applying deltas) keeps the binding
+ * trivially correct; an incremental update path is the planned optimisation.
  */
 
 import { RecalcEngine } from "./recalc.js";
 import { displayValue } from "./evaluator.js";
 import { parseCellKey } from "./model.js";
+import { locateReference, locateById } from "../references/locate.js";
+import { allContainers, scopePageOf } from "../references/containers.js";
+import { sectionPlainText } from "../references/sections.js";
+import { makeRange } from "./values.js";
 
 /**
- * The engine speaks 1-based A1 positions (its keys are "col,row" with A1 as
- * "1,1"); the table model stores 0-based positions. The conversion lives here so
- * nothing else has to think about it.
+ * The engine speaks 1-based A1 positions (A1 is col 1, row 1) scoped by table id;
+ * the table model stores 0-based positions. The conversion lives here so nothing
+ * else has to think about it.
  * @param {{ col: number, row: number }} position
- * @returns {{ col: number, row: number }}
+ * @param {string} scope Table id.
+ * @returns {{ col: number, row: number, scope: string }}
  */
-function toEnginePosition(position) {
-  return { col: position.col + 1, row: position.row + 1 };
+function toEnginePosition(position, scope) {
+  return { col: position.col + 1, row: position.row + 1, scope };
 }
 
 /** @typedef {import("./model.js").Table} Table */
 /** @typedef {import("./values.js").Value} Value */
+/** @typedef {{ pages: Record<string, any>, pageOrder: Record<string, string[]>, detached?: Record<string, any> }} WorkspaceData */
 
 export class TableEngines {
-  constructor() {
-    /** @type {Map<string, RecalcEngine>} */
+  /**
+   * @param {() => WorkspaceData} [getData] Current workspace data; enables cross-table formulas.
+   */
+  constructor(getData) {
+    this._getData = getData ?? null;
+    /** @type {Map<string, RecalcEngine>} Standalone mode: one engine per table. */
     this._engines = new Map();
+    /** @type {RecalcEngine | null} Shared mode: the workspace engine. */
+    this._book = null;
   }
 
   /**
-   * Rebuild the engine for a table from its sparse cells.
+   * Rebuild after the workspace changed. Cheap to call; shared mode rebuilds once.
+   * @returns {void}
+   */
+  refresh() {
+    if (this._getData) this._book = buildBook(this._getData());
+  }
+
+  /**
+   * Rebuild the engine for a table from its sparse cells (shared mode: everything).
    * @param {Table} table
    * @returns {RecalcEngine}
    */
   rebuild(table) {
-    const engine = new RecalcEngine();
-    for (const [key, cell] of Object.entries(table.cells)) {
-      const position = parseCellKey(key);
-      if (!position) continue;
-      if (typeof cell.formula === "string") {
-        engine.setFormula(toEnginePosition(position), cell.formula);
-      } else if (cell.value !== undefined) {
-        engine.setLiteral(toEnginePosition(position), cell.value);
-      }
+    if (this._getData) {
+      this.refresh();
+      return /** @type {RecalcEngine} */ (this._book);
     }
-    engine.recalculate();
+    const data = syntheticData(table);
+    const engine = buildBook(data);
     this._engines.set(table.id, engine);
     return engine;
   }
 
   /**
-   * The engine for a table, rebuilding it when absent.
+   * The engine holding a table, rebuilding it when absent.
    * @param {Table} table
    * @returns {RecalcEngine}
    */
   engine(table) {
+    if (this._getData) {
+      if (!this._book) this.refresh();
+      return /** @type {RecalcEngine} */ (this._book);
+    }
     return this._engines.get(table.id) ?? this.rebuild(table);
   }
 
   /** @param {string} tableId */
   forget(tableId) {
-    this._engines.delete(tableId);
+    if (this._getData) this._book = null;
+    else this._engines.delete(tableId);
   }
 
   /**
@@ -80,7 +104,7 @@ export class TableEngines {
   display(table, col, row) {
     const cell = table.cells[`${col},${row}`];
     if (cell && typeof cell.formula === "string") {
-      return this.engine(table).getDisplay(toEnginePosition({ col, row }));
+      return this.engine(table).getDisplay(toEnginePosition({ col, row }, table.id));
     }
     if (cell && cell.value !== undefined) return displayValue(cell.value);
     return "";
@@ -96,9 +120,84 @@ export class TableEngines {
   value(table, col, row) {
     const cell = table.cells[`${col},${row}`];
     if (cell && typeof cell.formula === "string") {
-      return this.engine(table).getValue(toEnginePosition({ col, row }));
+      return this.engine(table).getValue(toEnginePosition({ col, row }, table.id));
     }
     if (cell && cell.value !== undefined) return cell.value;
     return null;
   }
+}
+
+/**
+ * A one-page workspace around a single table, so the standalone mode can use the
+ * same name resolution.
+ * @param {Table} table
+ * @returns {WorkspaceData}
+ */
+function syntheticData(table) {
+  return {
+    pages: {
+      __page: {
+        id: "__page",
+        type: "sheet",
+        title: "",
+        content: { tables: { [table.id]: table }, tableOrder: [table.id] }
+      }
+    },
+    pageOrder: { root: ["__page"] }
+  };
+}
+
+/**
+ * Load every sheet table of the data into one engine and calculate it.
+ * @param {WorkspaceData} data
+ * @returns {RecalcEngine}
+ */
+export function buildBook(data) {
+  /** @type {Map<string, string>} Table id → id of the container (page or detached entry) holding it. */
+  const owners = new Map();
+  for (const [containerId, container] of allContainers(data)) {
+    if (container.type !== "sheet" || !container.content?.tables) continue;
+    for (const tableId of Object.keys(container.content.tables)) owners.set(tableId, containerId);
+  }
+  /** @param {string | undefined} scope */
+  const pageOfScope = (scope) => {
+    if (!scope) return null;
+    if (scope.startsWith("@page:")) return scope.slice(6) || null;
+    return owners.has(scope) ? scopePageOf(data, /** @type {string} */ (owners.get(scope))) : null;
+  };
+  /** @type {RecalcEngine} */
+  const engine = new RecalcEngine({
+    locate: (scope, segments, address) => locateReference(data, pageOfScope(scope), segments, address),
+    handleText: (handle) => sectionPlainText(data, handle.sectionId) ?? "",
+    resolveId: (id) => {
+      const located = locateById(data, id);
+      if (!located) return undefined;
+      if (located.error) return located.error;
+      if (located.value !== undefined) return located.value;
+      const cells = located.cells;
+      if (!cells) return undefined;
+      const { start, end } = cells;
+      const values = engine._readCells(cells.tableId, start, end);
+      return cells.scalar && values.length === 1
+        ? values[0]
+        : makeRange(values, end.row - start.row + 1, end.col - start.col + 1, { tableId: cells.tableId, start, end });
+    }
+  });
+  engine.bulk(() => {
+    for (const [tableId, containerId] of owners) {
+      const table = data.pages[containerId]?.content.tables[tableId] ?? data.detached?.[containerId]?.content.tables[tableId];
+      const scope = tableId;
+      for (const [key, cell] of Object.entries(table.cells ?? {})) {
+        const position = parseCellKey(key);
+        if (!position) continue;
+        if (typeof cell.formula === "string") {
+          engine.setFormula(toEnginePosition(position, scope), cell.formula);
+        } else if (cell.value !== undefined) {
+          engine.setLiteral(toEnginePosition(position, scope), cell.value);
+        }
+      }
+    }
+  });
+  engine.recalculate();
+  return engine;
 }

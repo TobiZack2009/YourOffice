@@ -103,3 +103,30 @@ describe("tokenize", () => {
     expect(tokenize("").at(-1)?.type).toBe("eof");
   });
 });
+
+describe("tokenize — names, paths and offsets", () => {
+  it("gives every token an end offset", () => {
+    const tokens = tokenize("=SUM(A1, 2)").filter((t) => t.type !== "eof");
+    expect(tokens.map((t) => [t.pos, t.end])).toEqual([
+      [0, 3], [3, 4], [4, 6], [6, 7], [8, 9], [9, 10]
+    ]);
+  });
+
+  it("tokenizes bang-separated paths", () => {
+    expect(shape("Expenses!B2")).toEqual([["word", "Expenses"], ["bang", "!"], ["word", "B2"]]);
+  });
+
+  it("tokenizes quoted names with doubled quote escapes", () => {
+    expect(shape("'Q3 Budget'!Notes")).toEqual([["qname", "Q3 Budget"], ["bang", "!"], ["word", "Notes"]]);
+    expect(shape("'It''s'")).toEqual([["qname", "It's"]]);
+  });
+
+  it("rejects unterminated and empty quoted names", () => {
+    expect(() => tokenize("'abc")).toThrow(FormulaSyntaxError);
+    expect(() => tokenize("''")).toThrow(FormulaSyntaxError);
+  });
+
+  it("still reads error literals that end in a bang", () => {
+    expect(shape("#REF!+1")).toEqual([["error", "#REF!"], ["op", "+"], ["number", 1]]);
+  });
+});

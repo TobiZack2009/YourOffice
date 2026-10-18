@@ -17,7 +17,7 @@
 
 import { formatA1, parseA1 } from "./references.js";
 import { parseCellKey } from "./model.js";
-import { tokenize } from "./tokenizer.js";
+import { rewriteFormula, isLocalReference } from "./refscan.js";
 
 /** @typedef {import("./references.js").CellRef} CellRef */
 /** @typedef {import("./model.js").Merge} Merge */
@@ -58,37 +58,44 @@ export function shiftRef(shift, ref) {
 /**
  * Rewrite the references in formula text according to an index shift.
  * Deleted targets become the `#REF!` error literal, exactly as Excel does.
- * Malformed formulas are returned unchanged.
+ * Malformed formulas are returned unchanged. Only references that point into the
+ * shifted table are touched: unqualified ones by default, or whatever
+ * `options.target(segments)` accepts (cross-table formulas pass a predicate that
+ * recognises `Expenses!B2` as pointing at the table being edited).
  *
  * @param {string} text Formula text, with or without a leading "=".
  * @param {IndexShift} shift
+ * @param {{ target?: (segments: string[]) => boolean }} [options]
  * @returns {string}
  */
-export function shiftFormulaReferences(text, shift) {
-  const body = text.startsWith("=") ? text.slice(1) : text;
-  let tokens;
-  try {
-    tokens = tokenize(text).filter((token) => token.type !== "eof");
-  } catch {
-    return text;
-  }
-
-  let output = "=";
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    const next = tokens[i + 1];
-    const raw = body.slice(token.pos, next ? next.pos : body.length);
-    const word = typeof token.value === "string" ? token.value : "";
-
-    if (token.type === "word" && parseA1(word)) {
-      const ref = /** @type {CellRef} */ (parseA1(word));
-      const moved = shiftRef(shift, ref);
-      output += (moved ? formatA1(moved) : "#REF!") + raw.slice(word.length);
-    } else {
-      output += raw;
+export function shiftFormulaReferences(text, shift, options = {}) {
+  const target = options.target ?? isLocalReference;
+  return rewriteFormula(text, ({ units }) => {
+    /** @type {import("./refscan.js").Edit[]} */
+    const edits = [];
+    for (const unit of units) {
+      if (unit.kind !== "address" || !target(unit.segments)) continue;
+      /** @type {import("./refscan.js").Edit[]} */
+      const unitEdits = [];
+      for (const [ref, index] of [[unit.first, unit.firstToken], [unit.second, unit.secondToken]]) {
+        if (!ref) continue;
+        const moved = shiftRef(shift, /** @type {CellRef} */ (ref));
+        if (moved && moved.col === ref.col && moved.row === ref.row) continue;
+        unitEdits.push({
+          from: /** @type {number} */ (index),
+          to: /** @type {number} */ (index),
+          text: moved ? formatA1(moved) : "#REF!"
+        });
+      }
+      // A qualifier in front of an error literal would not parse: the whole unit goes.
+      if (unit.segments.length > 0 && unitEdits.some((edit) => edit.text === "#REF!")) {
+        edits.push({ from: unit.from, to: unit.to, text: "#REF!" });
+      } else {
+        edits.push(...unitEdits);
+      }
     }
-  }
-  return output;
+    return edits;
+  });
 }
 
 /**

@@ -6,7 +6,13 @@
  * literals, references, names, operators and punctuation each get a token with
  * a source position for good diagnostics.
  *
- * Formula text may optionally include a leading "=", which is ignored.
+ * Formula text may optionally include a leading "=", which is ignored. Token
+ * positions are offsets into the text *after* that "=" (see `formulaBody`), and
+ * every token carries `pos` (start) and `end` (exclusive) so rewriters can splice
+ * the original text token by token.
+ *
+ * Names: a word, or a 'single-quoted name' (`''` escapes a quote) which becomes a
+ * `qname` token. `!` separates path segments (`Page!Table!B2`).
  */
 
 import { errorFromLiteral } from "./errors.js";
@@ -36,20 +42,28 @@ export class FormulaSyntaxError extends Error {
 }
 
 /**
+ * The formula text without its optional leading "=". Token offsets index into this.
+ * @param {string} input
+ * @returns {string}
+ */
+export function formulaBody(input) {
+  return input.startsWith("=") ? input.slice(1) : input;
+}
+
+/**
  * Tokenize formula text.
  * @param {string} input Formula text, with or without a leading "=".
  * @returns {Token[]} Tokens ending with an "eof" token.
  * @throws {FormulaSyntaxError} On unterminated strings or unknown characters.
  */
 export function tokenize(input) {
-  let text = input;
-  if (text.startsWith("=")) text = text.slice(1);
+  const text = formulaBody(input);
 
   /** @type {Token[]} */
   const tokens = [];
   let i = 0;
 
-  const push = (type, value) => tokens.push({ type, value, pos: i });
+  const push = (type, value) => tokens.push({ type, value, pos: i, end: i + 1 });
 
   while (i < text.length) {
     const ch = text[i];
@@ -78,7 +92,7 @@ export function tokenize(input) {
         }
       }
       const literal = text.slice(start, i);
-      tokens.push({ type: "number", value: Number(literal), literal, pos: start });
+      tokens.push({ type: "number", value: Number(literal), literal, pos: start, end: i });
       continue;
     }
 
@@ -104,7 +118,7 @@ export function tokenize(input) {
         }
       }
       if (!closed) throw new FormulaSyntaxError("unterminated string literal", start);
-      tokens.push({ type: "string", value, pos: start });
+      tokens.push({ type: "string", value, pos: start, end: i });
       continue;
     }
 
@@ -116,7 +130,7 @@ export function tokenize(input) {
       const literal = text.slice(start, i);
       const error = errorFromLiteral(literal);
       if (!error) throw new FormulaSyntaxError(`unknown error literal "${literal}"`, start);
-      tokens.push({ type: "error", value: error.code, pos: start });
+      tokens.push({ type: "error", value: error.code, pos: start, end: i });
       continue;
     }
 
@@ -127,10 +141,43 @@ export function tokenize(input) {
       while (i < text.length && WORD_CHARS.test(text[i])) i += 1;
       const word = text.slice(start, i);
       if (word === "TRUE" || word === "FALSE") {
-        tokens.push({ type: "boolean", value: word === "TRUE", pos: start });
+        tokens.push({ type: "boolean", value: word === "TRUE", pos: start, end: i });
       } else {
-        tokens.push({ type: "word", value: word, pos: start });
+        tokens.push({ type: "word", value: word, pos: start, end: i });
       }
+      continue;
+    }
+
+    // Quoted name: 'Q3 Budget', with '' for a literal quote.
+    if (ch === "'") {
+      const start = i;
+      i += 1;
+      let value = "";
+      let closed = false;
+      while (i < text.length) {
+        if (text[i] === "'") {
+          if (text[i + 1] === "'") {
+            value += "'";
+            i += 2;
+          } else {
+            i += 1;
+            closed = true;
+            break;
+          }
+        } else {
+          value += text[i];
+          i += 1;
+        }
+      }
+      if (!closed) throw new FormulaSyntaxError("unterminated quoted name", start);
+      if (value === "") throw new FormulaSyntaxError("empty quoted name", start);
+      tokens.push({ type: "qname", value, pos: start, end: i });
+      continue;
+    }
+
+    if (ch === "!") {
+      push("bang", ch);
+      i += 1;
       continue;
     }
 
@@ -157,7 +204,7 @@ export function tokenize(input) {
 
     const operator = OPERATORS.find((candidate) => text.startsWith(candidate, i));
     if (operator) {
-      push("op", operator);
+      tokens.push({ type: "op", value: operator, pos: i, end: i + operator.length });
       i += operator.length;
       continue;
     }
@@ -165,6 +212,6 @@ export function tokenize(input) {
     throw new FormulaSyntaxError(`unexpected character "${ch}"`, i);
   }
 
-  tokens.push({ type: "eof", value: null, pos: text.length });
+  tokens.push({ type: "eof", value: null, pos: text.length, end: text.length });
   return tokens;
 }

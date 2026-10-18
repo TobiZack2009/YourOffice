@@ -81,11 +81,12 @@ export function formatA1(ref) {
 /**
  * Stable map key for a cell position. Absolute markers are ignored: a reference
  * *target* is a position, not a syntax.
- * @param {{ col: number, row: number }} ref
- * @returns {string} e.g. "3,12"
+ * A position may carry a `scope` (a table id) when one engine holds several tables.
+ * @param {{ col: number, row: number, scope?: string }} ref
+ * @returns {string} e.g. "3,12" or "tbl_1|3,12"
  */
 export function refKey(ref) {
-  return `${ref.col},${ref.row}`;
+  return ref.scope ? `${ref.scope}|${ref.col},${ref.row}` : `${ref.col},${ref.row}`;
 }
 
 /**
