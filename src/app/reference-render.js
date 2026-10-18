@@ -15,7 +15,7 @@ import { isHandle, isRange, rangeDims } from "../sheet/values.js";
 import { renderTable } from "../sheet/render.js";
 import { TableEngines } from "../sheet/table-engine.js";
 import { evaluateExpression } from "../references/expression.js";
-import { findSection, sectionKind, sectionRunIds } from "../references/sections.js";
+import { findSection, locatorSlideIds, sectionKind, sectionRunIds, sectionSlideIds } from "../references/sections.js";
 import { h } from "./dom.js";
 
 const MAX_DEPTH = 6;
@@ -88,21 +88,26 @@ export function renderTableSection(ctx, found) {
  */
 export function renderSlideSection(ctx, found, width = DEFAULT_SLIDE_WIDTH) {
   const content = found.container.content;
-  const slide = content.slides?.[found.section.locator.slideId];
-  if (!slide) return missing("The slide is gone.");
+  const ids = sectionSlideIds(content, found.section.locator);
+  if (ids.length === 0) return missing(locatorSlideIds(found.section.locator).length > 1 ? "The slides are gone." : "The slide is gone.");
   const size = content.size ?? { width: 1280, height: 720 };
   const scale = width / size.width;
   const depth = ctx.depth ?? 0;
-  const inner = renderSlide(slide, { size, scale, ...staticReferenceHooks(ctx, found.containerId, depth + 1) });
-  return h(
-    "div",
-    {
-      class: "reference-slide",
-      "data-slide-id": slide.id,
-      style: `width:${Math.round(width)}px;height:${Math.round(size.height * scale)}px`
-    },
-    [inner]
-  );
+  const drawn = ids.map((slideId) => {
+    const slide = content.slides[slideId];
+    const inner = renderSlide(slide, { size, scale, ...staticReferenceHooks(ctx, found.containerId, depth + 1) });
+    return h(
+      "div",
+      {
+        class: "reference-slide",
+        "data-slide-id": slide.id,
+        style: `width:${Math.round(width)}px;height:${Math.round(size.height * scale)}px`
+      },
+      [inner]
+    );
+  });
+  // Several slides stack top to bottom, in the order of the presentation.
+  return drawn.length === 1 ? drawn[0] : h("div", { class: "reference-slides" }, drawn);
 }
 
 /**

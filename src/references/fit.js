@@ -10,12 +10,12 @@
  *   - blocks flow inline only when they are a single paragraph, heading or quote
  *     (no list, code, image or nested structure, and only one block);
  *   - a table or slide flows inline only when it is drawn at most half as wide as the
- *     container, so it can sit beside text.
+ *     container, so it can sit beside text; several slides stack and always break.
  */
 
 import { isHandle, isRange } from "../sheet/values.js";
 import { isFormulaError } from "../sheet/errors.js";
-import { findSection, sectionKind, sectionRunIds } from "./sections.js";
+import { findSection, sectionKind, sectionRunIds, sectionSlideIds } from "./sections.js";
 
 /** A table or slide may flow inline up to this share of the container's width. */
 export const INLINE_WIDTH_SHARE = 0.5;
@@ -23,7 +23,7 @@ export const INLINE_WIDTH_SHARE = 0.5;
 const FLOWING_BLOCKS = new Set(["paragraph", "heading", "quote"]);
 
 /**
- * @typedef {{ kind: "scalar" | "empty" | "error" | "table" | "slide" } | { kind: "blocks", count: number, flowing: boolean }} Shape
+ * @typedef {{ kind: "scalar" | "empty" | "error" | "table" } | { kind: "slide", count: number } | { kind: "blocks", count: number, flowing: boolean }} Shape
  */
 
 /**
@@ -34,7 +34,7 @@ const FLOWING_BLOCKS = new Set(["paragraph", "heading", "quote"]);
 export function shapeOfSection(found) {
   const kind = sectionKind(found);
   if (kind === "table") return { kind: "table" };
-  if (kind === "slide") return { kind: "slide" };
+  if (kind === "slide") return { kind: "slide", count: sectionSlideIds(found.container.content, found.section.locator).length };
   const content = found.container.content;
   const ids = sectionRunIds(content, found.section.locator);
   const flowing =
@@ -74,6 +74,8 @@ export function fitOf(shape, metrics = {}) {
     case "blocks":
       return shape.count === 1 && shape.flowing ? "inline" : "break";
     default: {
+      // Several slides stack, so they always break the line.
+      if (shape.kind === "slide" && shape.count > 1) return "break";
       const { displayWidth, containerWidth } = metrics;
       if (!(displayWidth > 0) || !(containerWidth > 0)) return "break";
       return displayWidth <= containerWidth * INLINE_WIDTH_SHARE ? "inline" : "break";

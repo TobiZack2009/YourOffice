@@ -8,6 +8,8 @@
  *   document      { startBlockId, endBlockId }   a run of sibling blocks
  *   sheet         { tableId, range? }            a whole table, or a 0-based rectangle of it
  *   presentation  { slideId }                    one whole slide
+ *                 { slideId, slideIds }          several whole slides (`slideId` is the first;
+ *                                                they are shown in the presentation's order)
  *
  * `implicit` sections have no name and exist so that every embed goes through a
  * section, even of a table or slide nobody named.
@@ -37,6 +39,38 @@ export function findSection(data, sectionId) {
     if (section) return { containerId, container, section, detached: !data.pages[containerId] };
   }
   return null;
+}
+
+/**
+ * The slide ids a presentation locator names, as written.
+ * @param {{ slideId?: string, slideIds?: string[] }} locator
+ * @returns {string[]}
+ */
+export function locatorSlideIds(locator) {
+  if (Array.isArray(locator?.slideIds)) return locator.slideIds;
+  return typeof locator?.slideId === "string" ? [locator.slideId] : [];
+}
+
+/**
+ * The locator for one or more slides: `{ slideId }` for one, with `slideIds` added for more.
+ * @param {string[]} slideIds
+ * @returns {{ slideId: string, slideIds?: string[] }}
+ */
+export function slideLocator(slideIds) {
+  const ids = [...new Set(slideIds)];
+  return ids.length > 1 ? { slideId: ids[0], slideIds: ids } : { slideId: ids[0] };
+}
+
+/**
+ * The slides of a presentation section that still exist, in the presentation's order.
+ * @param {any} content Presentation content.
+ * @param {{ slideId?: string, slideIds?: string[] }} locator
+ * @returns {string[]}
+ */
+export function sectionSlideIds(content, locator) {
+  const wanted = new Set(locatorSlideIds(locator));
+  const order = Array.isArray(content?.slideOrder) ? content.slideOrder : [];
+  return order.filter((/** @type {string} */ id) => wanted.has(id) && content.slides?.[id]);
 }
 
 /**
@@ -79,7 +113,7 @@ export function sectionsCovering(container, item) {
     );
   }
   if (container?.type === "presentation" && item.slideId) {
-    return sections.filter((section) => /** @type {any} */ (section).locator.slideId === item.slideId);
+    return sections.filter((section) => locatorSlideIds(/** @type {any} */ (section).locator).includes(/** @type {string} */ (item.slideId)));
   }
   if (container?.type === "sheet" && item.tableId) {
     return sections.filter((section) => /** @type {any} */ (section).locator.tableId === item.tableId);
@@ -110,12 +144,15 @@ export function sectionPlainText(data, sectionId, depth = 0) {
     return lines.join("\n");
   }
   if (container.type === "presentation") {
-    const slide = container.content.slides?.[section.locator.slideId];
-    if (!slide) return "";
-    return (slide.objectOrder ?? [])
-      .map((id) => slide.objects[id])
-      .filter((object) => object?.type === "text")
-      .map((object) => runsText(data, object.text?.runs ?? [], depth))
+    return sectionSlideIds(container.content, section.locator)
+      .map((slideId) => {
+        const slide = container.content.slides[slideId];
+        return (slide.objectOrder ?? [])
+          .map((/** @type {string} */ id) => slide.objects[id])
+          .filter((/** @type {any} */ object) => object?.type === "text")
+          .map((/** @type {any} */ object) => runsText(data, object.text?.runs ?? [], depth))
+          .join("\n");
+      })
       .join("\n");
   }
   return null;
@@ -190,7 +227,7 @@ export function sectionIsIntact(container, section) {
   const content = container?.content;
   if (!content) return false;
   if (container.type === "document") return sectionRunIds(content, section.locator).length > 0;
-  if (container.type === "presentation") return Boolean(content.slides?.[section.locator.slideId]);
+  if (container.type === "presentation") return sectionSlideIds(content, section.locator).length > 0;
   return Boolean(content.tables?.[section.locator.tableId]);
 }
 
@@ -212,7 +249,11 @@ export function locatorProblem(container, locator) {
     return null;
   }
   if (container.type === "presentation") {
-    return content.slides?.[locator.slideId] ? null : "That slide does not exist.";
+    const ids = locatorSlideIds(locator);
+    if (ids.length === 0 || ids.some((id) => typeof id !== "string")) return "A section needs a slide.";
+    if (new Set(ids).size !== ids.length) return "A slide can only be listed once.";
+    if (locator.slideId !== ids[0]) return "The section's first slide must match its slide list.";
+    return ids.every((id) => content.slides?.[id]) ? null : "That slide does not exist.";
   }
   const table = content.tables?.[locator.tableId];
   if (!table) return "That table does not exist.";

@@ -51,7 +51,7 @@ import { markStateIn, setLinkIn, toggleMarkIn } from "./marks.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { createInspector } from "./inspector.js";
 import { createSlideStrip } from "./slide-strip.js";
-import { findSection, findSectionByLocator, sectionKind } from "../references/sections.js";
+import { findSection, findSectionByLocator, sectionKind, slideLocator } from "../references/sections.js";
 import { ensureSection } from "../references/catalog.js";
 import { buildBook } from "../sheet/table-engine.js";
 import { enginesFor, staticReferenceHooks } from "./reference-render.js";
@@ -388,21 +388,25 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     onCreate: ({ layout, index }) => newSlide(layout, index),
     onDuplicate: (slideId) => duplicateSlide(slideId),
     onDelete: (slideId) => deleteSlide(slideId),
+    onDeleteMany: (slideIds) => deleteSlides(slideIds),
     onMove: (slideId, index) => moveSlide(slideId, index),
     referenceCount: (slideId) => {
       const section = findSectionByLocator(workspace.data.pages[pageId], { slideId });
       return section ? referenceCount(workspace, section.id) : 0;
     },
-    onHandle: (slideId, anchor) => openSlideHandle(slideId, anchor)
+    onHandle: (slideIds, anchor) => openSlideHandle(slideIds, anchor)
   });
 
   /**
-   * The click-only section handle of a slide: name it, see what reads it.
-   * @param {string} slideId
+   * The click-only section handle of a slide, or of a selection of several: name them
+   * as one section, see what reads it.
+   * @param {string[]} slideIds In presentation order.
    * @param {HTMLElement} anchor
    */
-  function openSlideHandle(slideId, anchor) {
-    const found = findSectionByLocator(workspace.data.pages[pageId], { slideId });
+  function openSlideHandle(slideIds, anchor) {
+    const locator = slideLocator(slideIds);
+    const many = slideIds.length > 1;
+    const found = findSectionByLocator(workspace.data.pages[pageId], locator);
     /** @type {import("./popover.js").MenuItem[]} */
     let items;
     if (found?.name) {
@@ -411,18 +415,18 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       const count = found ? referenceCount(workspace, found.id) : 0;
       items = [
         {
-          label: "Name this slide",
+          label: many ? `Name these ${slideIds.length} slides` : "Name this slide",
           icon: "rename",
           attrs: { "data-action": "section-make" },
           action: () =>
             promptName(popovers, anchor, {
-              title: "Slide name",
+              title: many ? "Name for these slides" : "Slide name",
               confirm: "Save",
               onSubmit: (name) =>
                 run(() =>
                   found
                     ? workspace.dispatch("renameSection", { sectionId: found.id, name })
-                    : workspace.dispatch("createSection", { pageId, locator: { slideId }, name })
+                    : workspace.dispatch("createSection", { pageId, locator, name })
                 )
             })
         },
@@ -979,6 +983,22 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       setCurrent(neighbour);
     }
     run(() => send("deleteSlide", { slideId }));
+  }
+
+  /** @param {string[]} slideIds Delete several slides as one change. */
+  function deleteSlides(slideIds) {
+    const order = getContent().slideOrder;
+    const ids = slideIds.filter((id) => order.includes(id));
+    if (ids.length === 0 || ids.length >= order.length) return;
+    finishEdit(true);
+    if (currentSlideId && ids.includes(currentSlideId)) {
+      const at = order.indexOf(currentSlideId);
+      const rest = order.filter((id) => !ids.includes(id));
+      const after = order.slice(at + 1).find((id) => rest.includes(id));
+      const before = order.slice(0, at).reverse().find((id) => rest.includes(id));
+      setCurrent(after ?? before ?? null);
+    }
+    run(() => send("deleteSlide", { slideIds: ids }));
   }
 
   /**

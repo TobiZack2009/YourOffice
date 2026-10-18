@@ -368,23 +368,25 @@ export const presentationCommands = {
   },
 
   /**
-   * Delete a slide. The last slide cannot be deleted. Links to it are cleared.
+   * Delete a slide, or several at once with `slideIds` (one command, so the sections that
+   * read them see a single change). The last slide cannot be deleted. Links to it are cleared.
    * @param {Workspace} store
    * @param {Transaction} tx
-   * @param {{ pageId: string, slideId: string }} payload
+   * @param {{ pageId: string, slideId?: string, slideIds?: string[] }} payload
    */
   deleteSlide(store, tx, payload) {
     const p = /** @type {Record<string, unknown>} */ (payload ?? {});
     const { page, content } = requirePresentationPage(store, p.pageId);
-    const slide = requireSlide(content, p.slideId);
-    if (content.slideOrder.length <= 1) {
+    const ids = Array.isArray(p.slideIds) ? [...new Set(p.slideIds)] : [p.slideId];
+    const doomed = new Set(ids.map((id) => requireSlide(content, id).id));
+    if (content.slideOrder.length - doomed.size < 1) {
       throw new CommandError("a presentation needs at least one slide", "lastSlide");
     }
-    delete content.slides[slide.id];
-    content.slideOrder = content.slideOrder.filter((id) => id !== slide.id);
+    for (const id of doomed) delete content.slides[id];
+    content.slideOrder = content.slideOrder.filter((id) => !doomed.has(id));
     for (const other of Object.values(content.slides)) {
       for (const object of Object.values(other.objects)) {
-        if (object.link?.kind === "slide" && object.link.slideId === slide.id) delete object.link;
+        if (object.link?.kind === "slide" && doomed.has(object.link.slideId)) delete object.link;
       }
     }
     touchPage(tx, page);

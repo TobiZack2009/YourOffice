@@ -16,7 +16,7 @@
 
 import { collectDescendants, findContainer } from "../document/model.js";
 import { addDetached } from "./detached.js";
-import { sectionRunIds } from "./sections.js";
+import { locatorSlideIds, sectionRunIds, slideLocator } from "./sections.js";
 
 /**
  * @typedef {object} SectionCapture
@@ -73,8 +73,10 @@ export function captureSections(data) {
       /** @type {Record<string, any>} */
       const slides = {};
       for (const section of sections) {
-        const slide = content.slides?.[section.locator.slideId];
-        if (slide) slides[slide.id] = slide;
+        for (const slideId of locatorSlideIds(section.locator)) {
+          const slide = content.slides?.[slideId];
+          if (slide) slides[slide.id] = slide;
+        }
       }
       if (Object.keys(slides).length > 0) {
         capture.slides.set(id, slides);
@@ -171,16 +173,39 @@ export function healSections(data, capture, touch) {
   for (const [containerId, before] of capture.slides) {
     const container = containerFor(containerId);
     if (!container?.content) continue;
-    for (const [slideId, slide] of Object.entries(before)) {
-      if (container.content.slides?.[slideId]) continue;
-      const sections = Object.values(/** @type {Record<string, any>} */ (container.content.sections ?? {})).filter(
-        (section) => section.locator?.slideId === slideId
-      );
+    const content = container.content;
+    /** @type {{ ids: Set<string>, sections: any[] }[]} */
+    const groups = [];
+    for (const section of Object.values(/** @type {Record<string, any>} */ (content.sections ?? {}))) {
+      const ids = locatorSlideIds(section.locator);
+      const gone = ids.filter((id) => before[id] && !content.slides?.[id]);
+      if (gone.length === 0) continue;
+      const survivors = ids.filter((id) => content.slides?.[id]);
+      if (survivors.length > 0) {
+        // Some slides of the run remain: it shrinks to them.
+        section.locator = slideLocator(survivors);
+        touch(containerId);
+        continue;
+      }
+      // Every slide is gone. Sections that shared a vanished slide share one detached copy.
+      const sharing = groups.filter((group) => gone.some((id) => group.ids.has(id)));
+      const group = sharing[0] ?? { ids: new Set(), sections: [] };
+      if (!sharing[0]) groups.push(group);
+      for (const other of sharing.slice(1)) {
+        for (const id of other.ids) group.ids.add(id);
+        group.sections.push(...other.sections);
+        groups.splice(groups.indexOf(other), 1);
+      }
+      for (const id of gone) group.ids.add(id);
+      group.sections.push(section);
+    }
+    for (const group of groups) {
+      const slideIds = [...group.ids];
       detach(data, containerId, container, "presentation", {
-        size: container.content.size,
-        slideOrder: [slideId],
-        slides: { [slideId]: slide }
-      }, sections);
+        size: content.size,
+        slideOrder: slideIds,
+        slides: Object.fromEntries(slideIds.map((id) => [id, before[id]]))
+      }, group.sections);
       touch(containerId);
     }
   }

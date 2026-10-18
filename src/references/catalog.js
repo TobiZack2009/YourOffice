@@ -88,7 +88,7 @@ function itemsOf(data, page) {
     }
   } else if (page.type === "presentation") {
     (content.slideOrder ?? []).forEach((/** @type {string} */ slideId, /** @type {number} */ index) => {
-      const section = sections.find((s) => s.locator.slideId === slideId);
+      const section = sections.find((s) => s.locator.slideId === slideId && !s.locator.slideIds);
       const name = section?.name;
       items.push({
         key: `slide:${slideId}`,
@@ -100,6 +100,10 @@ function itemsOf(data, page) {
         locator: { slideId }
       });
     });
+    // Named runs of several slides.
+    for (const section of named.filter((s) => s.locator.slideIds)) {
+      items.push({ key: `section:${section.id}`, kind: "section", label: section.name, name: section.name, pageId: page.id, sectionId: section.id });
+    }
   } else {
     for (const section of named) {
       items.push({ key: `section:${section.id}`, kind: "section", label: section.name, name: section.name, pageId: page.id, sectionId: section.id });

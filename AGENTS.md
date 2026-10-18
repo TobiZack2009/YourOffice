@@ -539,7 +539,9 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     referenced table detaches it instead of producing `#REF!`.
   - **Sections and references.** `content.sections[id] = {id, name?, locator, implicit?}` on each
     page. Locators: document `{startBlockId, endBlockId}` (a contiguous sibling run), sheet
-    `{tableId, range?}`, presentation `{slideId}`. Tables and slides get an implicit unnamed
+    `{tableId, range?}`, presentation `{slideId}` for one slide or `{slideId: first, slideIds: [...]}`
+    for several (any set, not only neighbours; `slideLocator` builds the canonical form, ids in
+    presentation order). Tables and slides get an implicit unnamed
     section when embedded (`references/catalog.js` `ensureSection`). A reference instance is
     `{id, kind: "embed"|"expression", sectionId | expression, display}` and lives as a document
     `sectionRef` block, an inline run `{text: REF_CHAR, ref}` (atomic, counts as one character),
@@ -571,6 +573,23 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     (replace source = the slide-embed swap, edit expression, remove); double-click edits an
     expression. The editor refreshes on other pages' changes when it drew references.
     The Insert tab has a Reference group (Embed, Expression); the slide strip has a section handle.
+  - **Multi-slide sections.** The slide strip selects several slides (Shift+click range from the
+    anchor, Cmd/Ctrl+click toggle, Shift+Arrow extend, Cmd/Ctrl+A all; the current slide is always
+    in a multi-selection and a plain click or arrow ends it). Its handle on a selected slide names
+    the whole selection as one section (`createSection` with `slideLocator(ids)`); Delete removes
+    the selection through `deleteSlide {slideIds}`, one command, so healing sees a single change.
+    Deleting some of a section's slides shrinks its locator to the survivors; deleting all of them
+    detaches the slides (sections sharing a vanished slide share one detached entry). A multi-slide
+    embed draws the slides stacked, in presentation order (`.reference-slides`), and never flows
+    inline. The picker lists a named multi-slide section under its presentation. Dragging in the
+    strip still moves one slide.
+  - **Links and trailing click (document editor).** A link is an inline mark editable like bold:
+    `link-form.js` (`normalizeLinkUrl` rejects script-like schemes, bare emails become `mailto:`;
+    `buildLinkForm`, `buildLinkCard`). `setLink(url, text?)` edits, inserts at a caret, removes, and
+    splits partially covered anchors; clicking a link opens a card (edit / remove / open, and
+    Cmd/Ctrl+click opens it), the ribbon Link button is `active` inside a link and the context menu
+    has Link. Cmd/Ctrl+K is Quick Find, so it is deliberately **not** a link shortcut. Clicking
+    below the last block focuses a trailing empty paragraph or appends one.
   - **Browser smoke (playwright-core, system Chrome).** Make a section from a paragraph, embed it
     on a slide, cross-page expression (`Budget!'Q1 Budget'!D2`), bad expression blocked with an
     explanation, delete the source and the embed survives, inline expression chip in a paragraph,
@@ -586,7 +605,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     rather than detached. Arrow navigation in a host skips embed blocks. An inline embed's
     inline/break choice reads `clientWidth` at render time (0 when unmounted, so tables and
     slides break until re-rendered). A page-title ambiguity gives `#NAME?`. Multi-selection
-    resize on slides is still deferred. The slide strip handle is click-only.
+    resize on slides is still deferred. The slide strip handle is click-only. Multi-slide sections cannot be dragged as a group.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
@@ -598,9 +617,9 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   Phase 6 suites: `formula-functions`, `cross-table`, `sheet-refscan`, `references-scope`,
   `references-rewrite`, `references-catalog`, `references-commands`, `references-fit`,
   `app-references`, `app-block-references`, `app-inline-references`, `app-sheet-references`,
-  `app-slide-references`, `app-presentation-references`.
-  **990 tests green across 52 files**; the single-file build inlines JS + CSS into one
-  ~374 kB HTML.
+  `app-slide-references`, `app-presentation-references`, `app-links`, `references-multi-slide`.
+  **1042 tests green across 54 files**; the single-file build inlines JS + CSS into one
+  ~383 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 

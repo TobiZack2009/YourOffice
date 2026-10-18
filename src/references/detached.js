@@ -20,6 +20,7 @@ import { createId } from "../core/ids.js";
 import { collectDescendants } from "../document/model.js";
 import { createTable } from "../sheet/model.js";
 import { collectReferenceSites } from "./index.js";
+import { sectionSlideIds, slideLocator } from "./sections.js";
 
 /** @typedef {import("./containers.js").ContainerData} ContainerData */
 
@@ -119,13 +120,13 @@ export function copySectionContent(container, section) {
     };
   }
   if (container.type === "presentation") {
-    const slide = content.slides?.[locator.slideId];
-    if (!slide) return null;
+    const ids = sectionSlideIds(content, locator);
+    if (ids.length === 0) return null;
     return {
       size: structuredClone(content.size),
-      slideOrder: [slide.id],
-      slides: { [slide.id]: structuredClone(slide) },
-      sections: registry({ slideId: slide.id })
+      slideOrder: ids,
+      slides: Object.fromEntries(ids.map((slideId) => [slideId, structuredClone(content.slides[slideId])])),
+      sections: registry(slideLocator(ids))
     };
   }
   const table = content.tables?.[locator.tableId];

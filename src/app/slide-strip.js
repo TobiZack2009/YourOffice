@@ -6,6 +6,12 @@
  * touches the workspace itself. Slide management lives here: click to select,
  * a hover "+" between thumbnails, drag to reorder (the landing spot comes from the
  * pure `planSlideReorder`), a right-click menu, and keyboard handling.
+ *
+ * Several slides can be selected at once (Shift+click for a range from the anchor,
+ * Cmd/Ctrl+click to toggle, Shift+Arrow to extend). The strip owns that set; the
+ * editor only learns of it through `onDeleteMany` and `onHandle`. The current slide is
+ * always part of a selection of more than one, and moving the current slide elsewhere
+ * (a plain click, a plain arrow) ends it. Dragging still moves a single slide.
  */
 
 import { LAYOUTS } from "../presentation/layouts.js";
@@ -27,14 +33,16 @@ export const THUMB_WIDTH = 168;
  * @property {(spec: { layout?: string, index: number }) => void} onCreate
  * @property {(slideId: string) => void} onDuplicate
  * @property {(slideId: string) => void} onDelete
+ * @property {(slideIds: string[]) => void} [onDeleteMany] Delete a multi-selection (in presentation order).
  * @property {(slideId: string, index: number) => void} onMove
  * @property {(slideId: string) => number} [referenceCount] How many places read this slide.
- * @property {(slideId: string, anchor: HTMLElement) => void} [onHandle] The section handle was pressed (click-only).
+ * @property {(slideIds: string[], anchor: HTMLElement) => void} [onHandle] The section handle was pressed (click-only); several ids when it belongs to a multi-selection, in presentation order.
  *
  * @typedef {object} SlideStripHandle
  * @property {HTMLElement} element
  * @property {() => void} render
  * @property {() => void} focus
+ * @property {() => string[]} getSelection The selected slides in presentation order (the current one when alone).
  */
 
 /**
@@ -46,6 +54,77 @@ export function createSlideStrip(options) {
   const element = h("nav", { class: "slide-strip", tabindex: "0", "aria-label": "Slides", "data-role": "slide-strip" });
   /** @type {string | null} */
   let dragId = null;
+  /** @type {Set<string>} Selected slides when more than one; empty otherwise. */
+  const selected = new Set();
+  /** @type {string | null} Where a Shift range starts. */
+  let anchorId = null;
+
+  /** Drop ids that vanished, and the selection when it no longer holds the current slide. */
+  function pruneSelection() {
+    const content = options.getContent();
+    for (const id of [...selected]) if (!content.slides[id]) selected.delete(id);
+    const current = options.getCurrent();
+    if (selected.size < 2 || (current && !selected.has(current))) selected.clear();
+    if (selected.size === 0 && current) anchorId = current;
+  }
+
+  /** @returns {string[]} */
+  function getSelection() {
+    pruneSelection();
+    const order = options.getContent().slideOrder;
+    if (selected.size > 1) return order.filter((id) => selected.has(id));
+    const current = options.getCurrent();
+    return current ? [current] : [];
+  }
+
+  /**
+   * Select the run between the anchor and `toId`; `toId` becomes the current slide.
+   * @param {string} toId
+   */
+  function selectRange(toId) {
+    const order = options.getContent().slideOrder;
+    const from = order.indexOf(anchorId ?? options.getCurrent() ?? toId);
+    const to = order.indexOf(toId);
+    if (from === -1 || to === -1) return;
+    const [lo, hi] = from <= to ? [from, to] : [to, from];
+    selected.clear();
+    for (const id of order.slice(lo, hi + 1)) selected.add(id);
+    options.onSelect(toId);
+    pruneSelection();
+    render();
+  }
+
+  /** @param {string} slideId */
+  function toggleInSelection(slideId) {
+    const current = options.getCurrent();
+    if (selected.size === 0 && current) selected.add(current);
+    if (selected.has(slideId)) {
+      selected.delete(slideId);
+      if (slideId === current) {
+        const next = options.getContent().slideOrder.find((id) => selected.has(id));
+        if (next) options.onSelect(next);
+      }
+    } else {
+      selected.add(slideId);
+      options.onSelect(slideId);
+    }
+    anchorId = slideId;
+    pruneSelection();
+    render();
+  }
+
+  /** @param {string} slideId @param {MouseEvent} event */
+  function clickSlide(slideId, event) {
+    if (event.shiftKey) selectRange(slideId);
+    else if (event.metaKey || event.ctrlKey) toggleInSelection(slideId);
+    else {
+      const had = selected.size > 0;
+      selected.clear();
+      anchorId = slideId;
+      options.onSelect(slideId);
+      if (had) render();
+    }
+  }
 
   function clearDropMarks() {
     for (const el of element.querySelectorAll(".drop-before, .drop-after")) el.classList.remove("drop-before", "drop-after");
@@ -64,6 +143,7 @@ export function createSlideStrip(options) {
 
   function render() {
     const content = options.getContent();
+    pruneSelection();
     const current = options.getCurrent();
     const scrollTop = element.scrollTop;
     clear(element);
@@ -80,13 +160,14 @@ export function createSlideStrip(options) {
       thumb.append(renderSlide(slide, { size: content.size, scale, ...options.slideHooks?.() }));
 
       const wrap = h("div", {
-        class: `slide-thumb-wrap${slideId === current ? " is-current" : ""}`,
+        class: `slide-thumb-wrap${slideId === current ? " is-current" : ""}${selected.has(slideId) ? " is-selected" : ""}`,
         draggable: "true",
         "data-slide-id": slideId,
         "data-index": index,
         role: "button",
         "aria-label": `Slide ${index + 1}`,
-        "aria-current": slideId === current ? "true" : "false"
+        "aria-current": slideId === current ? "true" : "false",
+        "aria-selected": selected.has(slideId) ? "true" : "false"
       }, [
         h("span", { class: "slide-number", text: String(index + 1) }),
         thumb
@@ -120,16 +201,21 @@ export function createSlideStrip(options) {
         if (count > 0) handle.append(h("span", { class: "handle-badge", text: String(count) }));
         handle.addEventListener("click", (event) => {
           event.stopPropagation();
-          options.onHandle?.(slideId, handle);
+          options.onHandle?.(selected.has(slideId) ? getSelection() : [slideId], handle);
         });
         handle.addEventListener("mousedown", (event) => event.stopPropagation());
         wrap.append(handle);
       }
 
-      wrap.addEventListener("click", () => options.onSelect(slideId));
+      wrap.addEventListener("click", (event) => clickSlide(slideId, event));
       wrap.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        if (slideId !== options.getCurrent()) options.onSelect(slideId);
+        if (!selected.has(slideId)) {
+          selected.clear();
+          anchorId = slideId;
+          if (slideId !== options.getCurrent()) options.onSelect(slideId);
+          else render();
+        }
         openMenu({ x: event.clientX, y: event.clientY }, slideId);
       });
       wrap.addEventListener("dragstart", (event) => {
@@ -188,6 +274,8 @@ export function createSlideStrip(options) {
   function openMenu(point, slideId) {
     const order = options.getContent().slideOrder;
     const index = order.indexOf(slideId);
+    const group = selected.has(slideId) ? getSelection() : [];
+    const many = group.length > 1;
     /** @type {import("./popover.js").MenuItem[]} */
     const items = [
       {
@@ -205,32 +293,40 @@ export function createSlideStrip(options) {
         label: "Duplicate",
         icon: "duplicate",
         attrs: { "data-action": "duplicate-slide" },
+        disabled: many,
         action: () => options.onDuplicate(slideId)
       },
       { separator: true },
       {
         label: "Move up",
         attrs: { "data-action": "move-slide-up" },
-        disabled: index <= 0,
+        disabled: many || index <= 0,
         action: () => options.onMove(slideId, index - 1)
       },
       {
         label: "Move down",
         attrs: { "data-action": "move-slide-down" },
-        disabled: index === -1 || index >= order.length - 1,
+        disabled: many || index === -1 || index >= order.length - 1,
         action: () => options.onMove(slideId, index + 1)
       },
       { separator: true },
       {
-        label: "Delete",
+        label: many ? `Delete ${group.length} slides` : "Delete",
         icon: "trash",
         danger: true,
         attrs: { "data-action": "delete-slide" },
-        disabled: order.length <= 1,
-        action: () => options.onDelete(slideId)
+        disabled: order.length <= (many ? group.length : 1),
+        action: () => (many ? deleteGroup(group) : options.onDelete(slideId))
       }
     ];
     popovers.showAt(point, buildMenu(items, popovers.close, (name) => icon(name, { size: 16 })));
+  }
+
+  /** @param {string[]} ids */
+  function deleteGroup(ids) {
+    selected.clear();
+    if (options.onDeleteMany) options.onDeleteMany(ids);
+    else for (const id of ids) options.onDelete(id);
   }
 
   element.addEventListener("keydown", (event) => {
@@ -242,20 +338,34 @@ export function createSlideStrip(options) {
     if (key.key === "ArrowDown" || key.key === "ArrowUp") {
       key.preventDefault();
       const next = key.key === "ArrowDown" ? index + 1 : index - 1;
-      if (key.altKey && current && next >= 0 && next < order.length) options.onMove(current, next);
-      else if (order[next]) options.onSelect(order[next]);
+      if (key.shiftKey && order[next]) selectRange(order[next]);
+      else if (key.altKey && current && next >= 0 && next < order.length) options.onMove(current, next);
+      else if (order[next]) {
+        selected.clear();
+        options.onSelect(order[next]);
+        render();
+      }
     } else if (key.key === "Enter") {
       key.preventDefault();
       options.onCreate({ index: index + 1 });
     } else if ((key.key === "Delete" || key.key === "Backspace") && current) {
       key.preventDefault();
-      options.onDelete(current);
-    } else if (mod && key.key.toLowerCase() === "d" && current) {
+      const group = getSelection();
+      if (group.length > 1) deleteGroup(group);
+      else options.onDelete(current);
+    } else if (mod && key.key.toLowerCase() === "a") {
+      key.preventDefault();
+      selected.clear();
+      for (const id of order) selected.add(id);
+      anchorId = order[0] ?? null;
+      pruneSelection();
+      render();
+    } else if (mod && key.key.toLowerCase() === "d" && current && getSelection().length === 1) {
       key.preventDefault();
       options.onDuplicate(current);
     }
   });
 
   render();
-  return { element, render, focus: () => element.focus() };
+  return { element, render, focus: () => element.focus(), getSelection };
 }
