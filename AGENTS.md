@@ -31,7 +31,7 @@ Full product/technical spec: `app.txt` (source of truth for requirements).
 - **Separate dependency graphs.** Data deps (formulas, variables) vs rendering deps
   (views to rerender) — spec §9.
 
-### Current phase: 5 — Presentation editor (Phases 1–4 core done; Phase 5 landed, Phase 4 polish remaining)
+### Current phase: 6 — sections, embeds and expression references (Phases 1–5 done; Phase 6 landed, polish noted below)
 
 Directory layout (logical modules from spec §14; may split further as it grows):
 
@@ -77,8 +77,8 @@ labelled groups) → canvas.
   sidebar. `icons.js` builds inline SVG icons from the Lucide pack (`lucide` on npm, named imports
   so unused icons are tree-shaken; a few icons with no Lucide equivalent are drawn locally). `quick-find.js` is the Cmd/Ctrl+K
   overlay (`findPages` is the pure filter).
-- Embedding sheets/slides in documents is deferred: the document Insert tab shows
-  disabled "Sheet"/"Slide" seams (Phase 6).
+- Embedding landed in Phase 6 (see the status log). The sheet Insert tab keeps a disabled
+  "Embed" seam with a `disabledReason`: embedding into sheets is not supported.
 
 Key types (JSDoc typedefs document the shapes; there is no static type checker):
 
@@ -514,6 +514,79 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     and Preview groups; Delay/Duration are in ms like the transition duration field.
   - Browser smoke (playwright-core, system Chrome): add/retime/reorder/preview, motion
     endpoint drag, tab switch hiding the timeline, no console errors.
+- **Phase 6 — sections, embeds and expression references:**
+  - **Language (`src/sheet/`).** The tokenizer gives every token an `end` offset and adds `!`,
+    `'quoted names'` (`''` escape) and an optional leading `=`. The parser adds a `path` node
+    (`segments`, optional `address`: `Page!Table!A1:B2`) and `REF("id")`. One function table
+    serves sheets and expressions: the old six plus lazy IF/IFERROR/IFNA, logic (AND OR NOT
+    ISBLANK ISERROR ISNUMBER ISTEXT), math (ROUND* ABS INT MOD SQRT POWER) and text (LEN UPPER
+    LOWER TRIM LEFT RIGHT MID FIND SEARCH REPLACE SUBSTITUTE TEXT INCLUDES STARTSWITH ENDSWITH).
+    Values are scalars, ranges, and handles `{kind: "blocks"|"slide", sectionId}`; a 1x1 range
+    collapses to a scalar and block runs coerce to plain text. Errors explain themselves:
+    `sheet/errors.js` has a plain-language message and hint per code, and a derived error
+    (same `code`) carries specifics such as "did you mean". Rewrites in `shift.js`,
+    `cell-shift.js`, `fill.js` slice by token `end`.
+  - **Scope (`src/references/scope.js`, `rewrite.js`).** Page nesting is scope nesting; a page's
+    members are its tables, named sections and child pages. Bare names resolve innermost-out,
+    so a section on another page needs a `Page!Name` path. Duplicate table/section names are
+    auto-suffixed. Rename, page move and a name that would re-point an existing bare name rewrite
+    expressions and cell formulas token by token (qualifying a path to keep the same target) in
+    the same transaction.
+  - **Cross-table formulas.** `Expenses!B2` works. `sheet/table-engine.js` keeps one
+    workspace-wide cell-keyed dependency graph (`TableEngines` per-table API unchanged).
+    `references/cross-table.js` rewrites formulas in other tables and expressions on row/column
+    insert/delete, cell insert/delete and `moveCells` (the same-table guard is gone). Deleting a
+    referenced table detaches it instead of producing `#REF!`.
+  - **Sections and references.** `content.sections[id] = {id, name?, locator, implicit?}` on each
+    page. Locators: document `{startBlockId, endBlockId}` (a contiguous sibling run), sheet
+    `{tableId, range?}`, presentation `{slideId}`. Tables and slides get an implicit unnamed
+    section when embedded (`references/catalog.js` `ensureSection`). A reference instance is
+    `{id, kind: "embed"|"expression", sectionId | expression, display}` and lives as a document
+    `sectionRef` block, an inline run `{text: REF_CHAR, ref}` (atomic, counts as one character),
+    or a presentation `reference` object. `references/hosts.js` is the single scan of hosts.
+    Commands (`references/commands.js`): `createSection`, `renameSection`, `removeSection`,
+    `insertReference`, `updateReference`, `removeReference`, `setExpression`, `restoreDetached`.
+    `aroundCommand` hooks capture and heal section locators around block commands, sweep the
+    detached store and run the cycle check (`HOT_COMMANDS` such as typing skip them).
+  - **Detached store.** `workspace.detached` holds content whose source was deleted while
+    referenced (page, block, table, slide). Every reference keeps rendering it; removing the last
+    reference discards it in the same transaction. `validateWorkspace` checks section/reference
+    integrity and cycles on import; the field is additive, no version bump.
+  - **Fit rule (`references/fit.js`, pure).** Scalars/empty/errors are inline; blocks only when it
+    is one paragraph/heading/quote; tables and slides when display width <= 50% of the container.
+    A breaking inline embed renders text / embed / text while the paragraph stays one block.
+  - **Document UI.** `handles.js` is the shared hover handle (gutter handle on every block:
+    Make section, rename, show references, remove; embed menu: go to source, remove; blocks drag as
+    one transaction). `reference-picker.js` is a searchable tree with live previews;
+    `expression-editor.js` is a popover with live result, plain-language error, a list of the
+    referenced names with number markers and `is-ref-N` underline colours, and Insert/Apply
+    disabled while invalid. `notice.js` is one `CommandError` surface for all three editors.
+    Document embeds are editable in place (edits reach every copy).
+  - **Sheet UI.** A handle follows the selection (table, or range when cells are selected); the
+    table handle drags. Error cells show a message line under the formula bar. Sheet embeds on
+    documents and slides are static grids.
+  - **Presentation.** `reference` objects are standalone and move/resize like images. Inline refs
+    in text objects set `autoHeight` (stored height is the minimum; `measureAutoHeights` in the
+    editor sets the drawn height without dispatching). A selected reference object shows a handle
+    (replace source = the slide-embed swap, edit expression, remove); double-click edits an
+    expression. The editor refreshes on other pages' changes when it drew references.
+    The Insert tab has a Reference group (Embed, Expression); the slide strip has a section handle.
+  - **Browser smoke (playwright-core, system Chrome).** Make a section from a paragraph, embed it
+    on a slide, cross-page expression (`Budget!'Q1 Budget'!D2`), bad expression blocked with an
+    explanation, delete the source and the embed survives, inline expression chip in a paragraph,
+    cross-table formula rewritten on table rename, `#NAME?` cell explained. No console errors.
+    Found and fixed: the table name label leaking out of table embeds.
+  - **Known limitations / deferred.** Sheet embedding is disabled. Drag-to-repoint outlines are
+    deferred. Colours are a subset: the expression editor lists referenced names with a marker
+    and underline colour, but there is no token colouring, cell outlines or point mode (AST nodes
+    carry no offsets). Inline refs and slide embeds are static; edit via the source or a
+    block-level document embed. Inline refs in slide text have no handle. Cycle errors carry no
+    path detail. The shared engine rebuilds the whole workspace per refresh. Cell-formula to
+    section cycles rely on the evaluator depth guard. A fully deleted range section is removed
+    rather than detached. Arrow navigation in a host skips embed blocks. An inline embed's
+    inline/break choice reads `clientWidth` at render time (0 when unmounted, so tables and
+    slides break until re-rendered). A page-title ambiguity gives `#NAME?`. Multi-selection
+    resize on slides is still deferred. The slide strip handle is click-only.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
@@ -521,9 +594,13 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   `app-sidebar`, `app-block-editor`, `app-sheet-editor`, `app-shell`, `app-ribbon`,
   `app-quick-find`, `app-popover`, `document-nesting`, `presentation-model`,
   `presentation-commands`, `presentation-geometry`, `presentation-render`,
-  `app-presentation-editor`, `app-marks`, `app-animations`, `presentation-animation`.
-  **746 tests green across 38 files**; the single-file build inlines JS + CSS into one
-  ~278 kB HTML.
+  `app-presentation-editor`, `app-marks`, `app-animations`, `presentation-animation`, plus the
+  Phase 6 suites: `formula-functions`, `cross-table`, `sheet-refscan`, `references-scope`,
+  `references-rewrite`, `references-catalog`, `references-commands`, `references-fit`,
+  `app-references`, `app-block-references`, `app-inline-references`, `app-sheet-references`,
+  `app-slide-references`, `app-presentation-references`.
+  **990 tests green across 52 files**; the single-file build inlines JS + CSS into one
+  ~374 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
@@ -542,7 +619,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
 5. **Phase 5 — presentation** (done): slides on a shared, editable canvas size
    (default 1280×720), stable object IDs, text/image/shape/line, stored transitions.
    Ordered animations landed afterwards (see the status log); slideshow playback is deferred.
-6. **Phase 6 — references/sections:** typed source locators, reference instances,
+6. **Phase 6 — references/sections** (landed; limitations in the status log): typed source locators, reference instances,
    live cross-editor embeds, parameters, conditional visibility (small AST language),
    source-vs-instance editing, section dep cycles and invalidation.
 7. **Phase 7 — persistence/interchange:** IndexedDB autosave + recovery, Markdown,
@@ -555,8 +632,8 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
 
 (From spec §17 — decide with small prototypes + tests as each phase starts.)
 
-- **Phase 4 engine mapping — settled:** one `RecalcEngine` per table, with
-  cross-table references (`Expenses!B2`) deferred to Phase 6 name resolution.
+- **Phase 4 engine mapping — settled:** one `RecalcEngine` per table, later replaced in
+  Phase 6 by one workspace-wide cell-keyed graph (cross-table references work).
   `RecalcEngine` positions are 1-based (A1 = `"1,1"`); the sheet model is 0-based
   and converts in `TableEngines` only. Remaining Phase 4 work: canvas table
   dragging and incremental engine updates instead of a rebuild per change.
