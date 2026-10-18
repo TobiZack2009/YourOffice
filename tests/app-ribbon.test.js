@@ -79,13 +79,16 @@ describe("getTabs", () => {
     expect(ids(allControls("document"))).toContain("zoom");
   });
 
-  it("keeps embed seams disabled in the document Insert tab", () => {
-    const embeds = allControls("document").filter((control) => control.id.startsWith("embed-"));
-    expect(ids(embeds)).toEqual(["embed-sheet", "embed-slide"]);
-    for (const control of embeds) {
-      expect(control.enabled?.(/** @type {any} */ ({}))).toBe(false);
-      expect(control.disabledReason).toBe(EMBED_REASON);
-    }
+  it("offers Embed and Expression in the document Insert tab", () => {
+    const controls = allControls("document");
+    expect(ids(controls)).toContain("reference-embed");
+    expect(ids(controls)).toContain("reference-expression");
+  });
+
+  it("keeps the sheet embed seam disabled with a reason", () => {
+    const seam = allControls("sheet").find((control) => control.id === "embed-reference");
+    expect(seam?.enabled?.(/** @type {any} */ ({}))).toBe(false);
+    expect(seam?.disabledReason).toBe(EMBED_REASON);
   });
 
   it("offers merge and unmerge only for sheets", () => {

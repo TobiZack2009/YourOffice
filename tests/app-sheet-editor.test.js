@@ -163,10 +163,10 @@ describe("createSheetEditor", () => {
     expect(editor.selectedTableName()).toBeNull();
     editor.selectCell(tableId, 0, 0);
     expect(editor.selectedTableName()).toBe("Budget");
-    editor.renameSelectedTable("  Q1  ");
-    expect(table().name).toBe("Q1");
+    editor.renameSelectedTable("  Quarter 1  ");
+    expect(table().name).toBe("Quarter 1");
     editor.renameSelectedTable("   ");
-    expect(table().name).toBe("Q1");
+    expect(table().name).toBe("Quarter 1");
   });
 
   it("sizes the rows and columns of the selection", () => {

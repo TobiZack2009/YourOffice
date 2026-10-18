@@ -27,6 +27,8 @@ export const THUMB_WIDTH = 168;
  * @property {(slideId: string) => void} onDuplicate
  * @property {(slideId: string) => void} onDelete
  * @property {(slideId: string, index: number) => void} onMove
+ * @property {(slideId: string) => number} [referenceCount] How many places read this slide.
+ * @property {(slideId: string, anchor: HTMLElement) => void} [onHandle] The section handle was pressed (click-only).
  *
  * @typedef {object} SlideStripHandle
  * @property {HTMLElement} element
@@ -102,6 +104,25 @@ export function createSlideStrip(options) {
           "data-role": "animation-badge",
           title: `${animationCount} animation${animationCount === 1 ? "" : "s"}`
         }, [icon("animation", { size: 12 })]));
+      }
+
+      if (options.onHandle) {
+        const count = options.referenceCount?.(slideId) ?? 0;
+        const handle = h("button", {
+          class: `section-handle slide-handle${count > 0 ? " has-references" : ""}`,
+          type: "button",
+          draggable: "false",
+          "data-role": "slide-handle",
+          "aria-label": "Slide section options",
+          title: "Slide section options"
+        }, [icon("section", { size: 12 })]);
+        if (count > 0) handle.append(h("span", { class: "handle-badge", text: String(count) }));
+        handle.addEventListener("click", (event) => {
+          event.stopPropagation();
+          options.onHandle?.(slideId, handle);
+        });
+        handle.addEventListener("mousedown", (event) => event.stopPropagation());
+        wrap.append(handle);
       }
 
       wrap.addEventListener("click", () => options.onSelect(slideId));

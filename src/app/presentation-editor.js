@@ -15,7 +15,7 @@
  * The handle returned here is the ribbon's whole interface, and the inspector's.
  */
 
-import { CommandError } from "../core/errors.js";
+import { guard, showNotice, clearNotice } from "./notice.js";
 import { createId } from "../core/ids.js";
 import {
   fitScale,
@@ -51,6 +51,8 @@ import { markStateIn, setLinkIn, toggleMarkIn } from "./marks.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { createInspector } from "./inspector.js";
 import { createSlideStrip } from "./slide-strip.js";
+import { findSectionByLocator } from "../references/sections.js";
+import { promptName, referenceCount, sectionMenuItems, showMenu as showAnchoredMenu, showReferenceList } from "./handles.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../presentation/model.js").SlideObject} SlideObject */
@@ -72,6 +74,7 @@ import { createSlideStrip } from "./slide-strip.js";
  *
  * @typedef {object} PresentationEditorOptions
  * @property {() => void} [onChange] Called after the editor re-rendered from a model change.
+ * @property {(pageId: string) => void} [navigate] Go to another page (used by reference lists).
  * @property {() => void} [onSelectionChange] Called when selection, tool, view or edit state changes.
  * @property {string | null} [initialSlideId] Slide to open on (falls back to the first).
  * @property {(slideId: string | null) => void} [onSlideChange]
@@ -238,8 +241,6 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   let scale = 1;
   /** @type {Map<string, HTMLElement>} */
   const objectEls = new Map();
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let noticeTimer = null;
   /** @type {ResizeObserver | null} */
   let resizeObserver = null;
   /** @type {string | null} */
@@ -305,28 +306,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
    * @returns {boolean}
    */
   function run(fn) {
-    try {
-      fn();
-      return true;
-    } catch (error) {
-      if (error instanceof CommandError) {
-        notify(error.message);
-        refresh();
-        return false;
-      }
-      throw error;
-    }
+    return guard(fn, refresh);
   }
 
   /** @param {string} message */
   function notify(message) {
-    stageArea.querySelector(".stage-notice")?.remove();
-    stageArea.append(h("div", { class: "stage-notice", role: "status", text: message }));
-    if (noticeTimer) clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(() => {
-      stageArea.querySelector(".stage-notice")?.remove();
-      noticeTimer = null;
-    }, 4000);
+    showNotice(message);
   }
 
   // -- slide strip + inspector ---------------------------------------------------
@@ -339,8 +324,55 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     onCreate: ({ layout, index }) => newSlide(layout, index),
     onDuplicate: (slideId) => duplicateSlide(slideId),
     onDelete: (slideId) => deleteSlide(slideId),
-    onMove: (slideId, index) => moveSlide(slideId, index)
+    onMove: (slideId, index) => moveSlide(slideId, index),
+    referenceCount: (slideId) => {
+      const section = findSectionByLocator(workspace.data.pages[pageId], { slideId });
+      return section ? referenceCount(workspace, section.id) : 0;
+    },
+    onHandle: (slideId, anchor) => openSlideHandle(slideId, anchor)
   });
+
+  /**
+   * The click-only section handle of a slide: name it, see what reads it.
+   * @param {string} slideId
+   * @param {HTMLElement} anchor
+   */
+  function openSlideHandle(slideId, anchor) {
+    const found = findSectionByLocator(workspace.data.pages[pageId], { slideId });
+    /** @type {import("./popover.js").MenuItem[]} */
+    let items;
+    if (found?.name) {
+      items = sectionMenuItems({ workspace, popovers, anchor: () => anchor, sectionId: found.id, navigate: options.navigate });
+    } else {
+      const count = found ? referenceCount(workspace, found.id) : 0;
+      items = [
+        {
+          label: "Name this slide",
+          icon: "rename",
+          attrs: { "data-action": "section-make" },
+          action: () =>
+            promptName(popovers, anchor, {
+              title: "Slide name",
+              confirm: "Save",
+              onSubmit: (name) =>
+                run(() =>
+                  found
+                    ? workspace.dispatch("renameSection", { sectionId: found.id, name })
+                    : workspace.dispatch("createSection", { pageId, locator: { slideId }, name })
+                )
+            })
+        },
+        {
+          label: `Show references (${count})`,
+          icon: "link",
+          disabled: !found,
+          attrs: { "data-action": "section-references" },
+          action: () => found && showReferenceList({ workspace, popovers, anchor, sectionId: found.id, navigate: options.navigate })
+        }
+      ];
+    }
+    showAnchoredMenu(popovers, anchor, items);
+  }
 
   /** @type {import("./inspector.js").InspectorApi} */
   const inspectorApi = {
@@ -1376,7 +1408,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     if (event.button !== 0) return;
     const target = /** @type {Element} */ (event.target);
     if (editing && editing.host.contains(target)) return;
-    if (closest(target, ".stage-notice, .stage-empty")) return;
+    if (closest(target, ".stage-empty")) return;
     if (previewHandle) {
       event.preventDefault();
       stopPreview();
@@ -1928,7 +1960,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       document.removeEventListener("selectionchange", onSelectionChange);
       unsubscribe();
       resizeObserver?.disconnect();
-      if (noticeTimer) clearTimeout(noticeTimer);
+      clearNotice();
       popovers.destroy();
     },
     // state

@@ -83,7 +83,7 @@ import { SIZE_PRESETS } from "../presentation/geometry.js";
 const ANIMATION_SELECT_REASON = "Select an object to animate";
 const ANIMATION_PICK_REASON = "Select an animation in the timeline";
 export const THEME_REASON = "Themes arrive later";
-export const EMBED_REASON = "Embeds arrive with references (Phase 6)";
+export const EMBED_REASON = "References cannot be placed inside a sheet; use a formula in a cell";
 
 // -- shared predicates --------------------------------------------------------
 
@@ -624,11 +624,27 @@ function documentTabs() {
           ]
         },
         {
-          id: "embeds",
-          label: "Embeds",
+          id: "references",
+          label: "Reference",
           controls: [
-            seam({ id: "embed-sheet", label: "Sheet", icon: "sheet", attrs: { "data-action": "embed-sheet" } }, EMBED_REASON),
-            seam({ id: "embed-slide", label: "Slide", icon: "slide", attrs: { "data-action": "embed-slide" } }, EMBED_REASON)
+            button({
+              id: "reference-embed",
+              label: "Embed",
+              title: "Show part of another page here, live",
+              icon: "link",
+              attrs: { "data-action": "reference-embed" },
+              enabled: hasDoc,
+              action: (ctx, element) => ctx.docEditor?.insertEmbed(element)
+            }),
+            button({
+              id: "reference-expression",
+              label: "Expression",
+              title: "Show the result of a formula over tables and sections",
+              icon: "expression",
+              attrs: { "data-action": "reference-expression" },
+              enabled: hasDoc,
+              action: (ctx, element) => ctx.docEditor?.insertExpression(element)
+            })
           ]
         }
       ]
@@ -741,6 +757,11 @@ function sheetTabs() {
                 )
             })
           ]
+        },
+        {
+          id: "references",
+          label: "Reference",
+          controls: [seam({ id: "embed-reference", label: "Embed", icon: "link", attrs: { "data-action": "embed-reference" } }, EMBED_REASON)]
         }
       ]
     },

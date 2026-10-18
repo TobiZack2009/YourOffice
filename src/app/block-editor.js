@@ -13,6 +13,7 @@
  */
 
 import { createId } from "../core/ids.js";
+import { ensureSection } from "../references/catalog.js";
 import {
   canIndentBlock,
   canIndentItem,
@@ -21,10 +22,17 @@ import {
   findContainer
 } from "../document/model.js";
 import { renderBlock, renderRuns } from "../document/render.js";
+import { containerOf } from "../references/containers.js";
+import { findSection, sectionBlockIds, sectionRunIds, sectionsCovering } from "../references/sections.js";
 import { h, clear } from "./dom.js";
+import { planBlockMove, promptName, referenceMenuItems, sectionMenuItems, showMenu } from "./handles.js";
 import { icon } from "./icons.js";
+import { guard } from "./notice.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
-import { mergeRuns, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
+import { openExpressionEditor } from "./expression-editor.js";
+import { openReferencePicker } from "./reference-picker.js";
+import { createReferenceViews } from "./reference-view.js";
+import { mergeRuns, modelLength, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../document/model.js").Block} Block */
@@ -65,6 +73,22 @@ export function splitRunsAt(runs, offset) {
     consumed = end;
   }
   return { left: mergeRuns(left), right: mergeRuns(right) };
+}
+
+/**
+ * @param {InlineRun[]} runs
+ * @returns {boolean} True when nothing readable and no reference is in the runs.
+ */
+function isBlankRuns(runs) {
+  return runs.every((run) => !run.ref && run.text.trim().length === 0);
+}
+
+/**
+ * @param {InlineRun[]} runs
+ * @returns {number} Length as caret offsets count it (a reference is one character).
+ */
+function modelLength2(runs) {
+  return runs.reduce((total, run) => total + run.text.length, 0);
 }
 
 /**
@@ -118,17 +142,17 @@ function isRangeInside(editor) {
 function caretOffset(element) {
   const doc = element.ownerDocument;
   const selection = doc.getSelection?.();
-  if (!selection || selection.rangeCount === 0) return (element.textContent ?? "").length;
+  if (!selection || selection.rangeCount === 0) return modelLength(element);
   const range = selection.getRangeAt(0);
-  if (!element.contains(range.startContainer)) return (element.textContent ?? "").length;
+  if (!element.contains(range.startContainer)) return modelLength(element);
   const probe = doc.createRange();
   probe.selectNodeContents(element);
   try {
     probe.setEnd(range.startContainer, range.startOffset);
   } catch {
-    return (element.textContent ?? "").length;
+    return modelLength(element);
   }
-  return probe.toString().length;
+  return modelLength(probe.cloneContents());
 }
 
 /**
@@ -138,7 +162,7 @@ function caretOffset(element) {
  */
 function selectionOffsets(element) {
   const doc = element.ownerDocument;
-  const length = (element.textContent ?? "").length;
+  const length = modelLength(element);
   const selection = doc.getSelection?.();
   if (!selection || selection.rangeCount === 0) return { start: length, end: length };
   const range = selection.getRangeAt(0);
@@ -153,12 +177,46 @@ function selectionOffsets(element) {
     } catch {
       return length;
     }
-    return probe.toString().length;
+    return modelLength(probe.cloneContents());
   };
   return {
     start: measure(range.startContainer, range.startOffset),
     end: measure(range.endContainer, range.endOffset)
   };
+}
+
+/**
+ * The DOM position of a character offset, counting an inline reference as one character
+ * and never entering it.
+ * @param {Node} root
+ * @param {number} target
+ * @returns {{ container: Node, offset: number } | null}
+ */
+function pointAtOffset(root, target) {
+  let remaining = target;
+  /** @param {Node} node @returns {{ container: Node, offset: number } | null} */
+  const visit = (node) => {
+    const children = Array.from(node.childNodes);
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === Node.TEXT_NODE) {
+        const length = (child.textContent ?? "").length;
+        if (remaining <= length) return { container: child, offset: remaining };
+        remaining -= length;
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        if (/** @type {Element} */ (child).hasAttribute("data-ref-id")) {
+          if (remaining === 0) return { container: node, offset: i };
+          remaining -= 1;
+          if (remaining === 0) return { container: node, offset: i + 1 };
+        } else {
+          const found = visit(child);
+          if (found) return found;
+        }
+      }
+    }
+    return null;
+  };
+  return visit(root);
 }
 
 /**
@@ -181,20 +239,13 @@ function placeCaret(element, where = "end") {
     range.setStart(element, 0);
     range.collapse(true);
   } else {
-    const walker = doc.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    let remaining = where;
-    let node = walker.nextNode();
-    while (node) {
-      const length = (node.textContent ?? "").length;
-      if (remaining <= length) {
-        range.setStart(node, remaining);
-        range.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(range);
-        return;
-      }
-      remaining -= length;
-      node = walker.nextNode();
+    const point = pointAtOffset(element, where);
+    if (point) {
+      range.setStart(point.container, point.offset);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
     }
     range.selectNodeContents(element);
     range.collapse(false);
@@ -205,28 +256,133 @@ function placeCaret(element, where = "end") {
 }
 
 /**
- * Create a document editor bound to one page.
+ * A store-shaped view of one section of a container, for an editor drawn inside an
+ * embed. Reads see only the section's run of blocks as the document; every command
+ * goes to the real workspace in one transaction, after which the section grows to
+ * take in the blocks the command created next to it (Enter at the end of the run,
+ * a block lifted out of a list), so edits made in an embed never leak out of it.
+ * @param {any} host The real workspace.
+ * @param {string} sectionId
+ * @returns {any}
+ */
+function nestedStore(host, sectionId) {
+  /** Grow the run over adjacent blocks that belong to it. */
+  function fit(/** @type {Set<string>} */ belong) {
+    const found = findSection(host.data, sectionId);
+    if (!found) return;
+    const { content } = found.container;
+    const { startBlockId, endBlockId } = found.section.locator;
+    const place = findContainer(content, startBlockId);
+    if (!place) return;
+    let first = place.index;
+    let last = place.ids.indexOf(endBlockId);
+    if (last < first) return;
+    while (last + 1 < place.ids.length && belong.has(place.ids[last + 1])) last += 1;
+    while (first > 0 && belong.has(place.ids[first - 1])) first -= 1;
+    if (place.ids[first] !== startBlockId || place.ids[last] !== endBlockId) {
+      host.dispatch("resizeSection", { sectionId, startBlockId: place.ids[first], endBlockId: place.ids[last] });
+    }
+  }
+
+  return {
+    events: { on: () => () => {} },
+    get data() {
+      return host.data;
+    },
+    getPage(/** @type {string} */ id) {
+      const container = containerOf(host.data, id);
+      if (!container) return undefined;
+      const found = findSection(host.data, sectionId);
+      const blockOrder = found && found.containerId === id ? sectionRunIds(container.content, found.section.locator) : [];
+      return { ...container, content: { ...container.content, blockOrder } };
+    },
+    transact: (/** @type {string} */ label, /** @type {() => any} */ fn) => host.transact(label, fn),
+    dispatch(/** @type {string} */ type, /** @type {any} */ payload) {
+      return host.transact(type, () => {
+        const found = findSection(host.data, sectionId);
+        const before = new Set(found ? Object.keys(found.container.content.blocks ?? {}) : []);
+        const belong = new Set(found ? sectionBlockIds(found.container.content, found.section.locator) : []);
+        const result = host.dispatch(type, payload);
+        const after = findSection(host.data, sectionId);
+        if (after) for (const id of Object.keys(after.container.content.blocks ?? {})) if (!before.has(id)) belong.add(id);
+        fit(belong);
+        return result;
+      });
+    }
+  };
+}
+
+/**
+ * Create a document editor bound to one page, or (with `options.sectionId`) to one
+ * section of a container, which is how an embed is edited in place.
  *
- * @param {Workspace} workspace
- * @param {string} pageId
- * @param {{ resolvePageTitle?: (id: string) => string | undefined, onActiveChange?: (info: ActiveInfo) => void, onChange?: () => void }} [options]
+ * @param {Workspace} hostWorkspace
+ * @param {string} pageId Page, or the container that holds the section.
+ * @param {{
+ *   resolvePageTitle?: (id: string) => string | undefined,
+ *   onActiveChange?: (info: ActiveInfo) => void,
+ *   onChange?: () => void,
+ *   sectionId?: string,
+ *   navigate?: (pageId: string) => void
+ * }} [options]
  * @returns {EditorHandle}
  */
-export function createDocumentEditor(workspace, pageId, options = {}) {
+export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
+  const nested = Boolean(options.sectionId);
+  const workspace = nested ? nestedStore(hostWorkspace, /** @type {string} */ (options.sectionId)) : hostWorkspace;
   const element = h("div", {
-    class: "document-editor",
+    class: `document-editor${nested ? " is-embedded" : ""}`,
     role: "group",
     "aria-label": "Document body",
     tabindex: "-1"
   });
+
+  /** Whether a node belongs to this editor rather than to an editor nested in it. */
+  const owns = (/** @type {Node | null} */ node) => {
+    const start = node instanceof Element ? node : (node?.parentElement ?? null);
+    return !start || start.closest(".document-editor") === element;
+  };
   /** @type {string | null} */
   let activeBlockId = null;
   /** @type {string | null} */
   let activeItemId = null;
 
+  /** @type {any} Nested editor that currently has the caret, if any. */
+  let focusedChild = null;
+  const popovers = createPopoverHost(element.ownerDocument.body);
+
+  const views = createReferenceViews({
+    workspace: hostWorkspace,
+    hostId: pageId,
+    resolvePageTitle: options.resolvePageTitle,
+    createEditor: (sectionId, containerId) => {
+      /** @type {any} */
+      const child = createDocumentEditor(hostWorkspace, containerId, {
+        sectionId,
+        resolvePageTitle: options.resolvePageTitle,
+        navigate: options.navigate,
+        onActiveChange: () => {
+          focusedChild = child;
+          notifyActiveChange();
+        }
+      });
+      return child;
+    },
+    onHandle: (record, anchor) => openReferenceMenu(record, anchor),
+    onEditExpression: (record, frame) => editExpression(record, frame)
+  });
+
   const renderOptions = {
-    resolvePageTitle: options.resolvePageTitle
+    resolvePageTitle: options.resolvePageTitle,
+    renderReference: (/** @type {Block} */ block) => views.render(block)
   };
+
+  /** @returns {any} The nested editor to act through, when the caret is inside one. */
+  function activeChild() {
+    return focusedChild && views.childEditors().includes(focusedChild) && focusedChild.activeInfo().blockId
+      ? focusedChild
+      : null;
+  }
 
   /** @returns {import("../document/model.js").DocumentContent} */
   function content() {
@@ -283,17 +439,17 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   /** @returns {string[]} Unit keys in reading (DOM) order. */
   function unitKeys() {
-    return [...element.querySelectorAll("[data-unit]")].map((el) => el.getAttribute("data-unit") ?? "");
+    return [...element.querySelectorAll("[data-unit]")].filter(owns).map((el) => el.getAttribute("data-unit") ?? "");
   }
 
   /** @param {string} key @returns {HTMLElement | null} */
   function unitElement(key) {
-    return /** @type {HTMLElement | null} */ (element.querySelector(`[data-unit="${key}"]`));
+    return /** @type {HTMLElement | null} */ ([...element.querySelectorAll(`[data-unit="${key}"]`)].find(owns) ?? null);
   }
 
   /** @param {HTMLElement | null} unit @returns {HTMLElement | null} */
   function editableOfUnit(unit) {
-    if (!unit) return null;
+    if (!unit || unit.classList.contains("reference")) return null;
     if (isEditable(unit)) return unit;
     return /** @type {HTMLElement | null} */ (unit.querySelector('[contenteditable="true"]'));
   }
@@ -420,9 +576,12 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   function render() {
     clear(element);
+    handleTarget = null;
+    views.begin();
     const c = content();
     const blocks = c.blockOrder.map((id) => c.blocks[id]).filter(Boolean);
     if (blocks.length === 0) {
+      views.end();
       const start = h("div", { class: "empty-document", text: "Start writing…" });
       start.addEventListener("mousedown", (event) => {
         event.preventDefault();
@@ -436,6 +595,8 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
       const el = renderEditable(block);
       if (el) element.append(el);
     }
+    views.end();
+    if (blockHandle) element.append(blockHandle);
     applySelection();
   }
 
@@ -445,13 +606,13 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
   function findEditable(blockId, itemId = null) {
     if (itemId) {
       return /** @type {HTMLElement | null} */ (
-        element.querySelector(`[contenteditable="true"][data-item-id="${itemId}"]`)
+        [...element.querySelectorAll(`[contenteditable="true"][data-item-id="${itemId}"]`)].find(owns) ?? null
       );
     }
     if (!blockId) return null;
-    const matches = element.querySelectorAll(
-      `[contenteditable="true"][data-block-id="${blockId}"]:not([data-item-id])`
-    );
+    const matches = [
+      ...element.querySelectorAll(`[contenteditable="true"][data-block-id="${blockId}"]:not([data-item-id])`)
+    ].filter(owns);
     return /** @type {HTMLElement | null} */ (matches[0] ?? null);
   }
 
@@ -510,8 +671,10 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @param {string | null} itemId
    */
   function setActive(blockId, itemId) {
+    focusedChild = null;
     activeBlockId = blockId;
     activeItemId = itemId;
+    if (blockHandle && !handleBusy) showHandleAt(blockId && blockOf(blockId) ? topLevelOf(blockId) : null);
     notifyActiveChange();
   }
 
@@ -608,6 +771,19 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     const fallbackId = createId("block");
 
     workspace.transact("delete selection", () => {
+      if (nested) {
+        // An embed must keep a block to type in: add one after the run before it empties.
+        const doomed = new Set(keys.filter((key) => !parseKey(key).itemId).map((key) => parseKey(key).blockId));
+        const run = order();
+        if (run.length > 0 && run.every((id) => doomed.has(id))) {
+          workspace.dispatch("insertBlock", {
+            pageId,
+            block: { type: "paragraph" },
+            newBlockId: fallbackId,
+            afterBlockId: run[run.length - 1]
+          });
+        }
+      }
       // Reverse reading order removes nested units before the units that hold them.
       for (const key of [...keys].reverse()) {
         const { blockId, itemId } = parseKey(key);
@@ -621,7 +797,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
           workspace.dispatch("deleteBlock", { pageId, blockId });
         }
       }
-      if (order().length === 0) {
+      if (!nested && order().length === 0) {
         workspace.dispatch("insertBlock", {
           pageId,
           block: { type: "paragraph" },
@@ -718,6 +894,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     const restyle = (runs) =>
       mergeRuns(
         runs.map((run) => {
+          if (run.ref) return run;
           const marks = { ...(run.marks ?? {}) };
           if (remove) delete marks[mark];
           else marks[mark] = true;
@@ -840,7 +1017,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     }
 
     const runs = runsOf(el);
-    const empty = runsToPlainText(runs).trim().length === 0;
+    const empty = isBlankRuns(runs);
     const nested = findContainer(content(), blockId)?.parent != null;
 
     // Enter on an empty nested block lifts it out of the list item.
@@ -885,7 +1062,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     const items = block.items ?? [];
     const at = items.findIndex((item) => item.id === itemId);
     if (at === -1) return;
-    const empty = (el.textContent ?? "").trim().length === 0;
+    const empty = isBlankRuns(runsOf(el));
 
     if (empty) {
       const parent = findContainer(content(), block.id)?.parent;
@@ -946,7 +1123,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
       const previous = items[at - 1];
       const current = items[at];
       const merged = mergeRuns([...(previous.runs ?? []), ...runsOf(el)]);
-      const offset = runsToPlainText(previous.runs ?? []).length;
+      const offset = modelLength2(previous.runs ?? []);
       const children = [...(previous.children ?? []), ...(current.children ?? [])];
       const nextItems = items.slice();
       nextItems[at - 1] = { ...previous, runs: merged, ...(children.length > 0 ? { children } : {}) };
@@ -980,7 +1157,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     if (!previous || !isTextual(previous)) return;
 
     const appended = block.type === "code" ? runsOfUnit(blockId) : runsOf(el);
-    const mergeOffset = runsToPlainText(runsOfUnit(previousKey)).length;
+    const mergeOffset = modelLength2(runsOfUnit(previousKey));
 
     workspace.transact("merge blocks", () => {
       if (previous.type === "code") {
@@ -1069,6 +1246,8 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @returns {boolean}
    */
   function toggleMark(mark) {
+    const child = activeChild();
+    if (child) return child.toggleMark(mark);
     if (sel) return toggleMarkOnSelection(mark);
     const el = activeEditable();
     if (!el) return false;
@@ -1103,6 +1282,8 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @returns {boolean}
    */
   function setLink(url) {
+    const child = activeChild();
+    if (child) return child.setLink(url);
     const el = activeEditable();
     if (!el) return false;
     const selection = el.ownerDocument.getSelection?.();
@@ -1214,6 +1395,8 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   /** @returns {ActiveInfo} */
   function activeInfo() {
+    const child = activeChild();
+    if (child) return child.activeInfo();
     const block = activeBlockId ? blockOf(activeBlockId) : undefined;
     return {
       blockId: block?.id ?? null,
@@ -1250,16 +1433,18 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
   function unitKeyFrom(node) {
     const start = node instanceof Element ? node : node?.parentElement ?? null;
     const unit = start?.closest("[data-unit]");
-    return unit && element.contains(unit) ? unit.getAttribute("data-unit") : null;
+    return unit && element.contains(unit) && owns(unit) ? unit.getAttribute("data-unit") : null;
   }
 
   // -- events ------------------------------------------------------------------
 
-  element.addEventListener("focusin", (event) => setActiveFromNode(/** @type {Node} */ (event.target)));
+  element.addEventListener("focusin", (event) => {
+    if (owns(/** @type {Node} */ (event.target))) setActiveFromNode(/** @type {Node} */ (event.target));
+  });
 
   element.addEventListener("mousedown", (event) => {
     const pointer = /** @type {MouseEvent} */ (event);
-    if (pointer.button !== 0) return;
+    if (pointer.button !== 0 || !owns(/** @type {Node} */ (pointer.target))) return;
     const key = unitKeyFrom(/** @type {Node} */ (pointer.target));
     if (sel) clearBlockSelection();
 
@@ -1277,7 +1462,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   element.addEventListener("mousemove", (event) => {
     const pointer = /** @type {MouseEvent} */ (event);
-    if (!dragAnchor || !(pointer.buttons & 1)) return;
+    if (!dragAnchor || !(pointer.buttons & 1) || !owns(/** @type {Node} */ (pointer.target))) return;
     const key = unitKeyFrom(/** @type {Node} */ (pointer.target));
     if (!key) return;
     if (!sel && key === dragAnchor) return;
@@ -1290,6 +1475,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
   element.ownerDocument.addEventListener("mouseup", onMouseUp);
 
   element.addEventListener("input", (event) => {
+    if (!owns(/** @type {Node} */ (event.target))) return;
     const el = editableFrom(/** @type {Node} */ (event.target));
     if (el) {
       setActiveFromNode(el);
@@ -1298,6 +1484,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
   });
 
   element.addEventListener("paste", (event) => {
+    if (!owns(/** @type {Node} */ (event.target))) return;
     const el = editableFrom(/** @type {Node} */ (event.target));
     if (!el || el.getAttribute("data-block-type") === "paragraph") return;
     if (!el.matches("code[data-block-id]")) return;
@@ -1347,6 +1534,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   element.addEventListener("keydown", (event) => {
     const keyboard = /** @type {KeyboardEvent} */ (event);
+    if (!owns(/** @type {Node} */ (keyboard.target))) return;
     if (sel && keyboard.target === element) {
       handleSelectionKey(keyboard);
       return;
@@ -1356,7 +1544,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     const mod = keyboard.metaKey || keyboard.ctrlKey;
     const key = keyOfEditable(el);
     const { start, end } = selectionOffsets(el);
-    const length = (el.textContent ?? "").length;
+    const length = modelLength(el);
 
     if (mod && !keyboard.shiftKey && !keyboard.altKey) {
       const lower = keyboard.key.toLowerCase();
@@ -1425,6 +1613,11 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @param {{ type: string, level?: number, ordered?: boolean }} spec
    */
   function setActiveType(spec) {
+    const child = activeChild();
+    if (child) {
+      child.setActiveType(spec);
+      return;
+    }
     if (sel) {
       applyTypeToSelection(spec);
       return;
@@ -1475,12 +1668,22 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   /** Nest the active unit (or each selected unit) one level deeper. */
   function indent() {
+    const child = activeChild();
+    if (child) {
+      child.indent();
+      return;
+    }
     const el = activeEditable();
     if (el) handleTab(el, false);
   }
 
   /** Lift the active unit one level. */
   function outdent() {
+    const child = activeChild();
+    if (child) {
+      child.outdent();
+      return;
+    }
     const el = activeEditable();
     if (el) handleTab(el, true);
   }
@@ -1490,6 +1693,8 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @returns {string | null}
    */
   function insertAfterActive(spec) {
+    const child = activeChild();
+    if (child) return child.insertAfterActive(spec);
     if (!activeBlockId || !blockOf(activeBlockId)) return insertAtEnd(spec);
     return insertBlock(spec, { afterBlockId: activeBlockId });
   }
@@ -1499,12 +1704,11 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @returns {string | null}
    */
   function insertAtEnd(spec) {
-    return insertBlock(spec, { index: order().length });
+    const run = order();
+    return insertBlock(spec, nested && run.length > 0 ? { afterBlockId: run[run.length - 1] } : { index: run.length });
   }
 
   // -- context menu ------------------------------------------------------------
-
-  const popovers = createPopoverHost(element.ownerDocument.body);
 
   /** Delete the selected units, or the unit under the caret. */
   function deleteActive() {
@@ -1593,6 +1797,15 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
       { separator: true },
       item("Insert paragraph below", "paragraph", "ctx-insert-paragraph", () => insertAfterActive({ type: "paragraph" })),
       item("Insert divider below", "divider", "ctx-insert-divider", () => insertAfterActive({ type: "divider" })),
+      item("Insert embed…", "link", "ctx-insert-embed", () => insertEmbed()),
+      item("Insert expression…", "expression", "ctx-insert-expression", () => insertExpression()),
+      ...(nested
+        ? []
+        : [
+            item("Make section", "section", "ctx-make-section", () => makeSection(sel ? selectedTopLevel() : activeBlockId ? [topLevelOf(activeBlockId)] : []), {
+              disabled: !info.blockId
+            })
+          ]),
       { separator: true },
       item(sel && selectedKeys().length > 1 ? "Delete blocks" : "Delete block", "trash", "ctx-delete", () => deleteActive(), {
         danger: true,
@@ -1612,7 +1825,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
    * @returns {string | null}
    */
   function nearestUnitKey(clientY) {
-    const units = [...element.querySelectorAll("[data-unit]")];
+    const units = [...element.querySelectorAll("[data-unit]")].filter(owns);
     if (units.length === 0) return null;
     let best = null;
     let bestDistance = Infinity;
@@ -1635,6 +1848,7 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
 
   element.addEventListener("contextmenu", (event) => {
     const pointer = /** @type {MouseEvent} */ (event);
+    if (!owns(/** @type {Node} */ (pointer.target))) return;
     const key = unitKeyFrom(/** @type {Node} */ (pointer.target)) ?? nearestUnitKey(pointer.clientY);
     // No blocks at all: nothing to act on, so leave the browser's menu alone.
     if (!key) return;
@@ -1647,6 +1861,361 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     openContextMenu({ x: pointer.clientX, y: pointer.clientY });
   });
 
+  // -- references: handle, menus, insertion ---------------------------------------
+
+  /** @type {string | null} Top-level block the gutter handle is beside. */
+  let handleTarget = null;
+  let handleBusy = false;
+  let justDragged = false;
+  /** @type {HTMLElement | null} */
+  const blockHandle = nested
+    ? null
+    : h("button", {
+        class: "block-handle",
+        type: "button",
+        contenteditable: "false",
+        "data-role": "block-handle",
+        "aria-label": "Block options",
+        title: "Click for options, drag to move"
+      });
+  blockHandle?.append(icon("grip", { size: 16 }));
+  /** @type {HTMLElement | null} */
+  let dropIndicator = null;
+
+  /** @returns {HTMLElement[]} This editor's top-level block elements, in order. */
+  function topLevelElements() {
+    return /** @type {HTMLElement[]} */ ([...element.children].filter(
+      (child) => child !== blockHandle && child !== dropIndicator && child.hasAttribute("data-block-id")
+    ));
+  }
+
+  /** @param {string} blockId @returns {string} The top-level block that holds a block. */
+  function topLevelOf(blockId) {
+    let id = blockId;
+    for (let guardCount = 0; guardCount < 50; guardCount++) {
+      const parent = findContainer(content(), id)?.parent;
+      if (!parent) return id;
+      id = parent.blockId;
+    }
+    return id;
+  }
+
+  /** @param {string | null} blockId */
+  function showHandleAt(blockId) {
+    if (!blockHandle) return;
+    const target = blockId ? topLevelElements().find((el) => el.getAttribute("data-block-id") === blockId) : null;
+    if (!target) {
+      if (!handleBusy) blockHandle.classList.remove("is-visible");
+      return;
+    }
+    handleTarget = blockId;
+    blockHandle.style.top = `${target.offsetTop}px`;
+    blockHandle.classList.add("is-visible");
+  }
+
+  /** @returns {string[]} Top-level blocks covered by the unit selection, in order. */
+  function selectedTopLevel() {
+    const wanted = new Set(selectedKeys().map((key) => topLevelOf(parseKey(key).blockId)));
+    return order().filter((id) => wanted.has(id));
+  }
+
+  /** @param {string} blockId @returns {string[]} The blocks a handle action on this block acts on. */
+  function blocksFor(blockId) {
+    const selected = selectedTopLevel();
+    return selected.includes(blockId) ? selected : [blockId];
+  }
+
+  /** @returns {HTMLElement} Where follow-up popovers open from. */
+  function anchorElement() {
+    const target = handleTarget ? topLevelElements().find((el) => el.getAttribute("data-block-id") === handleTarget) : null;
+    if (blockHandle?.classList.contains("is-visible")) return blockHandle;
+    return target ?? element;
+  }
+
+  /** @param {string[]} ids Top-level blocks that become one section. */
+  function makeSection(ids) {
+    const top = order();
+    const at = ids.map((id) => top.indexOf(id)).filter((index) => index >= 0);
+    if (at.length === 0) return;
+    const startBlockId = top[Math.min(...at)];
+    const endBlockId = top[Math.max(...at)];
+    promptName(popovers, anchorElement(), {
+      title: "Section name",
+      confirm: "Create",
+      onSubmit: (name) => guard(() => hostWorkspace.dispatch("createSection", { pageId, locator: { startBlockId, endBlockId }, name }))
+    });
+  }
+
+  /** Select the units of these top-level blocks, then delete them as one step. */
+  function deleteBlocks(/** @type {string[]} */ ids) {
+    const els = topLevelElements().filter((el) => ids.includes(el.getAttribute("data-block-id") ?? ""));
+    if (els.length === 0) return;
+    const units = (/** @type {HTMLElement} */ el) => [el, ...el.querySelectorAll("[data-unit]")].filter((u) => u.hasAttribute("data-unit") && owns(u));
+    const first = units(els[0])[0];
+    const lastUnits = units(els[els.length - 1]);
+    const last = lastUnits[lastUnits.length - 1];
+    if (!first || !last) return;
+    setBlockSelection(first.getAttribute("data-unit") ?? "", last.getAttribute("data-unit") ?? "");
+    deleteSelection();
+  }
+
+  /** Items for the gutter handle of one block. */
+  function handleMenuItems(/** @type {string} */ blockId) {
+    const block = blockOf(blockId);
+    if (!block) return [];
+    const anchor = () => anchorElement();
+    /** @type {import("./popover.js").MenuItem[]} */
+    const items = [];
+    if (block.type === "sectionRef") {
+      items.push(...referenceItems(block, anchor));
+    } else {
+      const ids = blocksFor(blockId);
+      items.push({
+        label: ids.length > 1 ? `Make section from ${ids.length} blocks` : "Make section",
+        icon: "section",
+        attrs: { "data-action": "section-make" },
+        action: () => makeSection(ids)
+      });
+      const container = containerOf(hostWorkspace.data, pageId);
+      for (const section of sectionsCovering(container, { blockId })) {
+        if (!section.name) continue;
+        items.push({
+          label: `Section: ${section.name}`,
+          icon: "section",
+          attrs: { "data-action": "section-menu" },
+          submenu: sectionMenuItems({
+            workspace: /** @type {any} */ (hostWorkspace),
+            popovers,
+            anchor,
+            sectionId: section.id,
+            navigate: options.navigate
+          })
+        });
+      }
+    }
+    items.push(
+      { separator: true },
+      {
+        label: "Insert paragraph below",
+        icon: "paragraph",
+        attrs: { "data-action": "handle-insert-below" },
+        action: () => void insertBlock({ type: "paragraph" }, { afterBlockId: blockId })
+      },
+      {
+        label: blocksFor(blockId).length > 1 ? "Delete blocks" : "Delete block",
+        icon: "trash",
+        danger: true,
+        attrs: { "data-action": "handle-delete" },
+        action: () => deleteBlocks(blocksFor(blockId))
+      }
+    );
+    return items;
+  }
+
+  /**
+   * @param {any} record
+   * @param {() => HTMLElement} anchor
+   * @returns {import("./popover.js").MenuItem[]}
+   */
+  function referenceItems(record, anchor) {
+    return referenceMenuItems({
+      workspace: /** @type {any} */ (hostWorkspace),
+      popovers,
+      anchor,
+      hostId: pageId,
+      record,
+      navigate: options.navigate,
+      editExpression: () => editExpression(record, anchor()),
+      replaceSource: () => replaceSource(record, anchor())
+    });
+  }
+
+  /** @param {any} record @param {HTMLElement} anchor */
+  function openReferenceMenu(record, anchor) {
+    showMenu(popovers, anchor, referenceItems(record, () => anchor));
+  }
+
+  /** @param {any} record @param {HTMLElement} anchor */
+  function editExpression(record, anchor) {
+    openExpressionEditor({
+      workspace: /** @type {any} */ (hostWorkspace),
+      popovers,
+      anchor,
+      pageId,
+      initial: record.expression ?? "",
+      confirm: "Apply",
+      onSubmit: (text) => guard(() => hostWorkspace.dispatch("setExpression", { pageId, instanceId: record.id, expression: text }))
+    });
+  }
+
+  /** @param {any} record @param {HTMLElement} anchor */
+  function replaceSource(record, anchor) {
+    openReferencePicker({
+      workspace: /** @type {any} */ (hostWorkspace),
+      popovers,
+      anchor,
+      pageId,
+      onPick: (item, name) =>
+        guard(() =>
+          hostWorkspace.transact("change reference", () => {
+            const sectionId = ensureSection(/** @type {any} */ (hostWorkspace), item, name);
+            hostWorkspace.dispatch("updateReference", { pageId, instanceId: record.id, patch: { sectionId } });
+          })
+        )
+    });
+  }
+
+  /** @returns {Record<string, unknown>} Where an inserted reference block goes. */
+  function insertionPosition() {
+    if (activeBlockId && blockOf(activeBlockId)) return { afterBlockId: activeBlockId };
+    const run = order();
+    return nested && run.length > 0 ? { afterBlockId: run[run.length - 1] } : { index: run.length };
+  }
+
+  /**
+   * Open the source picker and embed what is chosen after the active block.
+   * @param {HTMLElement} [anchor]
+   */
+  function insertEmbed(anchor) {
+    const child = activeChild();
+    if (child) return child.insertEmbed(anchor);
+    const position = insertionPosition();
+    openReferencePicker({
+      workspace: /** @type {any} */ (hostWorkspace),
+      popovers,
+      anchor: anchor ?? anchorElement(),
+      pageId,
+      onPick: (item, name) =>
+        guard(() =>
+          hostWorkspace.transact("insert reference", () => {
+            const sectionId = ensureSection(/** @type {any} */ (hostWorkspace), item, name);
+            hostWorkspace.dispatch("insertReference", { pageId, kind: "embed", sectionId, display: {}, ...position });
+          })
+        )
+    });
+  }
+
+  /**
+   * Open the expression editor and insert the result after the active block.
+   * @param {HTMLElement} [anchor]
+   */
+  function insertExpression(anchor) {
+    const child = activeChild();
+    if (child) return child.insertExpression(anchor);
+    const position = insertionPosition();
+    openExpressionEditor({
+      workspace: /** @type {any} */ (hostWorkspace),
+      popovers,
+      anchor: anchor ?? anchorElement(),
+      pageId,
+      initial: "",
+      confirm: "Insert",
+      onSubmit: (text) =>
+        guard(() => hostWorkspace.dispatch("insertReference", { pageId, kind: "expression", expression: text, display: {}, ...position }))
+    });
+  }
+
+  /** Copy a just-typed editable's content into every other copy of the same text. */
+  function syncCopies() {
+    const active = element.ownerDocument.activeElement;
+    if (!active || !element.contains(active) || !isEditable(active)) return;
+    const blockId = active.getAttribute("data-block-id");
+    const itemId = active.getAttribute("data-item-id");
+    if (!blockId) return;
+    const selector = `[contenteditable="true"][data-block-id="${blockId}"]${itemId ? `[data-item-id="${itemId}"]` : ":not([data-item-id])"}`;
+    for (const other of element.querySelectorAll(selector)) {
+      if (other === active) continue;
+      other.replaceChildren(...[...active.childNodes].map((node) => node.cloneNode(true)));
+    }
+  }
+
+  if (blockHandle) {
+    const doc = element.ownerDocument;
+    /** @type {{ blockId: string, startY: number, active: boolean, target: string | null, side: "before" | "after" } | null} */
+    let drag = null;
+
+    /** @param {MouseEvent} event */
+    const onDragMove = (event) => {
+      if (!drag) return;
+      if (!drag.active && Math.abs(event.clientY - drag.startY) < 4) return;
+      drag.active = true;
+      handleBusy = true;
+      element.classList.add("is-block-dragging");
+      const moving = new Set(blocksFor(drag.blockId));
+      let best = null;
+      let bestDistance = Infinity;
+      for (const el of topLevelElements()) {
+        if (moving.has(el.getAttribute("data-block-id") ?? "")) continue;
+        const rect = el.getBoundingClientRect();
+        const distance = event.clientY < rect.top ? rect.top - event.clientY : event.clientY > rect.bottom ? event.clientY - rect.bottom : 0;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { el, rect };
+        }
+      }
+      if (!best) return;
+      drag.target = best.el.getAttribute("data-block-id");
+      drag.side = event.clientY < best.rect.top + best.rect.height / 2 ? "before" : "after";
+      if (!dropIndicator) {
+        dropIndicator = h("div", { class: "block-drop-indicator", "aria-hidden": "true" });
+        element.append(dropIndicator);
+      }
+      dropIndicator.style.top = `${best.el.offsetTop + (drag.side === "after" ? best.el.offsetHeight : 0)}px`;
+    };
+
+    const onDragEnd = () => {
+      doc.removeEventListener("mousemove", onDragMove);
+      doc.removeEventListener("mouseup", onDragEnd);
+      const finished = drag;
+      drag = null;
+      handleBusy = false;
+      element.classList.remove("is-block-dragging");
+      dropIndicator?.remove();
+      dropIndicator = null;
+      if (!finished?.active) return;
+      justDragged = true;
+      setTimeout(() => (justDragged = false), 0);
+      if (!finished.target) return;
+      const plan = planBlockMove(order(), blocksFor(finished.blockId), finished.target, finished.side);
+      if (plan) guard(() => hostWorkspace.dispatch("moveBlocks", { pageId, ...plan }));
+    };
+
+    blockHandle.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || !handleTarget) return;
+      event.preventDefault();
+      drag = { blockId: handleTarget, startY: event.clientY, active: false, target: null, side: "after" };
+      doc.addEventListener("mousemove", onDragMove);
+      doc.addEventListener("mouseup", onDragEnd);
+    });
+
+    blockHandle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (justDragged || !handleTarget) return;
+      const items = handleMenuItems(handleTarget);
+      handleBusy = true;
+      showMenu(popovers, blockHandle, items);
+      const release = () => {
+        handleBusy = false;
+        doc.removeEventListener("mousedown", release, true);
+      };
+      doc.addEventListener("mousedown", release, true);
+    });
+
+    element.addEventListener("mouseover", (event) => {
+      if (handleBusy) return;
+      let current = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+      while (current && current.parentElement !== element) current = current.parentElement;
+      if (current && current !== blockHandle && current.hasAttribute("data-block-id")) {
+        showHandleAt(current.getAttribute("data-block-id"));
+      }
+    });
+    element.addEventListener("mouseleave", () => {
+      if (handleBusy) return;
+      showHandleAt(activeBlockId && blockOf(activeBlockId) ? topLevelOf(activeBlockId) : null);
+    });
+  }
+
   // Store subscription: skip re-render for inline-only commits so the caret stays.
   const unsubscribe = workspace.events.on("change", (event) => {
     const payload = /** @type {{ kind?: string, commands?: string[] }} */ (event ?? {});
@@ -1656,6 +2225,8 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
       payload.commands.length > 0 &&
       payload.commands.every((command) => INLINE_COMMITS.has(command))
     ) {
+      syncCopies();
+      views.refreshExpressions();
       options.onChange?.();
       return;
     }
@@ -1687,8 +2258,13 @@ export function createDocumentEditor(workspace, pageId, options = {}) {
     getSelectedUnits: selectedKeys,
     clearSelection: clearBlockSelection,
     openContextMenu,
+    insertEmbed,
+    insertExpression,
+    makeSection: () => makeSection(sel ? selectedTopLevel() : activeBlockId && blockOf(activeBlockId) ? [topLevelOf(activeBlockId)] : []),
+    refreshExpressions: () => views.refreshExpressions(),
     destroy: () => {
       unsubscribe();
+      views.destroy();
       popovers.destroy();
       element.ownerDocument.removeEventListener("mouseup", onMouseUp);
     }

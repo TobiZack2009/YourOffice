@@ -272,12 +272,14 @@ export function mountApp(root, workspace, options = {}) {
     if (page.type === "document") {
       const editor = createDocumentEditor(workspace, page.id, {
         resolvePageTitle: (id) => workspace.getPage(id)?.title,
+        navigate: (id) => selectSidebar(id),
         onActiveChange: () => updateChrome()
       });
       state.editor = editor;
       canvas.append(pageHeader, h("div", { class: "page-body" }, [editor.element]));
     } else if (page.type === "sheet") {
       const sheetEditor = createSheetEditor(workspace, page.id, {
+        navigate: (id) => selectSidebar(id),
         onChange: () => updateChrome(),
         onSelectionChange: () => ribbon.update()
       });
@@ -286,6 +288,7 @@ export function mountApp(root, workspace, options = {}) {
     } else {
       presentationView.timeline = ribbon.getActiveTab() === "animations";
       const presentationEditor = createPresentationEditor(workspace, page.id, {
+        navigate: (id) => selectSidebar(id),
         onChange: () => updateChrome(),
         onSelectionChange: () => ribbon.update(),
         initialSlideId: lastSlideByPage.get(page.id),

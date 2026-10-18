@@ -7,6 +7,8 @@
  * elements correspond to which marks.
  */
 
+import { REF_CHAR } from "../document/model.js";
+
 /** @typedef {import("../document/model.js").InlineRun} InlineRun */
 
 /** Element tag → model mark. */
@@ -57,17 +59,35 @@ export function mergeRuns(runs) {
   /** @type {InlineRun[]} */
   const merged = [];
   for (const run of runs) {
+    if (run.ref) {
+      // A reference is atomic: it never merges with its neighbours.
+      merged.push({ text: REF_CHAR, ref: run.ref });
+      continue;
+    }
     const text = normalizeText(run.text);
     if (text.length === 0) continue;
     const { key } = canonicalMarks(run.marks);
     const last = merged[merged.length - 1];
-    if (last && canonicalMarks(last.marks).key === key) {
+    if (last && !last.ref && canonicalMarks(last.marks).key === key) {
       last.text += text;
     } else {
       merged.push(run.marks ? { text, marks: run.marks } : { text });
     }
   }
   return merged;
+}
+
+/**
+ * @param {Element} element An inline reference element.
+ * @returns {InlineRun["ref"] | null}
+ */
+function readRef(element) {
+  try {
+    const ref = JSON.parse(element.getAttribute("data-ref") ?? "");
+    return ref && typeof ref.id === "string" ? ref : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -90,6 +110,11 @@ export function parseInlineRuns(root) {
       }
       if (child.nodeType !== Node.ELEMENT_NODE) continue;
       const element = /** @type {Element} */ (child);
+      if (element.hasAttribute("data-ref-id")) {
+        const ref = readRef(element);
+        if (ref) runs.push({ text: REF_CHAR, ref });
+        continue;
+      }
       if (element.tagName === "BR") {
         runs.push(marks && Object.keys(marks).length > 0 ? { text: "\n", marks: { ...marks } } : { text: "\n" });
         continue;
@@ -119,6 +144,10 @@ export function runsEqual(a, b) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i].text !== b[i].text) return false;
+    if (a[i].ref || b[i].ref) {
+      if (JSON.stringify(a[i].ref ?? null) !== JSON.stringify(b[i].ref ?? null)) return false;
+      continue;
+    }
     if (canonicalMarks(a[i].marks).key !== canonicalMarks(b[i].marks).key) return false;
   }
   return true;
@@ -129,5 +158,22 @@ export function runsEqual(a, b) {
  * @returns {string}
  */
 export function runsToPlainText(runs) {
-  return runs.map((run) => run.text).join("");
+  return runs.map((run) => (run.ref ? "" : run.text)).join("");
+}
+
+/**
+ * Length of an element's content as the model counts it: an inline reference is one
+ * character however much it draws.
+ * @param {Node} node An element or fragment.
+ * @returns {number}
+ */
+export function modelLength(node) {
+  let total = 0;
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) total += (child.textContent ?? "").length;
+    else if (child.nodeType === Node.ELEMENT_NODE) {
+      total += /** @type {Element} */ (child).hasAttribute("data-ref-id") ? 1 : modelLength(child);
+    }
+  }
+  return total;
 }

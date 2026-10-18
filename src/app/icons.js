@@ -19,6 +19,7 @@ import {
   BetweenHorizontalStart,
   BetweenVerticalStart,
   Bold,
+  Bookmark,
   BringToFront,
   Circle,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
   Ellipsis,
   Equal,
   Eraser,
+  ExternalLink,
   File,
   FileSpreadsheet,
   FileSymlink,
@@ -72,6 +74,7 @@ import {
   Search,
   SendToBack,
   Shapes,
+  Sigma,
   Slash,
   Sparkles,
   Square,
@@ -91,6 +94,7 @@ import {
   Type,
   Underline,
   Undo2,
+  Unlink,
   Upload,
   ZoomIn
 } from "lucide";
@@ -188,6 +192,10 @@ const ICONS = {
   "after-previous": { node: ChevronsRight },
   "motion-path": { node: Route },
   grip: { node: GripVertical },
+  section: { node: Bookmark },
+  expression: { node: Sigma },
+  unlink: { node: Unlink },
+  "go-to": { node: ExternalLink },
   "move-up": { node: ChevronUp },
   "move-down": { node: ChevronDown },
 

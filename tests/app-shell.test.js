@@ -116,13 +116,11 @@ describe("contextual ribbon", () => {
     expect(appear.title).toContain("Select an object");
   });
 
-  it("shows disabled embed seams on the document Insert tab", () => {
+  it("offers Embed and Expression on the document Insert tab", () => {
     const { root } = setup();
     query(root, '.ribbon-tab[data-tab="insert"]')?.click();
-    const embed = /** @type {HTMLButtonElement} */ (query(root, '[data-action="embed-sheet"]'));
-    expect(embed.disabled).toBe(true);
-    expect(embed.title).toContain("Phase 6");
-    expect(/** @type {HTMLButtonElement} */ (query(root, '[data-action="embed-slide"]')).disabled).toBe(true);
+    expect(query(root, '[data-action="reference-embed"]')).toBeTruthy();
+    expect(query(root, '[data-action="reference-expression"]')).toBeTruthy();
   });
 
   it("hides the sidebar and sets zoom from the View tab", () => {

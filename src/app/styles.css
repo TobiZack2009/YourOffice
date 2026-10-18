@@ -1958,10 +1958,12 @@ svg.icon {
   background: transparent;
 }
 
-.stage-notice {
-  position: absolute;
+.app-notice {
+  position: fixed;
   left: 50%;
-  bottom: 14px;
+  bottom: 24px;
+  z-index: 1000;
+  max-width: min(520px, 90vw);
   transform: translateX(-50%);
   padding: 6px 12px;
   border-radius: 8px;
@@ -2127,4 +2129,454 @@ svg.icon {
 .canvas .page-body,
 .canvas .sheet-editor {
   zoom: var(--zoom, 1);
+}
+
+/* ---- sections, references and handles (Phase 6) ---------------------------- */
+
+.document-editor {
+  position: relative;
+}
+
+.block-handle,
+.section-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.block-handle {
+  left: 14px;
+  z-index: 5;
+}
+
+.block-handle.is-visible,
+.block-handle:focus-visible,
+.sheet-handle,
+.slide-thumb-wrap:hover .slide-handle,
+.slide-handle.has-references,
+.slide-handle:focus-visible {
+  opacity: 1;
+}
+
+.block-handle:hover,
+.section-handle:hover {
+  background: var(--hover);
+}
+
+.sheet-handle {
+  z-index: 4;
+}
+
+.slide-handle {
+  left: 4px;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.handle-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.block-drop-indicator {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.is-block-dragging {
+  opacity: 0.5;
+}
+
+.document-editor.is-embedded {
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* A reference frame: the handle sits outside the content, the body is the content. */
+.reference {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 4px 6px 4px 4px;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+}
+
+.reference:hover,
+.reference:focus-within {
+  border-color: var(--border);
+}
+
+.reference.is-removed {
+  border-color: var(--text-muted);
+}
+
+.reference.is-missing {
+  border-color: var(--danger);
+}
+
+.reference-handle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.reference-handle:hover {
+  background: var(--hover);
+}
+
+.reference-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.reference-blocks > .block:last-child,
+.reference-body .document-editor > .block:last-child {
+  margin-bottom: 0;
+}
+
+.reference-table {
+  overflow: auto;
+}
+
+.reference-table .sheet-table.is-embedded {
+  position: static;
+}
+
+.reference-slide {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.reference-range {
+  border-collapse: collapse;
+}
+
+.reference-range td {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+}
+
+.reference-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-size: 0.95em;
+}
+
+.reference-chip.is-error {
+  background: #fdecec;
+  color: var(--danger);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+.reference-missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.reference-empty {
+  display: inline-block;
+  min-width: 12px;
+  min-height: 1em;
+}
+
+.reference.is-expression .reference-body {
+  cursor: default;
+}
+
+/* Name prompt and reference list popovers */
+.name-prompt,
+.reference-list-popover,
+.expression-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 240px;
+}
+
+.name-prompt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.name-prompt-input,
+.expression-input,
+.picker-search {
+  font: inherit;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+}
+
+.expression-input {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.name-prompt-input:focus,
+.expression-input:focus,
+.picker-search:focus {
+  border-color: var(--accent);
+}
+
+.name-prompt-input.is-invalid {
+  border-color: var(--danger);
+}
+
+.name-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.name-prompt .button,
+.name-prompt-actions .button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.name-prompt-actions .button.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.name-prompt-actions .button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.reference-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.reference-list-row {
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reference-list-row:hover {
+  background: var(--hover);
+}
+
+.reference-list-empty {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Expression editor */
+.expression-popover {
+  width: 380px;
+}
+
+.expression-suggestions {
+  display: flex;
+  flex-direction: column;
+}
+
+.expression-suggestion {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.expression-suggestion:hover,
+.expression-suggestion.is-highlighted {
+  background: var(--accent-soft);
+}
+
+.expression-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.expression-name {
+  padding: 0 6px;
+  border-bottom: 2px solid currentColor;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.expression-result {
+  min-height: 24px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.expression-problem {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+/* Excel-style palette: colour is paired with a number and an underline */
+.is-ref-1 { color: #1d6fdc; }
+.is-ref-2 { color: #c2410c; }
+.is-ref-3 { color: #15803d; }
+.is-ref-4 { color: #9333ea; }
+.is-ref-5 { color: #b45309; }
+.is-ref-6 { color: #be185d; }
+
+/* Reference picker */
+.reference-picker-popover {
+  width: 560px;
+}
+
+.reference-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-body {
+  display: flex;
+  gap: 10px;
+  height: 280px;
+}
+
+.picker-tree {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.picker-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.picker-page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-item:hover,
+.picker-item:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.picker-empty,
+.picker-hint {
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Sheet: explanation line under the formula bar, error cells */
+.formula-message {
+  display: none;
+  padding: 2px 10px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.formula-message.is-visible {
+  display: block;
+}
+
+.sheet-cell.is-error {
+  color: var(--danger);
 }

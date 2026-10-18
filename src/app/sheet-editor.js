@@ -8,13 +8,16 @@
  * table, rebuilt whenever the sheet changes.
  */
 
-import { CommandError } from "../core/errors.js";
+import { guard } from "./notice.js";
+import { explain, isFormulaError } from "../sheet/errors.js";
 import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
 import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf } from "../sheet/render.js";
 import { TableEngines } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
+import { findSectionByLocator } from "../references/sections.js";
+import { promptName, referenceCount, sectionMenuItems, showMenu, showReferenceList } from "./handles.js";
 
 /** Smallest size a header drag can shrink a column or row to. */
 const MIN_COLUMN_WIDTH = 24;
@@ -32,8 +35,8 @@ const MIN_ROW_HEIGHT = 16;
  */
 export function parseCellInput(raw) {
   if (raw === "") return null;
-  if (raw.startsWith("=")) return { formula: raw };
   const trimmed = raw.trim();
+  if (trimmed.startsWith("=")) return { formula: raw };
   if (/^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(trimmed)) return { value: Number(trimmed) };
   if (trimmed.toUpperCase() === "TRUE") return { value: true };
   if (trimmed.toUpperCase() === "FALSE") return { value: false };
@@ -106,11 +109,11 @@ export function rawCellText(cell) {
  * Create a sheet editor bound to one sheet page.
  * @param {Workspace} workspace
  * @param {string} pageId
- * @param {{ onChange?: () => void, onSelectionChange?: () => void }} [options]
+ * @param {{ onChange?: () => void, onSelectionChange?: () => void, navigate?: (pageId: string) => void }} [options]
  * @returns {SheetEditorHandle}
  */
 export function createSheetEditor(workspace, pageId, options = {}) {
-  const engines = new TableEngines();
+  const engines = new TableEngines(() => workspace._data);
   const element = h("div", { class: "sheet-editor" });
   /**
    * The active range is `anchor`..`focus` (the anchor is the active cell); `others`
@@ -124,7 +127,8 @@ export function createSheetEditor(workspace, pageId, options = {}) {
    *   | { type: "select" }
    *   | { type: "fill", tableId: string, source: Rect, target: Rect | null, hit: Position | null }
    *   | { type: "move", tableId: string, grab: Position, range: Rect, delta: Position | null }
-   *   | { type: "resize", axis: "col" | "row", tableId: string, index: number, origin: number, original: number, size: number }}
+   *   | { type: "resize", axis: "col" | "row", tableId: string, index: number, origin: number, original: number, size: number }
+   *   | { type: "tablemove", tableId: string, originX: number, originY: number, start: Position, x: number, y: number, moved: boolean }}
    */
   let gesture = null;
   /** True once the user typed into the formula bar and has not committed yet. */
@@ -173,8 +177,9 @@ export function createSheetEditor(workspace, pageId, options = {}) {
   );
 
   const bar = h("div", { class: "sheet-bar" }, [address, input]);
+  const message = h("div", { class: "formula-message", role: "status", "data-role": "formula-message" });
   const canvasWrap = h("div", { class: "sheet-canvas-wrap", tabindex: "-1" });
-  element.append(bar, canvasWrap);
+  element.append(bar, message, canvasWrap);
   const popovers = createPopoverHost(document.body);
 
   // -- selection ---------------------------------------------------------------
@@ -551,7 +556,8 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     const { range: source } = clipboard;
     const width = source.end.col - source.start.col + 1;
     const height = source.end.row - source.start.row + 1;
-    try {
+    let pasted = false;
+    const done = guard(() => {
       if (clipboard.cut) {
         workspace.dispatch("moveCells", {
           pageId,
@@ -566,7 +572,8 @@ export function createSheetEditor(workspace, pageId, options = {}) {
           active.start,
           { col: active.start.col + width - 1, row: active.start.row + height - 1 }
         );
-        return true;
+        pasted = true;
+        return;
       }
       const targets = allRanges().map((range) => {
         const spanCols = range.end.col - range.start.col + 1;
@@ -585,11 +592,9 @@ export function createSheetEditor(workspace, pageId, options = {}) {
         targets
       });
       if (targets.length === 1) selectRange(active.tableId, targets[0].start, targets[0].end);
-      return true;
-    } catch (error) {
-      if (error instanceof CommandError) return false;
-      throw error;
-    }
+      pasted = true;
+    });
+    return done && pasted;
   }
 
   /**
@@ -680,13 +685,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
    * @returns {boolean}
    */
   function attempt(action) {
-    try {
-      action();
-      return true;
-    } catch (error) {
-      if (error instanceof CommandError) return false;
-      throw error;
-    }
+    return guard(action);
   }
 
   /** @param {"right" | "down"} direction */
@@ -815,7 +814,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   function refresh() {
     const snapshot = content();
-    for (const table of Object.values(snapshot.tables)) engines.rebuild(table);
+    engines.refresh();
     clampSelection();
     if (clipboard && !snapshot.tables[clipboard.tableId]) clipboard = null;
 
@@ -846,12 +845,18 @@ export function createSheetEditor(workspace, pageId, options = {}) {
       address.textContent = positionToA1(col, row);
       const cell = table ? getCell(table, col, row) : undefined;
       if (!inputDirty) input.value = rawCellText(cell);
+      const shown = cell && table && typeof cell.formula === "string" ? engines.value(table, col, row) : null;
+      message.textContent = isFormulaError(shown) ? explain(shown).text : "";
+      message.classList.toggle("is-visible", message.textContent !== "");
     } else {
+      message.textContent = "";
+      message.classList.remove("is-visible");
       address.textContent = "—";
       input.value = "";
       inputDirty = false;
       cellEditing = false;
     }
+    placeSheetHandle();
     if (cellEditing) placeCellEditor(caret, hadFocus);
     options.onSelectionChange?.();
   }
@@ -1128,6 +1133,21 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   /** Follow the pointer while a header edge is dragged, resizing the live DOM without re-rendering. */
   const dragResize = (/** @type {Event} */ event) => {
+    if (gesture?.type === "tablemove") {
+      const mouse = /** @type {MouseEvent} */ (event);
+      const dx = mouse.clientX - gesture.originX;
+      const dy = mouse.clientY - gesture.originY;
+      if (!gesture.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      gesture.moved = true;
+      gesture.x = Math.max(0, Math.round(gesture.start.col + dx));
+      gesture.y = Math.max(0, Math.round(gesture.start.row + dy));
+      const host = [...canvasWrap.querySelectorAll(".sheet-table")].find((el) => el.getAttribute("data-table-id") === gesture?.tableId);
+      if (host) {
+        /** @type {HTMLElement} */ (host).style.left = `${gesture.x}px`;
+        /** @type {HTMLElement} */ (host).style.top = `${gesture.y}px`;
+      }
+      return;
+    }
     if (gesture?.type !== "resize") return;
     const mouse = /** @type {MouseEvent} */ (event);
     const pointer = gesture.axis === "col" ? mouse.clientX : mouse.clientY;
@@ -1148,6 +1168,14 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     const done = gesture;
     gesture = null;
     if (!done || done.type === "select") return;
+    if (done.type === "tablemove") {
+      if (done.moved) {
+        justDragged = true;
+        attempt(() => workspace.dispatch("moveTable", { pageId, tableId: done.tableId, x: done.x, y: done.y }));
+        refresh();
+      }
+      return;
+    }
     if (done.type === "resize") {
       if (done.size !== done.original) {
         attempt(() =>
@@ -1173,6 +1201,127 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     }
   };
   document.addEventListener("mouseup", finishGesture);
+
+  // -- section handle ------------------------------------------------------------
+
+  /** Set after a table drag so the click that follows the release does not open the menu. */
+  let justDragged = false;
+
+  /** @returns {{ mode: "table" | "range", tableId: string, range: Rect | null } | null} */
+  function handleTarget() {
+    const range = currentRange();
+    if (!range) {
+      // Nothing selected: the handle stands for the first table.
+      const first = workspace.data.pages[pageId]?.content?.tableOrder?.[0];
+      return first ? { mode: "table", tableId: first, range: null } : null;
+    }
+    const table = tableOf(range.tableId);
+    if (!table) return null;
+    const single = range.start.col === range.end.col && range.start.row === range.end.row;
+    const whole =
+      range.start.col === 0 && range.start.row === 0 && range.end.col >= table.columnCount - 1 && range.end.row >= table.rowCount - 1;
+    return single || whole
+      ? { mode: "table", tableId: range.tableId, range: null }
+      : { mode: "range", tableId: range.tableId, range: { start: range.start, end: range.end } };
+  }
+
+  /** @param {{ mode: "table" | "range", tableId: string, range: Rect | null }} target */
+  function handleMenu(target) {
+    const data = workspace.data;
+    const page = data.pages[pageId];
+    const table = tableOf(target.tableId);
+    const locator = target.range ? { tableId: target.tableId, range: target.range } : { tableId: target.tableId };
+    const found = findSectionByLocator(page, locator);
+    const anchor = () => /** @type {HTMLElement} */ (canvasWrap.querySelector("[data-role=sheet-handle]") ?? canvasWrap);
+    /** @type {import("./popover.js").MenuItem[]} */
+    const items = [];
+    if (target.mode === "table") {
+      items.push({
+        label: "Rename table",
+        icon: "rename",
+        attrs: { "data-action": "table-rename" },
+        action: () =>
+          promptName(popovers, anchor(), {
+            title: "Table name",
+            initial: table?.name ?? "",
+            onSubmit: (name) => guard(() => workspace.dispatch("renameTable", { pageId, tableId: target.tableId, name }))
+          })
+      });
+    } else if (found?.name) {
+      items.push(...sectionMenuItems({ workspace, popovers, anchor, sectionId: found.id, navigate: options.navigate }));
+      return items;
+    } else {
+      items.push({
+        label: "Make section",
+        icon: "section",
+        attrs: { "data-action": "section-make" },
+        action: () =>
+          promptName(popovers, anchor(), {
+            title: "Section name",
+            confirm: "Create",
+            onSubmit: (name) => guard(() => workspace.dispatch("createSection", { pageId, locator, name }))
+          })
+      });
+    }
+    const count = found ? referenceCount(workspace, found.id) : 0;
+    items.push({
+      label: `Show references (${count})`,
+      icon: "link",
+      disabled: !found,
+      attrs: { "data-action": "section-references" },
+      action: () => found && showReferenceList({ workspace, popovers, anchor: anchor(), sectionId: found.id, navigate: options.navigate })
+    });
+    return items;
+  }
+
+  /** Put the handle by the selected table's top-left corner (rebuilt on every render). */
+  function placeSheetHandle() {
+    const target = handleTarget();
+    if (!target) return;
+    const table = tableOf(target.tableId);
+    if (!table) return;
+    const locator = target.range ? { tableId: target.tableId, range: target.range } : { tableId: target.tableId };
+    const found = findSectionByLocator(workspace.data.pages[pageId], locator);
+    const count = found ? referenceCount(workspace, found.id) : 0;
+    const handle = h("button", {
+      class: `section-handle sheet-handle is-${target.mode}`,
+      type: "button",
+      "data-role": "sheet-handle",
+      "data-mode": target.mode,
+      "aria-label": target.mode === "table" ? "Table options" : "Range options",
+      title: target.mode === "table" ? "Table options (drag to move)" : "Range options",
+      style: `left:${Math.max(0, table.position.x - 24)}px;top:${table.position.y}px`
+    });
+    handle.append(icon(target.mode === "table" ? "grip" : "section", { size: 14 }));
+    if (count > 0) handle.append(h("span", { class: "handle-badge", text: String(count) }));
+    handle.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+      const mouse = /** @type {MouseEvent} */ (event);
+      if (mouse.button !== 0) return;
+      if (target.mode === "table") {
+        event.preventDefault();
+        gesture = {
+          type: "tablemove",
+          tableId: target.tableId,
+          originX: mouse.clientX,
+          originY: mouse.clientY,
+          start: { col: table.position.x, row: table.position.y },
+          x: table.position.x,
+          y: table.position.y,
+          moved: false
+        };
+      }
+    });
+    handle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (justDragged) {
+        justDragged = false;
+        return;
+      }
+      showMenu(popovers, handle, handleMenu(target));
+    });
+    (canvasWrap.querySelector(".sheet-canvas") ?? canvasWrap).append(handle);
+  }
 
   // -- context menu ------------------------------------------------------------
 
