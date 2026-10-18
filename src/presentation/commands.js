@@ -42,7 +42,7 @@ const COPY_OFFSET = 24;
 
 /** Fields `updateObject` may change; identity and type are never patchable. */
 const PATCHABLE = new Set([
-  "x", "y", "width", "height", "rotation", "name", "link", "fill", "stroke", "shape", "flipV", "text", "src"
+  "x", "y", "width", "height", "rotation", "name", "link", "fill", "stroke", "shape", "flipV", "text", "src", "autoHeight"
 ]);
 
 /**

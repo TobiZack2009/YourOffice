@@ -1205,6 +1205,30 @@ function presentationTabs() {
               action: (ctx) => ctx.presentationEditor?.pickImage()
             })
           ]
+        },
+        {
+          id: "references",
+          label: "Reference",
+          controls: [
+            button({
+              id: "reference-embed",
+              label: "Embed",
+              title: "Show part of another page on this slide, live",
+              icon: "link",
+              attrs: { "data-action": "reference-embed" },
+              enabled: hasSlide,
+              action: (ctx, element) => ctx.presentationEditor?.insertEmbed(element)
+            }),
+            button({
+              id: "reference-expression",
+              label: "Expression",
+              title: "Show the result of a formula over tables and sections",
+              icon: "expression",
+              attrs: { "data-action": "reference-expression" },
+              enabled: hasSlide,
+              action: (ctx, element) => ctx.presentationEditor?.insertExpression(element)
+            })
+          ]
         }
       ]
     },

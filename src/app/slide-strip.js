@@ -22,6 +22,7 @@ export const THUMB_WIDTH = 168;
  * @property {() => import("../presentation/model.js").PresentationContent} getContent
  * @property {() => string | null} getCurrent
  * @property {import("./popover.js").PopoverHost} popovers
+ * @property {() => Partial<import("../presentation/render.js").RenderSlideOptions>} [slideHooks] How thumbnails draw references.
  * @property {(slideId: string) => void} onSelect
  * @property {(spec: { layout?: string, index: number }) => void} onCreate
  * @property {(slideId: string) => void} onDuplicate
@@ -76,7 +77,7 @@ export function createSlideStrip(options) {
       const thumb = h("div", { class: "slide-thumb" });
       thumb.style.width = `${THUMB_WIDTH}px`;
       thumb.style.height = `${thumbHeight}px`;
-      thumb.append(renderSlide(slide, { size: content.size, scale }));
+      thumb.append(renderSlide(slide, { size: content.size, scale, ...options.slideHooks?.() }));
 
       const wrap = h("div", {
         class: `slide-thumb-wrap${slideId === current ? " is-current" : ""}`,

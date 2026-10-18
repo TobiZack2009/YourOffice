@@ -46,13 +46,25 @@ import { createPreview } from "./animation-preview.js";
 import { createAnimationTimeline } from "./animation-timeline.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
-import { parseInlineRuns, runsEqual } from "./inline.js";
+import { caretOffset, parseInlineRuns, runsEqual } from "./inline.js";
 import { markStateIn, setLinkIn, toggleMarkIn } from "./marks.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { createInspector } from "./inspector.js";
 import { createSlideStrip } from "./slide-strip.js";
-import { findSectionByLocator } from "../references/sections.js";
-import { promptName, referenceCount, sectionMenuItems, showMenu as showAnchoredMenu, showReferenceList } from "./handles.js";
+import { findSection, findSectionByLocator, sectionKind } from "../references/sections.js";
+import { ensureSection } from "../references/catalog.js";
+import { buildBook } from "../sheet/table-engine.js";
+import { enginesFor, staticReferenceHooks } from "./reference-render.js";
+import { openExpressionEditor } from "./expression-editor.js";
+import { openReferencePicker } from "./reference-picker.js";
+import {
+  promptName,
+  referenceCount,
+  referenceMenuItems,
+  sectionMenuItems,
+  showMenu as showAnchoredMenu,
+  showReferenceList
+} from "./handles.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../presentation/model.js").SlideObject} SlideObject */
@@ -87,6 +99,13 @@ export const NUDGE = 1;
 export const NUDGE_FAST = 10;
 const DRAG_THRESHOLD = 3;
 const DEFAULT_IMAGE_BOX = { width: 480, height: 270 };
+/** Starting box of a standalone reference object, by what it shows. */
+const REFERENCE_BOXES = {
+  slide: { width: 480, height: 270 },
+  table: { width: 480, height: 200 },
+  blocks: { width: 480, height: 120 },
+  expression: { width: 320, height: 80 }
+};
 const ROTATE_STEP = 15;
 const STAGE_PADDING = 64;
 const MAX_STAGE_SCALE = 3;
@@ -108,7 +127,7 @@ const textCapable = (o) => o.type === "text" || o.type === "shape";
 /** @param {SlideObject} o */
 const fillCapable = (o) => o.type === "text" || o.type === "shape";
 /** @param {SlideObject} o */
-const strokeCapable = (o) => o.type !== "image";
+const strokeCapable = (o) => o.type !== "image" && o.type !== "reference";
 
 /** @param {Element | EventTarget | null} node */
 function closest(node, selector) {
@@ -247,6 +266,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   let selectedAnimationId = null;
   /** @type {import("./animation-preview.js").PreviewHandle | null} */
   let previewHandle = null;
+  /** @type {ReturnType<typeof staticReferenceHooks> | null} */
+  let hookCache = null;
+  /** True once something on a slide read other pages, so their edits must redraw this one. */
+  let drewReferences = false;
+  /** Grown heights of `autoHeight` text objects (measured, never stored). @type {Map<string, number>} */
+  const autoHeights = new Map();
 
   /**
    * What the live gesture is showing, drawn into the overlay.
@@ -314,11 +339,50 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     showNotice(message);
   }
 
+  // -- references on slides --------------------------------------------------------
+
+  /**
+   * Hooks that draw reference objects and inline references read-only. Built lazily, once per
+   * model change, so a slide without references never pays for the formula engines.
+   */
+  function slideHooks() {
+    if (!hookCache) {
+      const data = workspace.data;
+      /** @type {any} */
+      let engines = null;
+      /** @type {any} */
+      let book = null;
+      const ctx = {
+        data,
+        get engines() {
+          return (engines ??= enginesFor(data));
+        },
+        get book() {
+          return (book ??= buildBook(data));
+        },
+        resolvePageTitle: (/** @type {string} */ id) => workspace.getPage(id)?.title
+      };
+      const hooks = staticReferenceHooks(/** @type {any} */ (ctx), pageId, 1);
+      hookCache = {
+        renderReference: (object) => {
+          drewReferences = true;
+          return hooks.renderReference(object);
+        },
+        renderInlineRef: (ref) => {
+          drewReferences = true;
+          return hooks.renderInlineRef(ref);
+        }
+      };
+    }
+    return hookCache;
+  }
+
   // -- slide strip + inspector ---------------------------------------------------
 
   const strip = createSlideStrip({
     getContent,
     getCurrent: () => currentSlideId,
+    slideHooks,
     popovers,
     onSelect: (slideId) => selectSlide(slideId),
     onCreate: ({ layout, index }) => newSlide(layout, index),
@@ -443,11 +507,13 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     stage.style.setProperty("--grid", `${GRID_SIZE * scale}px`);
     stage.classList.toggle("show-grid", view.grid);
 
-    slideEl = renderSlide(slide, { size, scale, interactive: true });
+    slideEl = renderSlide(slide, { size, scale, interactive: true, ...slideHooks() });
     for (const child of Array.from(slideEl.children)) {
       const id = /** @type {HTMLElement} */ (child).dataset.objectId;
       if (id) objectEls.set(id, /** @type {HTMLElement} */ (child));
     }
+
+    measureAutoHeights(slide);
 
     overlay = h("div", { class: "stage-overlay", "data-role": "overlay" });
     overlay.style.width = `${size.width}px`;
@@ -458,6 +524,188 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     stage.append(slideEl, overlay);
     stageArea.append(stage);
     renderOverlay();
+  }
+
+  /**
+   * Grow `autoHeight` text objects to fit what they hold (a block embed in the text can be
+   * taller than the box). Only the drawing changes: no command, nothing stored.
+   * @param {Slide} slide
+   */
+  function measureAutoHeights(slide) {
+    autoHeights.clear();
+    for (const id of slide.objectOrder) {
+      const object = slide.objects[id];
+      if (!object || object.type !== "text" || !object.autoHeight) continue;
+      const el = objectEls.get(id);
+      const body = /** @type {HTMLElement | null} */ (el?.querySelector(".slide-text") ?? null);
+      if (!el || !body) continue;
+      const needed = Math.ceil(body.scrollHeight);
+      if (needed > object.height) {
+        el.style.height = `${needed}px`;
+        autoHeights.set(id, needed);
+      }
+    }
+  }
+
+  /**
+   * The handle of a selected reference object: opens its menu.
+   * @param {SlideObject} object
+   * @returns {HTMLElement}
+   */
+  function referenceHandle(object) {
+    const button = h("button", {
+      class: "slide-reference-handle",
+      type: "button",
+      "data-role": "reference-handle",
+      "aria-label": object.kind === "expression" ? "Expression" : "Embedded content",
+      title: object.kind === "expression" ? "Expression" : "Embedded content"
+    }, [icon(object.kind === "expression" ? "expression" : "link", { size: 14 })]);
+    button.style.left = `${object.x + object.width}px`;
+    button.style.top = `${object.y}px`;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      showAnchoredMenu(popovers, button, referenceItems(object, () => button));
+    });
+    return button;
+  }
+
+  /**
+   * @param {SlideObject} object
+   * @param {() => HTMLElement} anchor
+   */
+  function referenceItems(object, anchor) {
+    return referenceMenuItems({
+      workspace: /** @type {any} */ (workspace),
+      popovers,
+      anchor,
+      hostId: pageId,
+      record: object,
+      navigate: options.navigate,
+      editExpression: () => editExpression(object, anchor()),
+      replaceSource: () => replaceSource(object, anchor())
+    });
+  }
+
+  /** @param {SlideObject} object @param {HTMLElement} anchor */
+  function editExpression(object, anchor) {
+    openExpressionEditor({
+      workspace: /** @type {any} */ (workspace),
+      popovers,
+      anchor,
+      pageId,
+      initial: object.expression ?? "",
+      confirm: "Apply",
+      onSubmit: (text) => run(() => send("setExpression", { instanceId: object.id, expression: text }))
+    });
+  }
+
+  /** Swap which section a reference object shows. @param {SlideObject} object @param {HTMLElement} anchor */
+  function replaceSource(object, anchor) {
+    openReferencePicker({
+      workspace: /** @type {any} */ (workspace),
+      popovers,
+      anchor,
+      pageId,
+      onPick: (item, name) =>
+        run(() =>
+          workspace.transact("change reference", () => {
+            const sectionId = ensureSection(/** @type {any} */ (workspace), item, name);
+            send("updateReference", { instanceId: object.id, patch: { sectionId } });
+          })
+        )
+    });
+  }
+
+  /**
+   * Where a new reference goes: into the text being edited at the caret, or as its own object.
+   * Committing the edit first keeps the caret offset in step with the stored text.
+   * @returns {{ inline: { slideId: string, objectId: string, offset: number } } | null}
+   */
+  function inlinePlacement() {
+    if (!editing || !currentSlideId) return null;
+    const { id, host } = editing;
+    const blank = runsFromHost(host).every((r) => !r.ref && r.text.trim() === "");
+    if (blank) return null;
+    const offset = caretOffset(host);
+    finishEdit(true);
+    return { inline: { slideId: currentSlideId, objectId: id, offset } };
+  }
+
+  /**
+   * Place a reference: inline when text is being edited, else a standalone object, centred.
+   * @param {Record<string, unknown>} fields `kind` plus `sectionId` or `expression`.
+   * @param {ReturnType<typeof inlinePlacement>} inlineAt
+   * @param {{ width: number, height: number }} box
+   */
+  function placeReference(fields, inlineAt, box) {
+    if (!currentSlideId) return;
+    if (inlineAt) {
+      const { objectId } = inlineAt.inline;
+      workspace.transact("insert reference", () => {
+        send("insertReference", { slideId: currentSlideId, display: {}, ...fields, ...inlineAt });
+        if (getSlide()?.objects[objectId]?.type === "text") {
+          send("updateObject", { slideId: currentSlideId, objectId, patch: { autoHeight: true } });
+        }
+      });
+      return;
+    }
+    const size = getSize();
+    const width = Math.min(box.width, size.width);
+    const height = Math.min(box.height, size.height);
+    const instanceId = createId("obj");
+    selectedIds = [instanceId];
+    tool = null;
+    send("insertReference", {
+      slideId: currentSlideId,
+      display: {},
+      ...fields,
+      instanceId,
+      x: Math.round((size.width - width) / 2),
+      y: Math.round((size.height - height) / 2),
+      width,
+      height
+    });
+  }
+
+  /**
+   * Open the source picker and embed what is chosen.
+   * @param {HTMLElement} [anchor]
+   */
+  function insertEmbed(anchor) {
+    if (!currentSlideId) return;
+    const inlineAt = inlinePlacement();
+    openReferencePicker({
+      workspace: /** @type {any} */ (workspace),
+      popovers,
+      anchor: anchor ?? stageArea,
+      pageId,
+      onPick: (item, name) =>
+        run(() =>
+          workspace.transact("insert reference", () => {
+            const sectionId = ensureSection(/** @type {any} */ (workspace), item, name);
+            const kind = sectionKind(findSection(workspace.data, sectionId));
+            placeReference({ kind: "embed", sectionId }, inlineAt, REFERENCE_BOXES[kind] ?? REFERENCE_BOXES.blocks);
+          })
+        )
+    });
+  }
+
+  /**
+   * Open the expression editor and place its result.
+   * @param {HTMLElement} [anchor]
+   */
+  function insertExpression(anchor) {
+    if (!currentSlideId) return;
+    const inlineAt = inlinePlacement();
+    openExpressionEditor({
+      workspace: /** @type {any} */ (workspace),
+      popovers,
+      anchor: anchor ?? stageArea,
+      pageId,
+      initial: "",
+      confirm: "Insert",
+      onSubmit: (text) => run(() => placeReference({ kind: "expression", expression: text }, inlineAt, REFERENCE_BOXES.expression))
+    });
   }
 
   /**
@@ -556,11 +804,14 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     const slide = getSlide();
     if (!slide || previewHandle) return;
 
-    const objects = getSelectedObjects().map((o) => /** @type {SlideObject} */ ({ ...o, ...(preview.rects.get(o.id) ?? {}) }));
+    const objects = getSelectedObjects().map(
+      (o) => /** @type {SlideObject} */ ({ ...o, ...(autoHeights.has(o.id) ? { height: autoHeights.get(o.id) } : {}), ...(preview.rects.get(o.id) ?? {}) })
+    );
     const single = objects.length === 1;
     for (const object of objects) {
       overlay.append(selectionBox(object, { handles: single && !editing && !gesture?.hideHandles, id: object.id }));
     }
+    if (single && !editing && !gesture && objects[0].type === "reference") overlay.append(referenceHandle(objects[0]));
     if (objects.length > 1 && !gesture) {
       const bounds = unionBounds(objects.map(rotatedBounds));
       const group = selectionBox({ ...bounds }, { handles: false });
@@ -613,7 +864,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     const base = slide?.objects[id];
     if (!base) return;
     preview.rects.set(id, patch);
-    const fresh = renderObject({ ...base, ...patch }, { interactive: true });
+    const fresh = renderObject({ ...base, ...patch }, { interactive: true, ...slideHooks() });
     objectEls.get(id)?.replaceWith(fresh);
     objectEls.set(id, fresh);
   }
@@ -623,6 +874,8 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     if (destroyed) return;
     stopPreview({ quiet: true });
     cached = null;
+    hookCache = null;
+    drewReferences = false;
     const content = getContent();
     if (!currentSlideId || !content.slides[currentSlideId]) {
       const next = content.slideOrder[0] ?? null;
@@ -1220,7 +1473,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     tool = null;
 
     const shown = { ...object, text: object.text ?? createTextBody({ align: "center", valign: "middle" }) };
-    const fresh = renderObject(shown, { interactive: true });
+    const fresh = renderObject(shown, { interactive: true, ...slideHooks() });
     objectEls.get(object.id)?.replaceWith(fresh);
     objectEls.set(object.id, fresh);
     const host = /** @type {HTMLElement} */ (fresh.querySelector(".slide-text"));
@@ -1414,6 +1667,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       stopPreview();
       return;
     }
+    if (closest(target, "[data-role=reference-handle]")) return;
     if (editing) finishEdit(true);
 
     // Pointer-down on the stage never starts a native text selection or drag.
@@ -1730,6 +1984,13 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     if (!objectEl || editing) return;
     const id = /** @type {HTMLElement} */ (objectEl).dataset.objectId;
     const object = id ? getSlide()?.objects[id] : null;
+    if (object?.type === "reference" && object.kind === "expression") {
+      event.preventDefault();
+      selectedIds = [object.id];
+      afterStateChange();
+      editExpression(object, /** @type {HTMLElement} */ (objectEl));
+      return;
+    }
     if (!object || !textCapable(object)) return;
     event.preventDefault();
     if (!(selectedIds.length === 1 && selectedIds[0] === id)) {
@@ -1910,7 +2171,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   const unsubscribe = workspace.events.on("change", (event) => {
     if (destroyed) return;
     const payload = /** @type {{ pages?: string[] }} */ (event ?? {});
-    if (payload.pages && !payload.pages.includes(pageId)) return;
+    if (payload.pages && !payload.pages.includes(pageId) && !drewReferences) return;
     cached = null;
     if (editing) {
       const dispatched = finishEdit(true);
@@ -1980,6 +2241,9 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     setTool,
     listPages: inspectorApi.listPages,
     listSlides: inspectorApi.listSlides,
+    // references
+    insertEmbed,
+    insertExpression,
     // slides
     newSlide,
     duplicateSlide,
