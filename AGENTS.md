@@ -590,6 +590,16 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     Cmd/Ctrl+click opens it), the ribbon Link button is `active` inside a link and the context menu
     has Link. Cmd/Ctrl+K is Quick Find, so it is deliberately **not** a link shortcut. Clicking
     below the last block focuses a trailing empty paragraph or appends one.
+  - **One link type for pages and addresses.** The Insert tab has a single Link control (the
+    separate "Page link" block menu is gone; existing `pageLink` blocks still render, and clicking
+    one opens its page). The form's one field takes a web address or a page name: matching pages
+    are listed under it (`link-pages`, `linkPages(workspace)`), picking one fills the field and
+    defaults the text to the title (never overwriting text the user typed), and Apply/Enter on
+    words that are not an address takes the first match. A page destination is the ordinary link
+    mark with href `#<pageId>` (`pageIdOfLink`, `pageLinkUrl`), so it edits, removes and splits like
+    any link. Its card shows the page title with a go-to button (`options.navigate`), or "Page
+    removed"; Cmd/Ctrl+click goes straight to the page. The presentation link popover is still
+    address-only.
   - **Browser smoke (playwright-core, system Chrome).** Make a section from a paragraph, embed it
     on a slide, cross-page expression (`Budget!'Q1 Budget'!D2`), bad expression blocked with an
     explanation, delete the source and the embed survives, inline expression chip in a paragraph,
@@ -618,8 +628,8 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   `references-rewrite`, `references-catalog`, `references-commands`, `references-fit`,
   `app-references`, `app-block-references`, `app-inline-references`, `app-sheet-references`,
   `app-slide-references`, `app-presentation-references`, `app-links`, `references-multi-slide`.
-  **1042 tests green across 54 files**; the single-file build inlines JS + CSS into one
-  ~383 kB HTML.
+  **1057 tests green across 54 files**; the single-file build inlines JS + CSS into one
+  ~386 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 

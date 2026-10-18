@@ -2,19 +2,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Workspace } from "../src/workspace/store.js";
 import { registerDocumentCommands } from "../src/document/commands.js";
 import { createDocumentEditor } from "../src/app/block-editor.js";
-import { normalizeLinkUrl } from "../src/app/link-form.js";
+import { buildLinkForm, linkPages, normalizeLinkUrl, pageIdOfLink, pageLinkUrl } from "../src/app/link-form.js";
 
 /** @param {Array<Record<string, unknown>>} blocks */
-function setup(blocks) {
+function setup(blocks, options = {}) {
   const ws = Workspace.create({ title: "Doc" });
   registerDocumentCommands(ws);
   ws.dispatch("createPage", { type: "document", title: "Doc" });
   const pageId = ws.getChildren(null)[0];
   for (const block of blocks) ws.dispatch("insertBlock", { pageId, block });
-  const editor = createDocumentEditor(ws, pageId);
+  const editor = createDocumentEditor(ws, pageId, options);
   document.body.append(editor.element);
   return {
     ws,
+    pageId,
     editor,
     order: () => ws.getPage(pageId).content.blockOrder,
     block: (id) => ws.getPage(pageId).content.blocks[id],
@@ -260,5 +261,173 @@ describe("clicking below the last block", () => {
     press(editor);
     expect(order()).toHaveLength(2);
     expect(document.activeElement?.getAttribute("data-block-id")).toBe(order()[1]);
+  });
+});
+
+describe("page links share the link control", () => {
+  const withPages = (blocks, options) => {
+    const made = setup(blocks, { resolvePageTitle: undefined, ...options });
+    made.ws.dispatch("createPage", { type: "sheet", title: "Budget" });
+    made.ws.dispatch("createPage", { type: "document", title: "Meeting notes" });
+    const find = (title) => made.ws.getPages().find((page) => page.title === title).id;
+    return { ...made, find };
+  };
+  const rows = () => [...document.querySelectorAll('[data-role="link-page"]')];
+
+  it("tells page links from web addresses", () => {
+    expect(pageIdOfLink("#document_k3v8m2w9x1q4o")).toBe("document_k3v8m2w9x1q4o");
+    expect(pageIdOfLink("#top")).toBe("");
+    expect(pageIdOfLink("https://a.test/#document_abc")).toBe("");
+    expect(pageLinkUrl("sheet_abc")).toBe("#sheet_abc");
+  });
+
+  it("lists every page in the form and narrows them as the user types", () => {
+    const { editor, order } = withPages([{ type: "paragraph", runs: [{ text: "see " }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.openLinkEditor();
+    expect(rows().map((row) => row.textContent)).toEqual(["Doc", "Budget", "Meeting notes"]);
+    const input = document.querySelector('[data-role="link-input"]');
+    input.value = "bud";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(rows().map((row) => row.textContent)).toEqual(["Budget"]);
+  });
+
+  it("links a page picked from the list, with the title as the text", () => {
+    const { editor, order, block, find } = withPages([{ type: "paragraph", runs: [{ text: "see " }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.openLinkEditor();
+    rows().find((row) => row.textContent === "Budget").click();
+    expect(document.querySelector('[data-role="link-input"]').value).toBe("Budget");
+    expect(document.querySelector('[data-role="link-text-input"]').value).toBe("Budget");
+    document.querySelector(".popover-apply").click();
+    expect(block(order()[0]).runs.at(-1)).toEqual({ text: "Budget", marks: { link: `#${find("Budget")}` } });
+  });
+
+  it("keeps text the user typed when a page is picked", () => {
+    const { editor, order, block, find } = withPages([{ type: "paragraph", runs: [{ text: "see " }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.openLinkEditor();
+    document.querySelector('[data-role="link-text-input"]').value = "the numbers";
+    rows().find((row) => row.textContent === "Budget").click();
+    document.querySelector(".popover-apply").click();
+    expect(block(order()[0]).runs.at(-1)).toEqual({ text: "the numbers", marks: { link: `#${find("Budget")}` } });
+  });
+
+  it("takes the first matching page when words rather than an address are entered", () => {
+    const { editor, order, block, find } = withPages([{ type: "paragraph", runs: [{ text: "see " }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.openLinkEditor();
+    const input = document.querySelector('[data-role="link-input"]');
+    input.value = "meeting";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".popover-apply").click();
+    expect(block(order()[0]).runs.at(-1).marks.link).toBe(`#${find("Meeting notes")}`);
+  });
+
+  it("still links a web address from the same field", () => {
+    const { editor, order, block } = withPages([{ type: "paragraph", runs: [{ text: "see " }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.openLinkEditor();
+    const input = document.querySelector('[data-role="link-input"]');
+    input.value = "example.com";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('[data-role="link-text-input"]').value = "site";
+    document.querySelector(".popover-apply").click();
+    expect(block(order()[0]).runs.at(-1)).toEqual({ text: "site", marks: { link: "https://example.com" } });
+  });
+
+  it("links selected text to a page", () => {
+    const { editor, order, block, editables, find } = withPages([{ type: "paragraph", runs: [{ text: "open the budget now" }] }]);
+    editor.focusBlock(order()[0], "start");
+    selectRange(editables()[0], 9, 15);
+    editor.openLinkEditor();
+    expect(document.querySelector('[data-role="link-text-input"]')).toBeNull();
+    rows().find((row) => row.textContent === "Budget").click();
+    document.querySelector(".popover-apply").click();
+    expect(block(order()[0]).runs[1]).toEqual({ text: "budget", marks: { link: `#${find("Budget")}` } });
+  });
+
+  it("opens the form on the chosen page when a page link is edited", () => {
+    const { editor, order, find } = withPages([{ type: "paragraph", runs: [{ text: "x" }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.setLink(`#${find("Budget")}`, "Budget");
+    selectRange(editor.element.querySelector("[contenteditable=true]"), 3, 3);
+    editor.openLinkEditor();
+    expect(document.querySelector('[data-role="link-input"]').value).toBe("Budget");
+    expect(document.querySelector(".link-page-item.is-selected")?.textContent).toBe("Budget");
+  });
+
+  it("uses the page title as the text when none is given", () => {
+    const { editor, order, block, find } = withPages([{ type: "paragraph", runs: [{ text: "x" }] }], {
+      resolvePageTitle: (id) => (id ? "Budget" : undefined)
+    });
+    editor.focusBlock(order()[0], "end");
+    selectRange(editor.element.querySelector("[contenteditable=true]"), 1, 1);
+    editor.setLink(`#${find("Budget")}`);
+    expect(block(order()[0]).runs.at(-1)).toEqual({ text: "Budget", marks: { link: `#${find("Budget")}` } });
+  });
+
+  it("shows the page on the card and goes there", () => {
+    const visited = [];
+    const { editor, order, find } = withPages(
+      [{ type: "paragraph", runs: [{ text: "see " }] }],
+      { navigate: (id) => visited.push(id) }
+    );
+    editor.focusBlock(order()[0], "end");
+    editor.setLink(`#${find("Budget")}`, "numbers");
+    editor.element.querySelector("a").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const open = document.querySelector('[data-role="link-open-page"]');
+    expect(open.textContent).toBe("Budget");
+    expect(document.querySelector('[data-role="link-open"]')).toBeNull();
+    open.click();
+    expect(visited).toEqual([find("Budget")]);
+    expect(document.querySelector(".link-card")).toBeNull();
+  });
+
+  it("goes to the page on Cmd/Ctrl+click without a card", () => {
+    const visited = [];
+    const { editor, order, find } = withPages(
+      [{ type: "paragraph", runs: [{ text: "see " }] }],
+      { navigate: (id) => visited.push(id) }
+    );
+    editor.focusBlock(order()[0], "end");
+    editor.setLink(`#${find("Budget")}`, "numbers");
+    editor.element.querySelector("a").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
+    expect(visited).toEqual([find("Budget")]);
+    expect(document.querySelector(".link-card")).toBeNull();
+  });
+
+  it("says so on the card when the page was removed", () => {
+    const { editor, order } = withPages([{ type: "paragraph", runs: [{ text: "see " }] }]);
+    editor.focusBlock(order()[0], "end");
+    editor.setLink("#document_gone0000000a", "old page");
+    editor.element.querySelector("a").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(document.querySelector('[data-role="link-missing"]')?.textContent).toBe("Page removed");
+  });
+
+  it("opens the page behind an existing page-link block when it is clicked", () => {
+    const visited = [];
+    const { editor, find, ws, pageId } = withPages([], { navigate: (id) => visited.push(id) });
+    ws.dispatch("insertBlock", { pageId, block: { type: "pageLink", pageId: find("Budget") } });
+    editor.element.querySelector("a.page-link").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(visited).toEqual([find("Budget")]);
+  });
+
+  it("offers pages to the standalone form builder", () => {
+    const { ws } = withPages([]);
+    const pages = linkPages(ws);
+    expect(pages.map((page) => page.title)).toEqual(["Doc", "Budget", "Meeting notes"]);
+    const applied = [];
+    const form = buildLinkForm({
+      info: { canLink: true, inLink: false, url: "", text: "", hasSelection: true, wholeBlocks: false },
+      pages,
+      onApply: (value) => applied.push(value),
+      onRemove() {},
+      close() {}
+    });
+    document.body.append(form);
+    form.querySelector('[data-page-id="' + pages[1].id + '"]').click();
+    form.querySelector(".popover-apply").click();
+    expect(applied).toEqual([{ url: `#${pages[1].id}`, text: "" }]);
   });
 });

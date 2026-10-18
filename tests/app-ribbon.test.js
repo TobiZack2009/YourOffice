@@ -274,12 +274,20 @@ describe("createRibbon", () => {
     }
   });
 
+  it("offers one Link control on the document Insert tab for both pages and addresses", () => {
+    const { ribbon } = setup();
+    ribbon.setPage("document");
+    ribbon.selectTab("insert");
+    expect(ribbon.element.querySelectorAll('[data-action="link"]')).toHaveLength(1);
+    expect(ribbon.element.querySelector('[data-action="insert-page-link-menu"]')).toBeNull();
+  });
+
   it("opens a menu popover for menu controls and closes it on tab change", () => {
     const { ribbon, ctx, docEditor } = setup();
     ctx.docEditor = docEditor;
     ribbon.setPage("document");
     ribbon.selectTab("insert");
-    /** @type {HTMLElement} */ (ribbon.element.querySelector('[data-action="insert-page-link-menu"]')).click();
+    /** @type {HTMLElement} */ (ribbon.element.querySelector('[data-action="insert-heading-menu"]')).click();
     expect(ribbon.element.querySelector(".popover .menu")).toBeTruthy();
     ribbon.selectTab("home");
     expect(ribbon.element.querySelector(".popover")).toBeNull();

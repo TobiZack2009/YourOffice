@@ -27,7 +27,7 @@ import { findSection, sectionBlockIds, sectionRunIds, sectionsCovering } from ".
 import { h, clear } from "./dom.js";
 import { planBlockMove, promptName, referenceMenuItems, sectionMenuItems, showMenu } from "./handles.js";
 import { icon } from "./icons.js";
-import { NO_LINK, buildLinkCard, buildLinkForm, normalizeLinkUrl } from "./link-form.js";
+import { NO_LINK, buildLinkCard, buildLinkForm, linkPages, normalizeLinkUrl, pageIdOfLink } from "./link-form.js";
 import { guard } from "./notice.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { openExpressionEditor } from "./expression-editor.js";
@@ -1383,7 +1383,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       } else {
         const anchor = doc.createElement("a");
         anchor.setAttribute("href", url);
-        anchor.textContent = text || url;
+        anchor.textContent = text || (pageIdOfLink(url) && options.resolvePageTitle?.(pageIdOfLink(url))) || url;
         const at = range ?? doc.createRange();
         if (!range) {
           at.selectNodeContents(el);
@@ -1433,6 +1433,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     };
     const form = buildLinkForm({
       info,
+      pages: linkPages(hostWorkspace),
       onApply: ({ url, text }) => {
         restore();
         setLink(url, text);
@@ -1455,8 +1456,23 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   function openLinkCard(anchor, el) {
     const url = anchor.getAttribute("href") ?? "";
     const rect = anchor.getBoundingClientRect();
+    const pageId = pageIdOfLink(url);
+    const target = pageId ? hostWorkspace.getPage(pageId) : undefined;
     const card = buildLinkCard({
       url,
+      page: pageId
+        ? target
+          ? {
+              title: target.title || "Untitled",
+              type: target.type,
+              onOpen: () => {
+                popovers.close();
+                linkCardOpen = false;
+                options.navigate?.(pageId);
+              }
+            }
+          : null
+        : undefined,
       onEdit: () => {
         popovers.close();
         linkCardOpen = false;
@@ -1636,11 +1652,23 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     if (pointer.button !== 0 || !owns(/** @type {Node} */ (pointer.target))) return;
     const target = pointer.target instanceof Element ? pointer.target : null;
     const anchor = /** @type {HTMLAnchorElement | null} */ (target?.closest("a[href]") ?? null);
+    // A page-link block is not editable text: clicking it goes to the page.
+    const pageBlockId = anchor?.matches("a.page-link[data-page-id]") ? anchor.dataset.pageId : "";
+    if (pageBlockId && element.contains(anchor)) {
+      pointer.preventDefault();
+      if (hostWorkspace.getPage(pageBlockId)) options.navigate?.(pageBlockId);
+      return;
+    }
     const el = anchor ? editableFrom(anchor) : null;
     if (!anchor || !el || !element.contains(anchor)) return;
     pointer.preventDefault();
     if (pointer.metaKey || pointer.ctrlKey) {
       const href = anchor.getAttribute("href") ?? "";
+      const linkedPage = pageIdOfLink(href);
+      if (linkedPage) {
+        if (hostWorkspace.getPage(linkedPage)) options.navigate?.(linkedPage);
+        return;
+      }
       if (normalizeLinkUrl(href)) element.ownerDocument.defaultView?.open(href, "_blank", "noopener,noreferrer");
       return;
     }

@@ -22,7 +22,7 @@
  */
 
 import { h } from "./dom.js";
-import { NO_LINK, buildLinkForm } from "./link-form.js";
+import { NO_LINK, buildLinkForm, linkPages } from "./link-form.js";
 import { LAYOUTS } from "../presentation/layouts.js";
 import { SIZE_PRESETS } from "../presentation/geometry.js";
 
@@ -165,6 +165,7 @@ function linkPopover(ctx, close) {
   const info = ctx.docEditor?.getLinkInfo?.() ?? NO_LINK;
   return buildLinkForm({
     info,
+    pages: linkPages(ctx.workspace),
     onApply: ({ url, text }) => {
       restoreRange(savedRange);
       ctx.docEditor?.setLink(url, text);
@@ -581,27 +582,6 @@ function documentTabs() {
           id: "links",
           label: "Links",
           controls: [
-            button({
-              id: "insert-page-link",
-              kind: "menu",
-              label: "Page link",
-              icon: "page-link",
-              attrs: { "data-action": "insert-page-link-menu" },
-              enabled: hasDoc,
-              items: (ctx) => {
-                const others = ctx.workspace.getPages().filter((page) => page.id !== ctx.page?.id);
-                if (others.length === 0) return [{ heading: "No other pages" }];
-                return [
-                  { heading: "Link to page" },
-                  ...others.map((page) => ({
-                    label: page.title || "Untitled",
-                    icon: `page-${page.type}`,
-                    attrs: { "data-action": "insert-page-link", "data-page-id": page.id },
-                    action: () => ctx.docEditor?.insertAfterActive({ type: "pageLink", pageId: page.id })
-                  }))
-                ];
-              }
-            }),
             linkControl("insert-link")
           ]
         },
