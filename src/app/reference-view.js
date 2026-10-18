@@ -13,13 +13,18 @@
  * points somewhere else. `begin` / `render` / `end` bracket one host render.
  */
 
+import { renderRuns } from "../document/render.js";
 import { evaluateExpression } from "../references/expression.js";
-import { findSection, sectionKind } from "../references/sections.js";
+import { fitOf, shapeOfSection, shapeOfValue } from "../references/fit.js";
+import { findSection, sectionKind, sectionRunIds } from "../references/sections.js";
+import { HEADER_WIDTH, columnWidthOf } from "../sheet/model.js";
+import { isHandle } from "../sheet/values.js";
 import { buildBook } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { showNotice } from "./notice.js";
 import {
+  DEFAULT_SLIDE_WIDTH,
   enginesFor,
   missing,
   renderSectionById,
@@ -200,6 +205,110 @@ export function createReferenceViews(options) {
     return frame;
   }
 
+  /**
+   * Drawn width in px of what a section shows, for the inline fit rule.
+   * @param {any} found
+   * @param {{ width?: number } | undefined} display
+   * @returns {number}
+   */
+  function displayWidthOf(found, display) {
+    const kind = sectionKind(found);
+    if (kind === "slide") return display?.width ?? DEFAULT_SLIDE_WIDTH;
+    if (kind !== "table") return 0;
+    const table = found.container.content.tables?.[found.section.locator.tableId];
+    if (!table) return 0;
+    const range = found.section.locator.range;
+    const first = range ? range.start.col : 0;
+    const last = range ? range.end.col : table.columnCount - 1;
+    let width = range ? 0 : HEADER_WIDTH;
+    for (let col = first; col <= last; col++) width += columnWidthOf(table, col);
+    return width;
+  }
+
+  /**
+   * The single paragraph/heading/quote of a section as flowing text.
+   * @param {any} found
+   * @returns {HTMLElement}
+   */
+  function inlineText(found) {
+    const content = found.container.content;
+    const [id] = sectionRunIds(content, found.section.locator);
+    const block = content.blocks?.[id];
+    return h("span", { class: "inline-ref-text" }, [
+      renderRuns(block?.runs ?? [], { resolvePageTitle: options.resolvePageTitle })
+    ]);
+  }
+
+  /**
+   * Draw one inline reference. It flows with the text when its shape allows it
+   * (`data-fit="inline"`), otherwise it breaks the paragraph (`data-fit="break"`); the
+   * paragraph stays a single block either way. Inline references are read-only here.
+   * @param {any} record The reference carried by the run.
+   * @param {number} [containerWidth] Width of the paragraph in px; 0 when unknown.
+   * @returns {HTMLElement}
+   */
+  function renderInline(record, containerWidth = 0) {
+    used.add(record.id);
+    const data = options.workspace.data;
+    const outer = h("span", { class: `reference is-${record.kind}`, "data-kind": record.kind });
+    const body = h("span", { class: "reference-body" });
+    const handle = handleButton(record, record.kind === "expression" ? "function" : "link");
+    outer.append(handle, body);
+
+    const fill = () => {
+      clear(body);
+      /** @type {any} */
+      let found = null;
+      let shape;
+      let state = "live";
+      /** @type {any} */
+      let result = null;
+      if (record.kind === "expression") {
+        result = evaluateExpression(data, options.hostId, record.expression ?? "", { book: shared().book });
+        shape = shapeOfValue(data, result.value);
+        if (isHandle(result.value)) found = findSection(data, result.value.sectionId);
+      } else {
+        found = record.sectionId ? findSection(data, record.sectionId) : null;
+        state = !found ? "missing" : found.detached ? "removed" : "live";
+        shape = found ? shapeOfSection(found) : { kind: "error" };
+      }
+      const fit = fitOf(shape, {
+        displayWidth: found ? displayWidthOf(found, record.display) : 0,
+        containerWidth
+      });
+      outer.setAttribute("data-fit", fit);
+      outer.setAttribute("data-state", state);
+      outer.setAttribute("data-shape", shape.kind);
+      outer.classList.toggle("is-removed", state === "removed");
+      handle.replaceChildren(icon(state === "removed" ? "unlink" : record.kind === "expression" ? "expression" : "link", { size: 14 }));
+
+      if (record.kind === "expression" && !found) {
+        const shown = renderValue(context(), result.value);
+        if (shown.classList.contains("is-error")) {
+          shown.addEventListener("click", () => showNotice(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
+        }
+        body.append(shown);
+      } else if (!found) {
+        body.append(missing("The source was removed."));
+      } else if (fit === "inline" && shape.kind === "blocks") {
+        body.append(inlineText(found));
+      } else if (record.kind === "expression") {
+        body.append(renderValue(context(), result.value));
+      } else {
+        body.append(renderSectionById(context(), record.sectionId, record.display));
+      }
+    };
+    fill();
+    updaters.set(record.id, fill);
+    if (record.kind === "expression") {
+      outer.addEventListener("dblclick", (event) => {
+        if (/** @type {HTMLElement} */ (event.target).closest(".reference-handle")) return;
+        options.onEditExpression?.(record, outer);
+      });
+    }
+    return outer;
+  }
+
   /** Recompute every expression drawn by this cache, and those of nested editors. */
   function refreshExpressions() {
     pass = null;
@@ -211,6 +320,7 @@ export function createReferenceViews(options) {
     begin,
     end,
     render,
+    renderInline,
     refreshExpressions,
     /** @returns {any[]} Nested editors currently alive. */
     childEditors: () => [...views.values()].map((view) => view.editor),

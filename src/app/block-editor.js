@@ -374,7 +374,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   const renderOptions = {
     resolvePageTitle: options.resolvePageTitle,
-    renderReference: (/** @type {Block} */ block) => views.render(block)
+    renderReference: (/** @type {Block} */ block) => views.render(block),
+    renderInlineRef: (/** @type {any} */ ref) => views.renderInline(ref, element.clientWidth)
   };
 
   /** @returns {any} The nested editor to act through, when the caret is inside one. */
@@ -2065,8 +2066,30 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     });
   }
 
+  /**
+   * Where an inserted reference goes within the text, when the caret is in a non-empty
+   * paragraph, heading, quote or list item: the reference joins that text at the caret.
+   * @returns {Record<string, unknown> | null}
+   */
+  function inlinePosition() {
+    const selection = element.ownerDocument.getSelection?.();
+    if (!selection || selection.rangeCount === 0) return null;
+    const editable = editableFrom(selection.getRangeAt(0).startContainer);
+    if (!editable || !element.contains(editable) || !owns(editable)) return null;
+    const blockId = editable.getAttribute("data-block-id");
+    const block = blockId ? blockOf(blockId) : null;
+    if (!block || !["paragraph", "heading", "quote", "list"].includes(block.type)) return null;
+    const itemId = editable.getAttribute("data-item-id");
+    if (block.type === "list" !== Boolean(itemId)) return null;
+    const runs = runsOf(editable);
+    if (isBlankRuns(runs)) return null;
+    return { inline: { blockId, ...(itemId ? { itemId } : {}), offset: selectionOffsets(editable).start } };
+  }
+
   /** @returns {Record<string, unknown>} Where an inserted reference block goes. */
   function insertionPosition() {
+    const inline = inlinePosition();
+    if (inline) return inline;
     if (activeBlockId && blockOf(activeBlockId)) return { afterBlockId: activeBlockId };
     const run = order();
     return nested && run.length > 0 ? { afterBlockId: run[run.length - 1] } : { index: run.length };

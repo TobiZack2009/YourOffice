@@ -2332,6 +2332,50 @@ svg.icon {
   cursor: default;
 }
 
+/* Inline references: a run of the paragraph. `data-fit="inline"` flows with the text;
+   `data-fit="break"` stacks as text / embed / text while the paragraph stays one block. */
+.inline-ref.reference {
+  display: inline;
+  margin: 0;
+  padding: 0 2px;
+  border-radius: 6px;
+  user-select: none;
+}
+
+.inline-ref .reference-handle {
+  display: none;
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+
+.inline-ref:hover .reference-handle,
+.inline-ref:focus-within .reference-handle {
+  display: inline-flex;
+}
+
+.inline-ref .reference-body {
+  display: inline;
+}
+
+.inline-ref .reference-chip {
+  padding: 0 6px;
+}
+
+.inline-ref[data-fit="break"].reference {
+  display: block;
+  margin: 6px 0;
+  padding: 4px 6px;
+}
+
+.inline-ref[data-fit="break"] .reference-body {
+  display: block;
+}
+
+.inline-ref .reference-blocks > .block {
+  margin-bottom: 6px;
+}
+
 /* Name prompt and reference list popovers */
 .name-prompt,
 .reference-list-popover,
