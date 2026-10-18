@@ -14,7 +14,7 @@
  */
 
 import { createId } from "../core/ids.js";
-import { validateRuns } from "../document/model.js";
+import { validateRuns, validateReferenceFields } from "../document/model.js";
 
 /** @typedef {import("../document/model.js").InlineRun} InlineRun */
 /** @typedef {import("../workspace/schema.js").PageEnvelope} PageEnvelope */
@@ -28,7 +28,7 @@ export const SLIDE_DEFAULTS = {
 /** Bounds for the shared logical slide size. */
 export const SIZE_LIMITS = { min: 320, max: 7680 };
 
-export const OBJECT_TYPES = ["text", "shape", "line", "image"];
+export const OBJECT_TYPES = ["text", "shape", "line", "image", "reference"];
 export const SHAPES = ["rect", "ellipse", "triangle", "roundRect", "arrow"];
 export const TRANSITION_STYLES = ["none", "fade", "wipe"];
 export const TRANSITION_DIRECTIONS = ["left", "right", "up", "down"];
@@ -100,7 +100,7 @@ const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
  *
  * @typedef {object} SlideObject
  * @property {string} id
- * @property {"text" | "shape" | "line" | "image"} type
+ * @property {"text" | "shape" | "line" | "image" | "reference"} type
  * @property {number} x
  * @property {number} y
  * @property {number} width
@@ -114,6 +114,11 @@ const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
  * @property {boolean} [flipV] Line direction inside its box (false: top-left to bottom-right).
  * @property {TextBody} [text]
  * @property {string} [src] Image data URL.
+ * @property {boolean} [autoHeight] Text objects: the stored height is a minimum; the editor grows it to fit.
+ * @property {"embed" | "expression"} [kind] Reference objects.
+ * @property {string} [sectionId]
+ * @property {string} [expression]
+ * @property {Record<string, any>} [display]
  *
  * @typedef {object} Slide
  * @property {string} id
@@ -171,7 +176,7 @@ export function createTextBody(fields = {}) {
 /**
  * Build a slide object with sensible per-type defaults. Input is deep-copied so
  * callers' structures are never shared with the store.
- * @param {"text" | "shape" | "line" | "image"} type
+ * @param {"text" | "shape" | "line" | "image" | "reference"} type
  * @param {Partial<SlideObject>} [fields]
  * @returns {SlideObject}
  */
@@ -204,7 +209,14 @@ export function createObject(type, fields = {}) {
     object.flipV = copy.flipV ?? false;
   } else if (type === "image") {
     object.src = copy.src ?? "";
+  } else if (type === "reference") {
+    const source = /** @type {Record<string, any>} */ (copy);
+    object.kind = source.kind ?? "embed";
+    if (source.sectionId !== undefined) object.sectionId = source.sectionId;
+    if (source.expression !== undefined) object.expression = source.expression;
+    object.display = source.display ?? {};
   }
+  if (type === "text" && /** @type {any} */ (copy).autoHeight === true) object.autoHeight = true;
   return object;
 }
 
@@ -363,6 +375,14 @@ export function validateObject(object) {
     errors.push(`object.shape must be one of ${SHAPES.join(", ")}`);
   }
   if (object.flipV !== undefined && typeof object.flipV !== "boolean") errors.push("object.flipV must be a boolean");
+  if (object.autoHeight !== undefined && (typeof object.autoHeight !== "boolean" || object.type !== "text")) {
+    errors.push("object.autoHeight must be a boolean on a text object");
+  }
+  if (object.type === "reference") {
+    errors.push(...validateReferenceFields(object).map((m) => `object.${m}`));
+    if (object.text !== undefined) errors.push("reference objects cannot carry text");
+    return errors;
+  }
   if (object.text !== undefined) {
     if (object.type === "line" || object.type === "image") errors.push(`${object.type} objects cannot carry text`);
     else errors.push(...validateTextBody(object.text).map((m) => `object.${m}`));

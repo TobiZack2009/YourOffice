@@ -18,6 +18,10 @@
  * @property {(assetId: string) => string | undefined} [resolveAssetUrl]
  * @property {Record<string, Block>} [blocks] Block registry, used to render
  *   blocks nested under list items (set by `renderDocument`).
+ * @property {(block: Block) => HTMLElement | null} [renderReference] Draws a
+ *   reference block (an embed or expression); null falls back to a plain placeholder.
+ * @property {(ref: NonNullable<InlineRun["ref"]>) => HTMLElement | null} [renderInlineRef] Draws the
+ *   body of an inline reference run; null falls back to a plain placeholder.
  */
 
 /**
@@ -41,6 +45,10 @@ export function renderRuns(runs, options) {
   const fragment = doc.createDocumentFragment();
 
   for (const run of runs) {
+    if (run.ref) {
+      fragment.appendChild(renderInlineRef(doc, run.ref, options));
+      continue;
+    }
     const text = doc.createTextNode(run.text);
     let node = /** @type {Node} */ (text);
     const marks = run.marks ?? {};
@@ -61,6 +69,24 @@ export function renderRuns(runs, options) {
   }
 
   return fragment;
+}
+
+/**
+ * The atomic element standing for an inline reference. Its text is never part of the
+ * paragraph's text: editors measure it as one character and parse it back from `data-ref`.
+ * @param {Document} doc
+ * @param {NonNullable<InlineRun["ref"]>} ref
+ * @param {RenderOptions} [options]
+ * @returns {HTMLElement}
+ */
+function renderInlineRef(doc, ref, options) {
+  const element = options?.renderInlineRef?.(ref) ?? doc.createElement("span");
+  if (element.childNodes.length === 0) element.textContent = ref.kind === "expression" ? "Expression" : "Reference";
+  element.classList.add("inline-ref");
+  element.setAttribute("contenteditable", "false");
+  element.setAttribute("data-ref-id", ref.id);
+  element.setAttribute("data-ref", JSON.stringify(ref));
+  return element;
 }
 
 /**
@@ -160,6 +186,8 @@ export function renderBlock(block, options) {
       return decorate(anchor, block);
     }
     case "sectionRef": {
+      const shown = options?.renderReference?.(block);
+      if (shown) return decorate(shown, block);
       const span = doc.createElement("span");
       span.className = "section-ref";
       span.setAttribute("data-section-id", block.sectionId ?? "");

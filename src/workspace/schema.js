@@ -6,6 +6,8 @@
  * and tests all exercise the same code path.
  */
 
+import { validateReferences } from "../references/integrity.js";
+
 /** @typedef {"document" | "sheet" | "presentation"} PageType */
 
 /** @type {"YourOffice-workspace"} */
@@ -42,6 +44,7 @@ const ISO_8601_UTC =
  * @property {{ root: string[], [parentId: string]: string[] }} pageOrder
  *    root plus an ordered child list per parent page id.
  * @property {Record<string, unknown>} settings
+ * @property {Record<string, unknown>} [detached] Content that lost its place but is still read (see references/detached.js).
  */
 
 /**
@@ -235,6 +238,9 @@ export function validateWorkspace(data) {
       errors.push("settings.favoritePageIds must be an array of page ids when present");
     }
   }
+
+  // Sections, detached content and the references between them (only once the envelope is sound).
+  if (errors.length === 0) errors.push(...validateReferences(data));
 
   return { valid: errors.length === 0, errors };
 }

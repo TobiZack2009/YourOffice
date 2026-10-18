@@ -52,10 +52,10 @@ function textRunsOf(block) {
  * @returns {string}
  */
 function plainTextOf(block) {
-  if (Array.isArray(block.runs)) return block.runs.map((run) => run.text).join("");
+  if (Array.isArray(block.runs)) return block.runs.map((run) => (run.ref ? "" : run.text)).join("");
   if (block.type === "code") return block.text ?? "";
   if (Array.isArray(block.items)) {
-    return block.items.map((item) => item.runs.map((run) => run.text).join("")).join("\n");
+    return block.items.map((item) => item.runs.map((run) => (run.ref ? "" : run.text)).join("")).join("\n");
   }
   return "";
 }
@@ -81,7 +81,7 @@ function requireString(value, field, reason) {
  */
 function requireDocumentPage(store, pageId) {
   const id = requireString(pageId, "pageId", "invalidPage");
-  const page = store._data.pages[id];
+  const page = store._data.pages[id] ?? store._data.detached?.[id];
   if (!page) throw new CommandError(`page does not exist: ${id}`, "unknownPage");
   if (page.type !== "document") {
     throw new CommandError(`page ${id} is not a document page`, "wrongPageType");
@@ -377,6 +377,68 @@ export const documentCommands = {
   },
 
   /**
+   * Move several sibling blocks together, keeping their order, in one step. Unlike repeated
+   * `moveBlock` calls the blocks are never seen half-moved, so a section over them keeps its
+   * extent. The target is `afterBlockId` / `beforeBlockId` (a block outside the moved set), or
+   * `parent` (a list item, default the page) with an `index` counted after the blocks left.
+   * @param {Workspace} store
+   * @param {Transaction} tx
+   * @param {{ pageId: string, blockIds: string[], afterBlockId?: string, beforeBlockId?: string, parent?: { blockId: string, itemId: string }, index?: number }} payload
+   */
+  moveBlocks(store, tx, payload) {
+    const p = /** @type {Record<string, any>} */ (payload ?? {});
+    const { page, content } = requireDocumentPage(store, p.pageId);
+    if (!Array.isArray(p.blockIds) || p.blockIds.length === 0) {
+      throw new CommandError("blockIds must be a non-empty array", "invalidBlock");
+    }
+    const moving = new Set(/** @type {string[]} */ (p.blockIds));
+    for (const id of moving) requireBlock(content, id);
+    const home = requireContainer(content, p.blockIds[0]);
+    for (const id of moving) {
+      if (requireContainer(content, id).ids !== home.ids) {
+        throw new CommandError("blocks must share a container to move together", "differentContainers");
+      }
+    }
+    const ordered = home.ids.filter((id) => moving.has(id));
+    const forbidden = new Set(ordered.flatMap((id) => [id, ...collectDescendants(content, id)]));
+
+    /** @type {string[]} */
+    let target;
+    /** @type {() => number} */
+    let place;
+    const anchorId = p.afterBlockId ?? p.beforeBlockId;
+    if (anchorId !== undefined) {
+      requireString(anchorId, "anchor", "invalidBlock");
+      if (forbidden.has(anchorId)) throw new CommandError("cannot move blocks relative to themselves", "invalidIndex");
+      const at = requireContainer(content, anchorId, "anchor");
+      if (at.parent && forbidden.has(at.parent.blockId)) {
+        throw new CommandError("cannot move blocks into themselves", "invalidIndex");
+      }
+      target = at.ids;
+      place = () => target.indexOf(anchorId) + (p.afterBlockId !== undefined ? 1 : 0);
+    } else {
+      target = content.blockOrder;
+      if (p.parent !== undefined) {
+        const list = requireBlock(content, p.parent?.blockId);
+        if (forbidden.has(list.id)) throw new CommandError("cannot move blocks into themselves", "invalidIndex");
+        const item = /** @type {NonNullable<Block["items"]>} */ (list.items)[requireItemIndex(list, p.parent?.itemId)];
+        item.children ??= [];
+        target = item.children;
+      }
+      place = () => {
+        const index = p.index === undefined ? target.length : p.index;
+        if (!Number.isInteger(index) || index < 0 || index > target.length) {
+          throw new CommandError("index is out of range", "invalidIndex");
+        }
+        return index;
+      };
+    }
+    for (const id of ordered) home.ids.splice(home.ids.indexOf(id), 1);
+    target.splice(place(), 0, ...ordered);
+    touchPage(tx, page);
+  },
+
+  /**
    * Append a list item to a list block.
    * @param {Workspace} store
    * @param {Transaction} tx
@@ -430,7 +492,7 @@ export const documentCommands = {
       if (fields.runs === undefined) fields.runs = structuredClone(item.runs);
       if (type === "heading" && fields.level === undefined) fields.level = 1;
     } else if (type === "code" && fields.text === undefined) {
-      fields.text = item.runs.map((run) => run.text).join("");
+      fields.text = item.runs.map((run) => (run.ref ? "" : run.text)).join("");
     }
     if (newId) fields.id = newId;
     const created = createBlock(type, fields);

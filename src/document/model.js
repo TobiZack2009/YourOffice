@@ -41,6 +41,8 @@ const ALIGNMENTS = new Set(["left", "center", "right"]);
  * @typedef {object} InlineRun
  * @property {string} text
  * @property {{ bold?: boolean, italic?: boolean, underline?: boolean, strike?: boolean, code?: boolean, link?: string }} [marks]
+ * @property {{ id: string, kind?: "embed" | "expression", sectionId?: string, expression?: string, display?: Record<string, any> }} [ref]
+ *   Set on a reference run: an atomic inline embed or expression whose `text` is `REF_CHAR`.
  */
 
 /**
@@ -59,6 +61,9 @@ const ALIGNMENTS = new Set(["left", "center", "right"]);
  * @property {string} [align]
  * @property {string} [pageId]
  * @property {string} [sectionId]
+ * @property {"embed" | "expression"} [kind] Reference blocks: embed (default) or expression.
+ * @property {string} [expression]
+ * @property {Record<string, any>} [display]
  * @property {string} [tableId]
  * @property {string} [slideId]
  */
@@ -72,6 +77,9 @@ const ALIGNMENTS = new Set(["left", "center", "right"]);
 function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/** Stands in for an inline reference in a run's `text`, so every offset counts it as one character. */
+export const REF_CHAR = "\uFFFC";
 
 /**
  * Validate an inline run list.
@@ -94,6 +102,17 @@ export function validateRuns(runs) {
     } else if (run.text.length === 0) {
       errors.push(`runs[${index}].text must not be empty`);
     }
+    if (run.ref !== undefined) {
+      // A reference run is atomic: one placeholder character, no marks.
+      if (run.text !== REF_CHAR) errors.push(`runs[${index}] is a reference, its text must be the placeholder character`);
+      if (run.marks !== undefined) errors.push(`runs[${index}] is a reference and cannot carry marks`);
+      if (!isPlainObject(run.ref) || typeof run.ref.id !== "string" || run.ref.id.length === 0) {
+        errors.push(`runs[${index}].ref.id must be a non-empty string`);
+      } else {
+        errors.push(...validateReferenceFields(run.ref).map((e) => `runs[${index}].${e}`));
+      }
+      return;
+    }
     if (run.marks !== undefined) {
       if (!isPlainObject(run.marks)) {
         errors.push(`runs[${index}].marks must be an object`);
@@ -112,6 +131,32 @@ export function validateRuns(runs) {
       }
     }
   });
+  return errors;
+}
+
+/**
+ * Fields shared by every reference instance (a block, an inline run or a slide object):
+ * an embed names a section; an expression carries formula text. `display` is free-form
+ * instance-local presentation (size, alignment, crop).
+ * @param {Record<string, any>} record
+ * @returns {string[]}
+ */
+export function validateReferenceFields(record) {
+  /** @type {string[]} */
+  const errors = [];
+  const kind = record.kind ?? "embed";
+  if (kind !== "embed" && kind !== "expression") {
+    errors.push("reference.kind must be embed or expression");
+  } else if (kind === "embed") {
+    if (typeof record.sectionId !== "string" || record.sectionId.length === 0) {
+      errors.push("sectionRef.sectionId must be a non-empty string");
+    }
+  } else if (typeof record.expression !== "string") {
+    errors.push("reference.expression must be a string");
+  }
+  if (record.display !== undefined && !isPlainObject(record.display)) {
+    errors.push("reference.display must be an object");
+  }
   return errors;
 }
 
@@ -206,9 +251,7 @@ export function validateBlock(block) {
       }
       break;
     case "sectionRef":
-      if (typeof block.sectionId !== "string" || block.sectionId.length === 0) {
-        errors.push(`${prefix}: sectionRef.sectionId must be a non-empty string`);
-      }
+      errors.push(...validateReferenceFields(block).map((e) => `${prefix}: ${e}`));
       break;
     case "sheetEmbed":
       if (typeof block.pageId !== "string" || block.pageId.length === 0) {

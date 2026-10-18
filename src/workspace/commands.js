@@ -13,6 +13,7 @@
 import { createId } from "../core/ids.js";
 import { CommandError } from "../core/errors.js";
 import { PAGE_TYPES } from "./schema.js";
+import { retargetReferences, snapshotReferences } from "../references/rewrite.js";
 
 /** @typedef {import("./store.js").Workspace} Workspace */
 /** @typedef {import("./store.js").Transaction} Transaction */
@@ -40,6 +41,17 @@ function isNonEmptyString(value, field, reason, ErrorType) {
 export function touchPage(tx, page) {
   page.modifiedAt = new Date().toISOString();
   tx.pageIds.add(page.id);
+}
+
+/**
+ * Touch whatever holds content under `id`: a page or a detached entry. Unknown ids are ignored.
+ * @param {Workspace} store
+ * @param {Transaction} tx
+ * @param {string} id
+ */
+export function touchContainer(store, tx, id) {
+  const container = store._data.pages[id] ?? store._data.detached?.[id];
+  if (container) touchPage(tx, container);
 }
 
 /**
@@ -115,12 +127,15 @@ export const commands = {
     }
     const index = p.index === undefined ? siblings.length : p.index;
 
+    // A new page can start shadowing a name that formulas already use.
+    const snapshot = snapshotReferences(store._data);
     store._data.pages[page.id] = page;
     siblings.splice(index, 0, page.id);
     if (parentId !== null) {
       store._data.pageOrder[parentId] = /** @type {string[]} */ (siblings);
     }
     tx.pageIds.add(page.id);
+    retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
   },
 
   /**
@@ -140,8 +155,10 @@ export const commands = {
       throw new CommandError(`page does not exist: ${p.pageId}`, "unknownPage");
     }
     if (page.title === p.title) return;
+    const snapshot = snapshotReferences(store._data);
     page.title = p.title;
     touchPage(tx, page);
+    retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
   },
 
   /**
@@ -246,6 +263,9 @@ export const commands = {
       }
     }
 
+    // A move changes which names are visible from where, so formulas are respelled afterwards.
+    const snapshot = snapshotReferences(store._data);
+
     // Remove from current position first, so index math is stable.
     const currentParent = store.getParent(p.pageId);
     const currentSiblings =
@@ -260,6 +280,7 @@ export const commands = {
       store._data.pageOrder[newParentId] = /** @type {string[]} */ (target);
     }
     touchPage(tx, page);
+    retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
   },
 
   /**

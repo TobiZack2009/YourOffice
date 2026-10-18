@@ -15,6 +15,7 @@ import {
   migrateWorkspace
 } from "./schema.js";
 import { registerWorkspaceCommands } from "./commands.js";
+import { registerReferenceCommands } from "../references/commands.js";
 
 /** @typedef {import("./schema.js").PageEnvelope} PageEnvelope */
 /** @typedef {import("./schema.js").PageType} PageType */
@@ -76,9 +77,17 @@ export class Workspace {
      * @type {Map<string, (store: Workspace, tx: Transaction, payload: unknown) => void>}
      */
     this._commands = new Map();
+    /**
+     * Hooks that wrap every command handler, inside its transaction, so cross-cutting
+     * invariants (sections, detached content) are restored before the transaction
+     * commits. A hook runs before the handler and may return a function to run after it.
+     * @type {Array<(store: Workspace, tx: Transaction, type: string, payload: unknown) => (void | (() => void))>}
+     */
+    this._commandHooks = [];
 
     // Built-in commands are registered here; engine code may add more later.
     registerWorkspaceCommands(this);
+    registerReferenceCommands(this);
   }
 
   // -- construction -----------------------------------------------------------
@@ -122,6 +131,15 @@ export class Workspace {
   /** @returns {string} */
   get title() {
     return this._data.metadata.title;
+  }
+
+  /**
+   * The live workspace data. Strictly read-only: it exists so renderers and reference
+   * lookups do not pay for a deep copy per read. Mutate only through commands.
+   * @returns {WorkspaceDocument}
+   */
+  get data() {
+    return this._data;
   }
 
   /** @returns {WorkspaceDocument} Deep copy of the serialized state. */
@@ -287,6 +305,15 @@ export class Workspace {
   }
 
   /**
+   * Register a hook around every command, in the same transaction. It runs before
+   * the handler and may return a callback that runs after it (and may mutate `_data`).
+   * @param {(store: Workspace, tx: Transaction, type: string, payload: unknown) => (void | (() => void))} fn
+   */
+  aroundCommand(fn) {
+    this._commandHooks.push(fn);
+  }
+
+  /**
    * Whether a command type is registered.
    * @param {string} type
    * @returns {boolean}
@@ -308,15 +335,21 @@ export class Workspace {
     if (!handler) {
       throw new CommandError(`unknown command: ${type}`, "unknownCommand");
     }
+    /** @param {Transaction} tx */
+    const run = (tx) => {
+      const afters = [];
+      for (const hook of this._commandHooks) {
+        const after = hook(this, tx, type, payload);
+        if (typeof after === "function") afters.push(after);
+      }
+      handler(this, tx, payload);
+      tx.commands.push({ type, payload });
+      for (const after of afters) after();
+    };
     if (this._open !== null) {
-      handler(this, this._open, payload);
-      this._open.commands.push({ type, payload });
+      run(this._open);
     } else {
-      this.transact(type, () => {
-        const tx = /** @type {Transaction} */ (this._open);
-        handler(this, tx, payload);
-        tx.commands.push({ type, payload });
-      });
+      this.transact(type, () => run(/** @type {Transaction} */ (this._open)));
     }
   }
 
