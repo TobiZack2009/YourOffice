@@ -27,6 +27,7 @@ import { findSection, sectionBlockIds, sectionRunIds, sectionsCovering } from ".
 import { h, clear } from "./dom.js";
 import { planBlockMove, promptName, referenceMenuItems, sectionMenuItems, showMenu } from "./handles.js";
 import { icon } from "./icons.js";
+import { NO_LINK, buildLinkCard, buildLinkForm, normalizeLinkUrl } from "./link-form.js";
 import { guard } from "./notice.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { openExpressionEditor } from "./expression-editor.js";
@@ -850,11 +851,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   }
 
   /**
-   * Toggle an inline mark across every selected text unit.
-   * @param {"bold" | "italic" | "underline" | "strike" | "code"} mark
+   * Rewrite the runs of every selected text unit in one transaction.
+   * @param {string} label Transaction label.
+   * @param {(allRuns: InlineRun[]) => ((runs: InlineRun[]) => InlineRun[])} plan
+   *   Sees every selected run first (to decide add vs remove), returns the per-unit rewrite.
    * @returns {boolean}
    */
-  function toggleMarkOnSelection(mark) {
+  function transformSelectedRuns(label, plan) {
     const targets = selectedKeys()
       .map((key) => {
         const { blockId, itemId } = parseKey(key);
@@ -869,21 +872,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       .filter((target) => target !== null);
     const allRuns = targets.flatMap((target) => target.runs);
     if (allRuns.length === 0) return false;
-    const remove = allRuns.every((run) => run.marks?.[mark]);
+    const restyle = plan(allRuns);
 
-    /** @param {InlineRun[]} runs */
-    const restyle = (runs) =>
-      mergeRuns(
-        runs.map((run) => {
-          if (run.ref) return run;
-          const marks = { ...(run.marks ?? {}) };
-          if (remove) delete marks[mark];
-          else marks[mark] = true;
-          return Object.keys(marks).length > 0 ? { text: run.text, marks } : { text: run.text };
-        })
-      );
-
-    workspace.transact(`toggle ${mark}`, () => {
+    workspace.transact(label, () => {
       for (const target of targets) {
         if (target.itemId) {
           const hit = locateItem(target.itemId);
@@ -907,6 +898,46 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     render();
     notifyActiveChange();
     return true;
+  }
+
+  /**
+   * Toggle an inline mark across every selected text unit.
+   * @param {"bold" | "italic" | "underline" | "strike" | "code"} mark
+   * @returns {boolean}
+   */
+  function toggleMarkOnSelection(mark) {
+    return transformSelectedRuns(`toggle ${mark}`, (allRuns) => {
+      const remove = allRuns.every((run) => run.marks?.[mark]);
+      return (runs) =>
+        mergeRuns(
+          runs.map((run) => {
+            if (run.ref) return run;
+            const marks = { ...(run.marks ?? {}) };
+            if (remove) delete marks[mark];
+            else marks[mark] = true;
+            return Object.keys(marks).length > 0 ? { text: run.text, marks } : { text: run.text };
+          })
+        );
+    });
+  }
+
+  /**
+   * Link (or unlink, for "") every selected text unit.
+   * @param {string} url
+   * @returns {boolean}
+   */
+  function setLinkOnSelection(url) {
+    return transformSelectedRuns("link", () => (runs) =>
+      mergeRuns(
+        runs.map((run) => {
+          if (run.ref) return run;
+          const marks = { ...(run.marks ?? {}) };
+          if (url) marks.link = url;
+          else delete marks.link;
+          return Object.keys(marks).length > 0 ? { text: run.text, marks } : { text: run.text };
+        })
+      )
+    );
   }
 
   // -- structural edits --------------------------------------------------------
@@ -1258,40 +1289,189 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   }
 
   /**
-   * Set or clear a link on the current selection.
-   * @param {string} url Empty string removes the link.
-   * @returns {boolean}
+   * @param {HTMLElement} el
+   * @returns {Range | null} The live selection range when it sits inside `el`.
    */
-  function setLink(url) {
-    const child = activeChild();
-    if (child) return child.setLink(url);
-    const el = activeEditable();
-    if (!el) return false;
+  function rangeInside(el) {
     const selection = el.ownerDocument.getSelection?.();
     const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    if (!range) return false;
+    return range && el.contains(range.commonAncestorContainer) ? range : null;
+  }
 
-    const existing = closestMark(range.commonAncestorContainer, "a", el);
-    if (!url) {
-      if (existing) unwrap(existing);
-    } else if (existing) {
-      existing.setAttribute("href", url);
-    } else if (!range.collapsed) {
-      const anchor = el.ownerDocument.createElement("a");
-      anchor.setAttribute("href", url);
-      try {
-        anchor.append(range.extractContents());
-        range.insertNode(anchor);
-      } catch {
-        return false;
+  /** @param {HTMLElement} el @returns {boolean} Whether links can live in this host. */
+  const linkable = (el) => !el.matches("code[data-block-id]");
+
+  /**
+   * What the link controls need to know: whether the caret is in a link, its address and
+   * text, and what is selected.
+   * @returns {import("./link-form.js").LinkInfo}
+   */
+  function getLinkInfo() {
+    const child = activeChild();
+    if (child) return child.getLinkInfo();
+    if (sel) {
+      const urls = new Set();
+      for (const key of selectedKeys()) {
+        const { blockId, itemId } = parseKey(key);
+        const block = blockOf(blockId);
+        const runs = itemId ? (locateItem(itemId)?.item.runs ?? []) : (block?.runs ?? []);
+        for (const run of runs) if (!run.ref) urls.add(run.marks?.link ?? "");
       }
+      const only = urls.size === 1 ? [...urls][0] : "";
+      return { canLink: true, inLink: only !== "", url: only, text: "", hasSelection: true, wholeBlocks: true };
+    }
+    const el = activeEditable();
+    if (!el || !linkable(el)) return NO_LINK;
+    const range = rangeInside(el);
+    const anchor = range ? closestMark(range.commonAncestorContainer, "a", el) : null;
+    const hasSelection = Boolean(range && !range.collapsed);
+    return {
+      canLink: true,
+      inLink: Boolean(anchor),
+      url: anchor?.getAttribute("href") ?? "",
+      text: anchor ? (anchor.textContent ?? "") : hasSelection && range ? range.toString() : "",
+      hasSelection,
+      wholeBlocks: false
+    };
+  }
+
+  /**
+   * Set, edit or clear a link. Over selected text it links that text; inside a link it
+   * changes the address (and the text, when given); at a bare caret with `text` it inserts
+   * a new linked piece of text; for "" it removes the link under the selection. With whole
+   * blocks selected it links every run in them.
+   * @param {string} rawUrl Empty string removes the link.
+   * @param {string} [text] Text to show (editing a link, or inserting at a caret).
+   * @returns {boolean}
+   */
+  function setLink(rawUrl, text) {
+    const child = activeChild();
+    if (child) return child.setLink(rawUrl, text);
+    const url = rawUrl ? normalizeLinkUrl(rawUrl) : "";
+    if (rawUrl && !url) return false;
+    if (sel) return setLinkOnSelection(url);
+    const el = activeEditable();
+    if (!el || !linkable(el)) return false;
+    const doc = el.ownerDocument;
+    const selection = doc.getSelection?.();
+    const range = rangeInside(el);
+    const intersecting = () =>
+      range ? [...el.querySelectorAll("a")].filter((anchor) => range.intersectsNode(anchor)) : [];
+
+    if (!url) {
+      const existing = range ? closestMark(range.commonAncestorContainer, "a", el) : null;
+      const targets = new Set([...(existing ? [existing] : []), ...(range?.collapsed ? [] : intersecting())]);
+      if (targets.size === 0) return false;
+      for (const anchor of targets) unwrap(anchor);
     } else {
-      return false;
+      const existing = range ? closestMark(range.commonAncestorContainer, "a", el) : null;
+      if (existing) {
+        existing.setAttribute("href", url);
+        if (text && text !== existing.textContent) existing.textContent = text;
+      } else if (range && !range.collapsed) {
+        const anchor = doc.createElement("a");
+        anchor.setAttribute("href", url);
+        try {
+          // Extracting splits any link the selection only partly covers, so its outside
+          // part keeps the old address; the covered part is re-linked below.
+          anchor.append(range.extractContents());
+          for (const inner of [...anchor.querySelectorAll("a")]) unwrap(inner);
+          range.insertNode(anchor);
+        } catch {
+          return false;
+        }
+      } else {
+        const anchor = doc.createElement("a");
+        anchor.setAttribute("href", url);
+        anchor.textContent = text || url;
+        const at = range ?? doc.createRange();
+        if (!range) {
+          at.selectNodeContents(el);
+          at.collapse(false);
+        }
+        at.insertNode(anchor);
+        const after = doc.createRange();
+        after.setStartAfter(anchor);
+        after.collapse(true);
+        selection?.removeAllRanges();
+        selection?.addRange(after);
+      }
     }
 
     commitEditable(el);
     notifyActiveChange();
     return true;
+  }
+
+  /** @type {boolean} Whether the open popover is the click-on-a-link card. */
+  let linkCardOpen = false;
+
+  /**
+   * Open the link form at the caret (ribbon, context menu, the link card).
+   * @returns {boolean}
+   */
+  function openLinkEditor() {
+    const child = activeChild();
+    if (child) return child.openLinkEditor();
+    const info = getLinkInfo();
+    if (!info.canLink) return false;
+    const el = activeEditable();
+    const selection = element.ownerDocument.getSelection?.();
+    const saved = !sel && selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+    const restore = () => {
+      if (!saved || !selection) return;
+      selection.removeAllRanges();
+      selection.addRange(saved);
+    };
+    const target = (saved && typeof saved.getBoundingClientRect === "function" ? saved.getBoundingClientRect() : null) ?? { left: 0, bottom: 0, width: 0, height: 0 };
+    const box = target.width || target.height ? target : (el ?? element).getBoundingClientRect();
+    linkCardOpen = false;
+    const close = () => {
+      popovers.close();
+      restore();
+      if (!sel) el?.focus?.();
+    };
+    const form = buildLinkForm({
+      info,
+      onApply: ({ url, text }) => {
+        restore();
+        setLink(url, text);
+      },
+      onRemove: () => {
+        restore();
+        setLink("");
+      },
+      close
+    });
+    popovers.showAt({ x: box.left, y: box.bottom + 4 }, form, { class: "popover-dialog", keepFocus: true });
+    return true;
+  }
+
+  /**
+   * The card under a clicked link: where it goes, Edit and Remove.
+   * @param {HTMLAnchorElement} anchor
+   * @param {HTMLElement} el The editable host holding the link.
+   */
+  function openLinkCard(anchor, el) {
+    const url = anchor.getAttribute("href") ?? "";
+    const rect = anchor.getBoundingClientRect();
+    const card = buildLinkCard({
+      url,
+      onEdit: () => {
+        popovers.close();
+        linkCardOpen = false;
+        openLinkEditor();
+      },
+      onRemove: () => {
+        popovers.close();
+        linkCardOpen = false;
+        unwrap(anchor);
+        commitEditable(el);
+        notifyActiveChange();
+      }
+    });
+    popovers.showAt({ x: rect.left, y: rect.bottom + 4 }, card, { class: "popover-dialog link-card-popover" });
+    linkCardOpen = true;
   }
 
   /**
@@ -1423,9 +1603,19 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     if (owns(/** @type {Node} */ (event.target))) setActiveFromNode(/** @type {Node} */ (event.target));
   });
 
+  /** @type {{ x: number, y: number } | null} Where the last primary press landed. */
+  let lastPress = null;
+
   element.addEventListener("mousedown", (event) => {
     const pointer = /** @type {MouseEvent} */ (event);
     if (pointer.button !== 0 || !owns(/** @type {Node} */ (pointer.target))) return;
+    if (!nested && pointer.target === element && clickedBelowLastBlock(pointer)) {
+      pointer.preventDefault();
+      if (sel) clearBlockSelection();
+      appendOrFocusTrailingParagraph();
+      return;
+    }
+    lastPress = { x: pointer.clientX, y: pointer.clientY };
     const key = unitKeyFrom(/** @type {Node} */ (pointer.target));
     if (sel) clearBlockSelection();
 
@@ -1439,6 +1629,27 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
     dragAnchor = key;
     setActiveFromNode(/** @type {Node} */ (pointer.target));
+  });
+
+  element.addEventListener("click", (event) => {
+    const pointer = /** @type {MouseEvent} */ (event);
+    if (pointer.button !== 0 || !owns(/** @type {Node} */ (pointer.target))) return;
+    const target = pointer.target instanceof Element ? pointer.target : null;
+    const anchor = /** @type {HTMLAnchorElement | null} */ (target?.closest("a[href]") ?? null);
+    const el = anchor ? editableFrom(anchor) : null;
+    if (!anchor || !el || !element.contains(anchor)) return;
+    pointer.preventDefault();
+    if (pointer.metaKey || pointer.ctrlKey) {
+      const href = anchor.getAttribute("href") ?? "";
+      if (normalizeLinkUrl(href)) element.ownerDocument.defaultView?.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    // A drag or double-click that selects text is not a request for the card. (The
+    // selection itself cannot tell: a click inside a selected link collapses it only after.)
+    const down = lastPress;
+    const dragged = down && Math.hypot(pointer.clientX - down.x, pointer.clientY - down.y) > 3;
+    if (dragged || pointer.detail >= 2) return;
+    openLinkCard(anchor, el);
   });
 
   element.addEventListener("mousemove", (event) => {
@@ -1458,6 +1669,10 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   element.addEventListener("input", (event) => {
     if (!owns(/** @type {Node} */ (event.target))) return;
     const el = editableFrom(/** @type {Node} */ (event.target));
+    if (linkCardOpen) {
+      popovers.close();
+      linkCardOpen = false;
+    }
     if (el) {
       setActiveFromNode(el);
       commitEditable(el);
@@ -1689,6 +1904,32 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     return insertBlock(spec, nested && run.length > 0 ? { afterBlockId: run[run.length - 1] } : { index: run.length });
   }
 
+  /**
+   * Whether a press on the editor's own box landed under the last block (the empty page
+   * below the text) rather than in a gutter beside it.
+   * @param {MouseEvent} pointer
+   * @returns {boolean}
+   */
+  function clickedBelowLastBlock(pointer) {
+    let last = element.lastElementChild;
+    while (last && last === blockHandle) last = last.previousElementSibling;
+    if (!last) return true;
+    const rect = last.getBoundingClientRect();
+    return rect.height <= 0 || pointer.clientY > rect.bottom;
+  }
+
+  /** Put the caret in a fresh trailing paragraph, reusing the last one if it is already empty. */
+  function appendOrFocusTrailingParagraph() {
+    const run = order();
+    const lastId = run[run.length - 1];
+    const last = lastId ? blockOf(lastId) : null;
+    if (last && last.type === "paragraph" && (last.runs ?? []).every((r) => !r.ref && !r.text)) {
+      focusBlock(lastId, "end");
+      return;
+    }
+    insertAtEnd({ type: "paragraph" });
+  }
+
   // -- context menu ------------------------------------------------------------
 
   /** Delete the selected units, or the unit under the caret. */
@@ -1757,6 +1998,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       markItem("Underline", "underline"),
       markItem("Strikethrough", "strike"),
       markItem("Inline code", "code"),
+      item(getLinkInfo().inLink ? "Edit link…" : "Link…", "link", "ctx-link", () => openLinkEditor(), {
+        disabled: !getLinkInfo().canLink
+      }),
       { separator: true },
       {
         label: "Turn into",
@@ -2256,6 +2500,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     insertAtEnd,
     toggleMark,
     setLink,
+    getLinkInfo,
+    openLinkEditor,
     indent,
     outdent,
     getSelectedUnits: selectedKeys,

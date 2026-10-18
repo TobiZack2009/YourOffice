@@ -22,6 +22,7 @@
  */
 
 import { h } from "./dom.js";
+import { NO_LINK, buildLinkForm } from "./link-form.js";
 import { LAYOUTS } from "../presentation/layouts.js";
 import { SIZE_PRESETS } from "../presentation/geometry.js";
 
@@ -161,39 +162,19 @@ function textPopover(spec, close) {
  */
 function linkPopover(ctx, close) {
   const savedRange = currentRange();
-  const input = h("input", {
-    class: "popover-input",
-    type: "url",
-    placeholder: "https://…",
-    "aria-label": "Link URL",
-    "data-role": "link-input"
-  });
-  const apply = h("button", { class: "popover-apply", type: "button", text: "Apply" });
-  const remove = h("button", { class: "popover-remove", type: "button", text: "Remove" });
-
-  apply.addEventListener("click", () => {
-    const value = /** @type {HTMLInputElement} */ (input).value.trim();
-    if (value) {
+  const info = ctx.docEditor?.getLinkInfo?.() ?? NO_LINK;
+  return buildLinkForm({
+    info,
+    onApply: ({ url, text }) => {
       restoreRange(savedRange);
-      ctx.docEditor?.setLink(value);
-    }
-    close();
+      ctx.docEditor?.setLink(url, text);
+    },
+    onRemove: () => {
+      restoreRange(savedRange);
+      ctx.docEditor?.setLink("");
+    },
+    close
   });
-  remove.addEventListener("click", () => {
-    restoreRange(savedRange);
-    ctx.docEditor?.setLink("");
-    close();
-  });
-  input.addEventListener("keydown", (event) => {
-    const key = /** @type {KeyboardEvent} */ (event).key;
-    if (key === "Enter") {
-      event.preventDefault();
-      apply.click();
-    } else if (key === "Escape") {
-      close();
-    }
-  });
-  return h("div", { class: "popover-body" }, [input, h("div", { class: "popover-row" }, [apply, remove])]);
 }
 
 // -- control factories --------------------------------------------------------
@@ -275,6 +256,7 @@ function linkControl(id) {
     keepFocus: true,
     attrs: { "data-action": "link" },
     enabled: hasDoc,
+    active: (ctx) => Boolean(ctx.docEditor?.getLinkInfo?.().inLink),
     content: linkPopover
   });
 }
