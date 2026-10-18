@@ -92,7 +92,8 @@ export function renderSlideSection(ctx, found, width = DEFAULT_SLIDE_WIDTH) {
   if (!slide) return missing("The slide is gone.");
   const size = content.size ?? { width: 1280, height: 720 };
   const scale = width / size.width;
-  const inner = renderSlide(slide, { size, scale });
+  const depth = ctx.depth ?? 0;
+  const inner = renderSlide(slide, { size, scale, ...staticReferenceHooks(ctx, found.containerId, depth + 1) });
   return h(
     "div",
     {
@@ -102,6 +103,20 @@ export function renderSlideSection(ctx, found, width = DEFAULT_SLIDE_WIDTH) {
     },
     [inner]
   );
+}
+
+/**
+ * Hooks that let a slide draw its reference objects and inline references read-only.
+ * @param {StaticContext} ctx
+ * @param {string} containerId The page the slide lives in.
+ * @param {number} depth
+ * @returns {{ renderReference: (object: any) => HTMLElement, renderInlineRef: (ref: any) => HTMLElement }}
+ */
+export function staticReferenceHooks(ctx, containerId, depth) {
+  return {
+    renderReference: (object) => renderReferenceBlock(ctx, containerId, object, depth),
+    renderInlineRef: (ref) => h("span", {}, [renderReferenceBlock(ctx, containerId, ref, depth)])
+  };
 }
 
 /**

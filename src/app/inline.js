@@ -177,3 +177,23 @@ export function modelLength(node) {
   }
   return total;
 }
+
+/**
+ * @param {Element} element
+ * @returns {number} Caret offset in model characters from the element start (the end when the caret is elsewhere).
+ */
+export function caretOffset(element) {
+  const doc = element.ownerDocument;
+  const selection = doc.getSelection?.();
+  if (!selection || selection.rangeCount === 0) return modelLength(element);
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.startContainer)) return modelLength(element);
+  const probe = doc.createRange();
+  probe.selectNodeContents(element);
+  try {
+    probe.setEnd(range.startContainer, range.startOffset);
+  } catch {
+    return modelLength(element);
+  }
+  return modelLength(probe.cloneContents());
+}

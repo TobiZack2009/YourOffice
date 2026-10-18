@@ -32,7 +32,7 @@ import { buildMenu, createPopoverHost } from "./popover.js";
 import { openExpressionEditor } from "./expression-editor.js";
 import { openReferencePicker } from "./reference-picker.js";
 import { createReferenceViews } from "./reference-view.js";
-import { mergeRuns, modelLength, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
+import { caretOffset, mergeRuns, modelLength, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../document/model.js").Block} Block */
@@ -133,26 +133,6 @@ function isRangeInside(editor) {
   if (!selection || selection.rangeCount === 0) return false;
   const node = selection.getRangeAt(0).startContainer;
   return editor.contains(node);
-}
-
-/**
- * @param {Element} element
- * @returns {number} Caret offset in characters from the element start.
- */
-function caretOffset(element) {
-  const doc = element.ownerDocument;
-  const selection = doc.getSelection?.();
-  if (!selection || selection.rangeCount === 0) return modelLength(element);
-  const range = selection.getRangeAt(0);
-  if (!element.contains(range.startContainer)) return modelLength(element);
-  const probe = doc.createRange();
-  probe.selectNodeContents(element);
-  try {
-    probe.setEnd(range.startContainer, range.startOffset);
-  } catch {
-    return modelLength(element);
-  }
-  return modelLength(probe.cloneContents());
 }
 
 /**

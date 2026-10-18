@@ -24,6 +24,10 @@ export const TEXT_PLACEHOLDER = "Click to add text";
  * @property {Document} [document]
  * @property {number} [scale] CSS scale applied to the slide element (origin top-left).
  * @property {boolean} [interactive] Adds editing affordances (placeholders, line hit areas).
+ * @property {(object: SlideObject) => HTMLElement | null} [renderReference] Draws the body of a
+ *   `reference` object (an embed or expression); without it a plain placeholder is drawn.
+ * @property {(ref: any) => HTMLElement | null} [renderInlineRef] Draws the body of an inline
+ *   reference inside a text body.
  */
 
 /**
@@ -100,7 +104,7 @@ export function renderObject(object, options = {}) {
 
   if (object.type === "shape") {
     element.appendChild(renderShapeSvg(doc, object));
-    if (object.text) element.appendChild(renderTextBody(doc, object, interactive));
+    if (object.text) element.appendChild(renderTextBody(doc, object, interactive, options));
   } else if (object.type === "line") {
     element.appendChild(renderLineSvg(doc, object, interactive));
   } else if (object.type === "image") {
@@ -110,10 +114,16 @@ export function renderObject(object, options = {}) {
     img.setAttribute("draggable", "false");
     if (object.src) img.setAttribute("src", object.src);
     element.appendChild(img);
+  } else if (object.type === "reference") {
+    const body = options.renderReference?.(object) ?? doc.createElement("div");
+    if (body.childNodes.length === 0) body.textContent = object.kind === "expression" ? "Expression" : "Reference";
+    body.classList.add("slide-reference");
+    body.dataset.role = "reference";
+    element.appendChild(body);
   } else if (object.type === "text") {
     if (object.fill) element.style.background = object.fill;
     if (object.stroke) element.style.outline = `${object.stroke.width}px solid ${object.stroke.color}`;
-    element.appendChild(renderTextBody(doc, object, interactive));
+    element.appendChild(renderTextBody(doc, object, interactive, options));
   }
   return element;
 }
@@ -122,9 +132,10 @@ export function renderObject(object, options = {}) {
  * @param {Document} doc
  * @param {SlideObject} object
  * @param {boolean} interactive
+ * @param {RenderSlideOptions} [options]
  * @returns {HTMLElement}
  */
-function renderTextBody(doc, object, interactive) {
+function renderTextBody(doc, object, interactive, options) {
   const body = object.text ?? { runs: [], fontSize: 32, color: "#1d1d1f", align: "left", valign: "top" };
   const element = doc.createElement("div");
   element.className = "slide-text";
@@ -133,7 +144,7 @@ function renderTextBody(doc, object, interactive) {
   element.style.color = body.color;
   element.style.textAlign = body.align;
   element.style.justifyContent = { top: "flex-start", middle: "center", bottom: "flex-end" }[body.valign] ?? "flex-start";
-  element.appendChild(renderRuns(body.runs, { document: doc }));
+  element.appendChild(renderRuns(body.runs, { document: doc, renderInlineRef: options?.renderInlineRef }));
   if (interactive && body.runs.length === 0 && object.type === "text") {
     element.dataset.placeholder = TEXT_PLACEHOLDER;
   }
