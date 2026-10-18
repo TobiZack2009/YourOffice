@@ -598,8 +598,13 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     words that are not an address takes the first match. A page destination is the ordinary link
     mark with href `#<pageId>` (`pageIdOfLink`, `pageLinkUrl`), so it edits, removes and splits like
     any link. Its card shows the page title with a go-to button (`options.navigate`), or "Page
-    removed"; Cmd/Ctrl+click goes straight to the page. The presentation link popover is still
-    address-only.
+    removed"; Cmd/Ctrl+click goes straight to the page. The presentation editor uses the same form
+    (`createLinkForm(close)`, shared by the ribbon Link button and the context menu's Link…): while
+    editing text it links the selection (a page is the anchor href `#<pageId>`), otherwise it links the
+    selected objects, mapping `#<pageId>` to the object link `{kind: "page", pageId}` and anything
+    else to `{kind: "url"}` (`getLinkUrl` / `getLinkInfo` map back; a slide link counts as linked but
+    has no address). The inspector's Link section is unchanged and is the only place to set a slide
+    link.
   - **Browser smoke (playwright-core, system Chrome).** Make a section from a paragraph, embed it
     on a slide, cross-page expression (`Budget!'Q1 Budget'!D2`), bad expression blocked with an
     explanation, delete the source and the embed survives, inline expression chip in a paragraph,
@@ -628,8 +633,8 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   `references-rewrite`, `references-catalog`, `references-commands`, `references-fit`,
   `app-references`, `app-block-references`, `app-inline-references`, `app-sheet-references`,
   `app-slide-references`, `app-presentation-references`, `app-links`, `references-multi-slide`.
-  **1057 tests green across 54 files**; the single-file build inlines JS + CSS into one
-  ~386 kB HTML.
+  **1063 tests green across 54 files**; the single-file build inlines JS + CSS into one
+  ~385 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 

@@ -48,6 +48,7 @@ import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { caretOffset, parseInlineRuns, runsEqual } from "./inline.js";
 import { markStateIn, setLinkIn, toggleMarkIn } from "./marks.js";
+import { buildLinkForm, linkPages, pageIdOfLink, pageLinkUrl } from "./link-form.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { createInspector } from "./inspector.js";
 import { createSlideStrip } from "./slide-strip.js";
@@ -1640,7 +1641,8 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       return setLinkIn(editing.host, url);
     }
     if (getSelectedObjects().length === 0) return false;
-    setObjectLink(url ? { kind: "url", url } : null);
+    const pageId = pageIdOfLink(url);
+    setObjectLink(!url ? null : pageId ? { kind: "page", pageId } : { kind: "url", url });
     return true;
   }
 
@@ -1652,7 +1654,39 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       return anchor?.getAttribute("href") ?? "";
     }
     const link = getSelectedObjects()[0]?.link;
+    if (link?.kind === "page") return pageLinkUrl(link.pageId);
     return link?.kind === "url" ? link.url : "";
+  }
+
+  /**
+   * What the link form needs: the address (a page is `#<pageId>`) and whether something is
+   * linked. A slide link counts as linked even though it has no address here.
+   * @returns {import("./link-form.js").LinkInfo}
+   */
+  function getLinkInfo() {
+    const url = getLinkUrl();
+    const slideLink = !editing && getSelectedObjects()[0]?.link?.kind === "slide";
+    const canLink = editing ? true : getSelectedObjects().length > 0;
+    return { canLink, inLink: url !== "" || slideLink, url, text: "", hasSelection: true, wholeBlocks: true };
+  }
+
+  /**
+   * The link form (web address or page) for the ribbon and the context menu. Applying links
+   * the selected text while editing, otherwise the selected objects.
+   * @param {() => void} close
+   * @returns {HTMLElement}
+   */
+  function createLinkForm(close) {
+    const form = buildLinkForm({
+      info: getLinkInfo(),
+      pages: linkPages(workspace),
+      onApply: ({ url }) => setLink(url),
+      onRemove: () => setLink(""),
+      close
+    });
+    // Keep typing in the form from reaching the editor's shortcuts.
+    form.addEventListener("keydown", (event) => event.stopPropagation());
+    return form;
   }
 
   const canEditText = () => getSelectedObjects().some(textCapable);
@@ -2081,34 +2115,9 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
 
   /** @param {{ x: number, y: number }} point */
   function openLinkPopover(point) {
-    const input = /** @type {HTMLInputElement} */ (h("input", {
-      class: "popover-input",
-      type: "url",
-      placeholder: "https://…",
-      value: getLinkUrl(),
-      "data-field": "link-url",
-      "aria-label": "Link address"
-    }));
-    const apply = h("button", { class: "popover-button is-primary", type: "button", "data-action": "link-apply", text: "Apply" });
-    const remove = h("button", { class: "popover-button", type: "button", "data-action": "link-remove", text: "Remove" });
-    const commit = () => {
-      popovers.close();
-      setObjectLink(input.value.trim() ? { kind: "url", url: input.value.trim() } : null);
-    };
-    apply.addEventListener("click", commit);
-    remove.addEventListener("click", () => {
-      popovers.close();
-      setObjectLink(null);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (/** @type {KeyboardEvent} */ (event).key === "Enter") {
-        event.preventDefault();
-        commit();
-      }
-      event.stopPropagation();
-    });
-    popovers.showAt(point, h("div", { class: "link-popover" }, [input, h("div", { class: "popover-buttons" }, [apply, remove])]), { class: "popover-dialog" });
-    input.focus();
+    const form = createLinkForm(() => popovers.close());
+    popovers.showAt(point, form, { class: "popover-dialog" });
+    form.querySelector("input")?.focus();
   }
 
   // -- keyboard ------------------------------------------------------------------------------------------
@@ -2314,6 +2323,8 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     markActive,
     setLink,
     getLinkUrl,
+    getLinkInfo,
+    createLinkForm,
     canEditText,
     getTextState,
     focus: () => stageArea.focus()

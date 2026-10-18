@@ -564,3 +564,69 @@ describe("images", () => {
     expect(editor.getSelection()).toEqual([image.id]);
   });
 });
+
+describe("link form", () => {
+  const openForm = (editor, id) => {
+    editor.selectObjects([id]);
+    objectEl(editor, id).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 150, clientY: 120 }));
+    document.querySelector('.popover [data-action="link"]').click();
+  };
+  const rows = () => [...document.querySelectorAll('[data-role="link-page"]')];
+
+  it("lists the workspace pages next to the address field", () => {
+    const { editor, a, ws } = setup();
+    ws.dispatch("createPage", { type: "document", title: "Notes" });
+    openForm(editor, a);
+    expect(rows().map((row) => row.textContent)).toEqual(["Deck", "Notes"]);
+  });
+
+  it("links the selected object to a picked page", () => {
+    const { editor, a, ws, object } = setup();
+    ws.dispatch("createPage", { type: "document", title: "Notes" });
+    const notes = ws.getPages().find((page) => page.title === "Notes").id;
+    openForm(editor, a);
+    rows().find((row) => row.textContent === "Notes").click();
+    document.querySelector(".popover-apply").click();
+    expect(object(a).link).toEqual({ kind: "page", pageId: notes });
+    expect(document.querySelector(".popover")).toBeNull();
+  });
+
+  it("links the object to a web address from the same field", () => {
+    const { editor, a, object } = setup();
+    openForm(editor, a);
+    const input = document.querySelector('[data-role="link-input"]');
+    input.value = "example.com";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".popover-apply").click();
+    expect(object(a).link).toEqual({ kind: "url", url: "https://example.com" });
+  });
+
+  it("opens on the linked page and removes the link", () => {
+    const { editor, a, ws, pageId, slideId, object } = setup();
+    ws.dispatch("createPage", { type: "document", title: "Notes" });
+    const notes = ws.getPages().find((page) => page.title === "Notes").id;
+    ws.dispatch("updateObject", { pageId, slideId, objectId: a, patch: { link: { kind: "page", pageId: notes } } });
+    editor.selectObjects([a]);
+    expect(editor.getLinkUrl()).toBe(`#${notes}`);
+    openForm(editor, a);
+    expect(document.querySelector('[data-role="link-input"]').value).toBe("Notes");
+    document.querySelector('[data-action="link-remove"]').click();
+    expect(object(a).link).toBeUndefined();
+  });
+
+  it("reports a slide link as linked, so it can be removed here", () => {
+    const { editor, a, ws, pageId, slideId } = setup();
+    ws.dispatch("updateObject", { pageId, slideId, objectId: a, patch: { link: { kind: "slide", slideId } } });
+    editor.selectObjects([a]);
+    expect(editor.getLinkInfo()).toMatchObject({ canLink: true, inLink: true, url: "" });
+  });
+
+  it("applies a page link through setLink", () => {
+    const { editor, a, ws, object } = setup();
+    ws.dispatch("createPage", { type: "document", title: "Notes" });
+    const notes = ws.getPages().find((page) => page.title === "Notes").id;
+    editor.selectObjects([a]);
+    editor.setLink(`#${notes}`);
+    expect(object(a).link).toEqual({ kind: "page", pageId: notes });
+  });
+});

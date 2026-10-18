@@ -800,38 +800,7 @@ const TRANSITION_DIRECTION_OPTIONS = [
  * @returns {HTMLElement}
  */
 function presentationLinkPopover(ctx, close) {
-  const editor = ctx.presentationEditor;
-  const input = /** @type {HTMLInputElement} */ (
-    h("input", {
-      class: "popover-input",
-      type: "url",
-      placeholder: "https://…",
-      "aria-label": "Link URL",
-      "data-role": "link-input",
-      value: editor?.getLinkUrl() ?? ""
-    })
-  );
-  const apply = h("button", { class: "popover-apply", type: "button", text: "Apply" });
-  const remove = h("button", { class: "popover-remove", type: "button", text: "Remove" });
-  apply.addEventListener("click", () => {
-    const value = input.value.trim();
-    close();
-    if (value) editor?.setLink(value);
-  });
-  remove.addEventListener("click", () => {
-    close();
-    editor?.setLink("");
-  });
-  input.addEventListener("keydown", (event) => {
-    const key = /** @type {KeyboardEvent} */ (event).key;
-    if (key === "Enter") {
-      event.preventDefault();
-      apply.click();
-    } else if (key === "Escape") {
-      close();
-    }
-  });
-  return h("div", { class: "popover-body" }, [input, h("div", { class: "popover-row" }, [apply, remove])]);
+  return ctx.presentationEditor?.createLinkForm(close) ?? h("div", { class: "popover-body" });
 }
 
 /**
