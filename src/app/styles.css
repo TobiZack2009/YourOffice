@@ -2341,6 +2341,10 @@ svg.icon {
   position: static;
 }
 
+.reference-table .sheet-table-name {
+  display: none;
+}
+
 .reference-slide {
   position: relative;
   overflow: hidden;
