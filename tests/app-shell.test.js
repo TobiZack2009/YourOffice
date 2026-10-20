@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { mountApp } from "../src/app/shell.js";
 
 /** @param {{ seed?: boolean }} [opts] */
 function setup(opts = {}) {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   let docPageId = null;
   if (opts.seed !== false) {
     ws.dispatch("createPage", { type: "document", title: "Doc" });
@@ -146,8 +144,7 @@ describe("contextual ribbon", () => {
 
   it("exports the workspace as JSON from the File tab", () => {
     const download = vi.fn();
-    const ws = Workspace.create({ title: "My Space" });
-    registerDocumentCommands(ws);
+    const ws = createWorkspace({ title: "My Space" });
     const root = document.createElement("div");
     document.body.append(root);
     mountApp(root, ws, { download });
@@ -379,8 +376,7 @@ describe("lifecycle", () => {
   });
 
   it("uses the confirm option to guard deletion", () => {
-    const ws = Workspace.create({ title: "W" });
-    registerDocumentCommands(ws);
+    const ws = createWorkspace({ title: "W" });
     ws.dispatch("createPage", { type: "document", title: "Doc" });
     const pageId = ws.getChildren(null)[0];
     const confirm = vi.fn(() => false);

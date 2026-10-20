@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createSidebar, planDrop } from "../src/app/sidebar.js";
 
 /** Workspace with a small tree: A( a1 ), B */
 function tree() {
-  const ws = Workspace.create({ title: "Tree" });
+  const ws = createWorkspace({ title: "Tree" });
   ws.dispatch("createPage", { type: "document", title: "A" });
   ws.dispatch("createPage", { type: "sheet", title: "B" });
   const [a, b] = ws.getChildren(null);

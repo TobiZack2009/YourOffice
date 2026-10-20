@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createObject } from "../src/presentation/model.js";
 import { createPresentationEditor } from "../src/app/presentation-editor.js";
 
@@ -9,8 +8,7 @@ import { createPresentationEditor } from "../src/app/presentation-editor.js";
  * client coordinates are slide coordinates.
  */
 function setup(options = {}) {
-  const ws = Workspace.create({ title: "W" });
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "presentation", title: "Deck" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("createSlide", { pageId, layout: "blank" });

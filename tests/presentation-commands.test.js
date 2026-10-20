@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createObject, validatePresentationContent } from "../src/presentation/model.js";
 
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "presentation", title: "Deck" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("createSlide", { pageId, layout: "blank" });

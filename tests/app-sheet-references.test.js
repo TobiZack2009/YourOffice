@@ -1,14 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createSheetEditor } from "../src/app/sheet-editor.js";
 import { clearNotice } from "../src/app/notice.js";
 
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerSheetCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "sheet", title: "Budget" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("createTable", { pageId, name: "Costs", rows: 4, columns: 3, x: 40, y: 30 });

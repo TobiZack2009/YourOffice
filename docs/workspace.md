@@ -24,6 +24,12 @@
 
 ## Store (`workspace/store.js`)
 
+A bare `Workspace` registers only the workspace commands; features are installed by
+`domain/installDomain`. `registerCommand(type, handler, { hot, selfManaged })` stores facts that
+hooks read through `commandMeta(type)`. `configureValidation({ contentValidators,
+integrityChecks })` sets the rules used by `setPageContent`, import and export (the domain
+supplies the full set; a bare store checks the envelope only).
+
 `Workspace` runs command dispatch inside transactions, rolls back by snapshot on throw,
 supports per-transaction undo/redo, tracks dirty state, emits `change` events and exposes
 `canUndo` / `canRedo` / `hasCommand` for the UI. `getFavorites()` returns favourite ids that
@@ -33,12 +39,14 @@ still exist.
 
 `createPage`, `renamePage`, `deletePage` (refuses to orphan children), `movePage` (cannot
 move under its own descendant), `renameWorkspace`, `setPageContent` (deep-copied content, validated for the page's type),
-`setFavorite` (undoable; `deletePage` prunes it). Page rename/move/delete hook into the
-reference rewrite and detach logic (`references.md`).
+`setFavorite` (undoable; `deletePage` prunes it). Page create/rename/move/delete are
+plain model edits; the reference rewrite and detach logic run from the reference hook
+(`references.md`).
 
 ## Import / export (`workspace/format.js`)
 
-`exportWorkspaceJSON` / `importWorkspaceJSON`, round-trip tested. Malformed or invalid input
+`exportWorkspaceJSON` / `importWorkspaceJSON(text, { validation, install })`, round-trip tested;
+`domain/` exports the fully configured pair. Malformed or invalid input
 (including malformed page content or an unsafe link) is rejected with `WorkspaceFormatError`;
 export validates first and refuses to write a corrupt workspace. Persistence (IndexedDB autosave) is Phase 7; for now
 the workspace is in memory with a dirty dot, and Cmd/Ctrl+S calls `markSaved`.

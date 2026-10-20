@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { CommandError } from "../src/core/errors.js";
 import { createPopoverHost } from "../src/app/popover.js";
 import { guard, showNotice, clearNotice } from "../src/app/notice.js";
@@ -29,10 +26,7 @@ import { ERR } from "../src/sheet/errors.js";
  * Deck (presentation) two blank slides
  */
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerSheetCommands(ws);
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   const page = (type, title) => {
     ws.dispatch("createPage", { type, title });
     const list = ws.getChildren(null);

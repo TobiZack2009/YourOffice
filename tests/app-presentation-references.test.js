@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createPresentationEditor } from "../src/app/presentation-editor.js";
 import { createObject } from "../src/presentation/model.js";
 import { clearNotice } from "../src/app/notice.js";
@@ -10,10 +7,7 @@ import { REF_CHAR } from "../src/document/model.js";
 import { getTabs } from "../src/app/ribbon-tabs.js";
 
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerSheetCommands(ws);
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   const page = (type, title) => {
     ws.dispatch("createPage", { type, title });
     const list = ws.getChildren(null);

@@ -35,29 +35,11 @@ import { findSection, locatorProblem } from "./sections.js";
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../workspace/store.js").Transaction} Transaction */
 
-/** Commands that cannot move, remove or add sections or references: no capture, no cycle check. */
-const HOT_COMMANDS = new Set([
-  "setBlockRuns",
-  "updateBlock",
-  "setCell",
-  "setObjectRuns",
-  "updateObject",
-  "updateObjects",
-  "setRowHeight",
-  "setColumnWidth",
-  "addAnimation",
-  "updateAnimation",
-  "deleteAnimation",
-  "moveAnimation",
-  "setSlideBackground",
-  "setSlideTransition",
-  "applyTransitionToAll",
-  "setFavorite",
-  "renameWorkspace"
-]);
+/** Page commands after which formula text that names pages must be respelled. */
+const RESPELLING_COMMANDS = new Set(["createPage", "renamePage", "movePage"]);
 
-/** Commands that handle their own section bookkeeping. */
-const SELF_MANAGED = new Set(["deletePage", "resizeSection"]);
+/** Registration facts of reference commands: `resizeSection` does its own section bookkeeping. */
+const COMMAND_META = { resizeSection: { selfManaged: true } };
 
 /**
  * @param {unknown} value
@@ -441,11 +423,16 @@ export const referenceCommands = {
  */
 export function registerReferenceCommands(store) {
   for (const [type, handler] of Object.entries(referenceCommands)) {
-    if (!store.hasCommand(type)) store.registerCommand(type, handler);
+    if (!store.hasCommand(type)) store.registerCommand(type, handler, COMMAND_META[type]);
   }
 
   store.aroundCommand((workspace, tx, type, payload) => {
-    const capture = HOT_COMMANDS.has(type) || SELF_MANAGED.has(type) ? null : captureSections(workspace._data);
+    const { hot, selfManaged } = workspace.commandMeta(type);
+    const capture = hot || selfManaged ? null : captureSections(workspace._data);
+
+    // A new page can start shadowing a name, and a rename or move changes which names are
+    // visible from where: formulas are respelled once the handler has run.
+    const respell = RESPELLING_COMMANDS.has(type) ? snapshotReferences(workspace._data) : null;
 
     // Deleting a page moves what other places still read into the detached store.
     /** @type {{ snapshot: ReturnType<typeof snapshotReferences>, doomed: Array<[string, any]> } | null} */
@@ -463,6 +450,7 @@ export function registerReferenceCommands(store) {
     return () => {
       const data = workspace._data;
       const touch = (/** @type {string} */ id) => touchContainer(workspace, tx, id);
+      if (respell) retargetReferences(data, respell, touch);
       if (deleting) {
         for (const [id, page] of deleting.doomed) {
           const content = page?.content;
@@ -477,7 +465,7 @@ export function registerReferenceCommands(store) {
         sweepDetached(data);
         if (Object.keys(data.detached).length === 0) delete data.detached;
       }
-      if (!HOT_COMMANDS.has(type) && hasSections(workspace)) {
+      if (!hot && hasSections(workspace)) {
         const loop = findReferenceCycle(data);
         if (loop) {
           throw new CommandError("That would make content show itself, directly or through other references.", "referenceCycle");

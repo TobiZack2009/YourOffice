@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createAnimation, createObject } from "../src/presentation/model.js";
 import { PREVIEW_STEP_PAUSE } from "../src/presentation/animation.js";
 import { createPresentationEditor } from "../src/app/presentation-editor.js";
@@ -9,8 +8,7 @@ import { createAnimationTimeline, effectLabel, formatMs, objectLabel } from "../
 
 /** jsdom has no layout, so client coordinates are slide coordinates (scale 1). */
 function setup(view = { inspector: true, snap: false, grid: false, timeline: true }) {
-  const ws = Workspace.create({ title: "W" });
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "presentation", title: "Deck" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("createSlide", { pageId, layout: "blank" });

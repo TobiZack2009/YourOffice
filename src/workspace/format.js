@@ -28,12 +28,14 @@ export function exportWorkspaceJSON(store, options = {}) {
 }
 
 /**
- * Parse + validate + migrate workspace JSON text, returning the store.
+ * Parse + validate + migrate workspace JSON text, returning the store. Without `validation`
+ * only the envelope is checked; `domain/` supplies the full rules and installs the features.
  * @param {string} text
+ * @param {{ validation?: import("./schema.js").ValidationOptions, install?: (workspace: Workspace) => Workspace }} [options]
  * @returns {Workspace}
  * @throws {WorkspaceFormatError} On malformed JSON or schema violations.
  */
-export function importWorkspaceJSON(text) {
+export function importWorkspaceJSON(text, options = {}) {
   let data;
   try {
     data = JSON.parse(text);
@@ -42,7 +44,8 @@ export function importWorkspaceJSON(text) {
       `not valid JSON: ${error instanceof Error ? error.message : String(error)}`
     );
   }
-  return Workspace.fromJSON(data);
+  const workspace = Workspace.fromJSON(data, { validation: options.validation });
+  return options.install ? options.install(workspace) : workspace;
 }
 
 /**

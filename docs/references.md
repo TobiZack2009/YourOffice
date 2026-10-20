@@ -55,7 +55,10 @@ is described in `formulas.md`.
   missing target and type mismatch. Errors after insertion render as an error chip with an
   explanation and are flagged in "Show references".
 - `aroundCommand` hooks capture and heal section locators around block commands, sweep the
-  detached store and run the cycle check. `HOT_COMMANDS` (such as typing) skip them.
+  detached store and run the cycle check. Commands registered `hot` (typing, dragging) skip
+  them and `selfManaged` ones (`deletePage`, `resizeSection`) skip the capture; the same hook
+  respells formulas after `createPage`, `renamePage` and `movePage`, and moves the contents of
+  deleted pages into the detached store.
 - `references/index.js` (pure): reverse index of embeds, expressions and formulas with
   counts; `wouldCycle`; `validateReference`. Cycles are checked at insertion, expression
   edits, dragging blocks into a section that references them, and workspace import. Embed

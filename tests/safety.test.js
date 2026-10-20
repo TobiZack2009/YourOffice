@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { importWorkspaceJSON, exportWorkspaceJSON } from "../src/workspace/format.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace, exportWorkspaceJSON, importWorkspaceJSON } from "../src/domain/index.js";
 import { ensureDocumentContent, validateBlock } from "../src/document/model.js";
 import { ensureSheetContent } from "../src/sheet/model.js";
 import { ensurePresentationContent, validateObject } from "../src/presentation/model.js";
@@ -12,8 +8,7 @@ import { parseInlineRuns } from "../src/app/inline.js";
 import { CommandError, WorkspaceFormatError } from "../src/core/errors.js";
 
 function workspaceWithDocument(runs) {
-  const ws = Workspace.create({ title: "Safety" });
-  registerDocumentCommands(ws);
+  const ws = createWorkspace({ title: "Safety" });
   ws.dispatch("createPage", { type: "document", title: "Doc" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "x" }] } });
@@ -60,14 +55,14 @@ describe("unsafe links", () => {
 
 describe("content validation at the boundaries", () => {
   it("setPageContent rejects content that does not fit the page type", () => {
-    const ws = Workspace.create({ title: "T" });
+    const ws = createWorkspace({ title: "T" });
     ws.dispatch("createPage", { type: "sheet" });
     const pageId = ws.getChildren(null)[0];
     expect(() => ws.dispatch("setPageContent", { pageId, content: { blocks: {} } })).toThrow(CommandError);
   });
 
   it("import rejects malformed page content", () => {
-    const ws = Workspace.create({ title: "T" });
+    const ws = createWorkspace({ title: "T" });
     ws.dispatch("createPage", { type: "presentation" });
     const json = JSON.parse(exportWorkspaceJSON(ws));
     const pageId = Object.keys(json.pages)[0];
@@ -76,13 +71,13 @@ describe("content validation at the boundaries", () => {
   });
 
   it("import accepts a page that has no content yet", () => {
-    const ws = Workspace.create({ title: "T" });
+    const ws = createWorkspace({ title: "T" });
     ws.dispatch("createPage", { type: "document" });
     expect(() => importWorkspaceJSON(exportWorkspaceJSON(ws))).not.toThrow();
   });
 
   it("export refuses to write a corrupt workspace", () => {
-    const ws = Workspace.create({ title: "T" });
+    const ws = createWorkspace({ title: "T" });
     ws.dispatch("createPage", { type: "document" });
     const pageId = ws.getChildren(null)[0];
     ws._data.pages[pageId].content = { oops: true };

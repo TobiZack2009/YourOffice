@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { TableEngines } from "../src/sheet/table-engine.js";
 
 function setup() {
-  const ws = Workspace.create({ title: "S" });
-  registerSheetCommands(ws);
+  const ws = createWorkspace({ title: "S" });
   ws.dispatch("createPage", { type: "sheet", title: "Sheet" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("createTable", { pageId, name: "Budget", rows: 6, columns: 4 });

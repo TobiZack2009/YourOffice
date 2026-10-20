@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createQuickFind, findPages } from "../src/app/quick-find.js";
 
 function tree() {
-  const ws = Workspace.create({ title: "W" });
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "document", title: "Meeting Notes" });
   ws.dispatch("createPage", { type: "sheet", title: "Budget" });
   const [notes] = ws.getChildren(null);

@@ -685,12 +685,15 @@ export const documentCommands = {
   }
 };
 
+/** Commands that cannot add or remove structure others depend on; hooks skip their heavy checks for them. */
+const DOCUMENT_HOT = new Set(["setBlockRuns", "updateBlock"]);
+
 /**
  * Wire the document command set into a store.
  * @param {Workspace} store
  */
 export function registerDocumentCommands(store) {
   for (const [type, handler] of Object.entries(documentCommands)) {
-    store.registerCommand(type, handler);
+    store.registerCommand(type, handler, { hot: DOCUMENT_HOT.has(type) });
   }
 }

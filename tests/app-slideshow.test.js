@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createAnimation, createObject } from "../src/presentation/model.js";
 import { createSlideshow } from "../src/app/slideshow.js";
 import { mountApp } from "../src/app/shell.js";
@@ -10,8 +9,7 @@ import { mountApp } from "../src/app/shell.js";
  * a second click step; slide 2 has a fade transition; slide 3 has nothing special.
  */
 function deck() {
-  const ws = Workspace.create({ title: "W" });
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "presentation", title: "Deck" });
   const pageId = ws.getChildren(null)[0];
   for (let i = 0; i < 3; i += 1) ws.dispatch("createSlide", { pageId, layout: "blank" });
@@ -215,8 +213,7 @@ describe("slide show", () => {
   });
 
   it("returns null for a presentation without slides", () => {
-    const ws = Workspace.create({ title: "W" });
-    registerPresentationCommands(ws);
+    const ws = createWorkspace({ title: "W" });
     ws.dispatch("createPage", { type: "presentation", title: "Empty" });
     expect(createSlideshow(ws, ws.getChildren(null)[0])).toBeNull();
   });

@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { cellKey, getCell } from "../src/sheet/model.js";
 import { CommandError } from "../src/core/errors.js";
 
 function setup() {
-  const ws = Workspace.create({ title: "S" });
-  registerSheetCommands(ws);
+  const ws = createWorkspace({ title: "S" });
   ws.dispatch("createPage", { type: "sheet", title: "Sheet" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("createTable", { pageId, name: "Budget", rows: 5, columns: 3 });
@@ -41,8 +39,7 @@ describe("createTable", () => {
   });
 
   it("rejects creating on a non-sheet page", () => {
-    const ws = Workspace.create({ title: "W" });
-    registerSheetCommands(ws);
+    const ws = createWorkspace({ title: "W" });
     ws.dispatch("createPage", { type: "document", title: "Doc" });
     const pageId = ws.getChildren(null)[0];
     expect(() => ws.dispatch("createTable", { pageId })).toThrow(CommandError);

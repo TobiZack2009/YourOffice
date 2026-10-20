@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
+import { createWorkspace, validateDomain } from "../src/domain/index.js";
 import { createObject } from "../src/presentation/model.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
-import { validateWorkspace } from "../src/workspace/schema.js";
 import {
   findSection,
   findSectionByLocator,
@@ -19,9 +16,7 @@ import { renderSectionById } from "../src/app/reference-render.js";
 
 /** Deck: s1 s2 s3 s4 (each with a text box naming it). Notes: an empty document. */
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "presentation", title: "Deck" });
   ws.dispatch("createPage", { type: "document", title: "Notes" });
   const [deck, notes] = ws.getChildren(null);
@@ -106,7 +101,7 @@ describe("deleting slides under a multi-slide section", () => {
     expect(page().content.sections.trio.locator).toEqual({ slideId: "s1", slideIds: ["s1", "s3"] });
     ws.dispatch("deleteSlide", { pageId: deck, slideId: "s1" });
     expect(page().content.sections.trio.locator).toEqual({ slideId: "s3" });
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 
   it("detaches every slide when all of them go in one command, if something reads the section", () => {
@@ -120,7 +115,7 @@ describe("deleting slides under a multi-slide section", () => {
     expect(found.container.content.slideOrder).toEqual(["s2", "s3"]);
     expect(Object.keys(found.container.content.slides).sort()).toEqual(["s2", "s3"]);
     expect(found.container.content.sections.pair.locator).toEqual({ slideId: "s2", slideIds: ["s2", "s3"] });
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
     ws.undo();
     expect(raw().detached).toBeUndefined();
     expect(findSection(raw(), "pair").detached).toBeFalsy();
@@ -145,7 +140,7 @@ describe("deleting slides under a multi-slide section", () => {
     const b = findSection(raw(), "b");
     expect(a.detached && b.detached).toBe(true);
     expect(a.containerId).toBe(b.containerId);
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 
   it("refuses to delete every slide", () => {

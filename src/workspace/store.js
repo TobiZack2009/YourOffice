@@ -15,10 +15,6 @@ import {
   migrateWorkspace
 } from "./schema.js";
 import { registerWorkspaceCommands } from "./commands.js";
-import { registerReferenceCommands } from "../references/commands.js";
-import { validateDocumentContent } from "../document/model.js";
-import { validateSheetContent } from "../sheet/model.js";
-import { validatePresentationContent } from "../presentation/model.js";
 
 /** @typedef {import("./schema.js").PageEnvelope} PageEnvelope */
 /** @typedef {import("./schema.js").PageType} PageType */
@@ -33,6 +29,8 @@ import { validatePresentationContent } from "../presentation/model.js";
  * @property {{ type: string, payload: unknown }[]} commands Applied in order.
  * @property {Set<string>} pageIds Page ids touched, for targeted rerenders.
  */
+
+/** @typedef {{ hot: boolean, selfManaged: boolean }} CommandMeta */
 
 /** @typedef {{ id: string, label: string, commands: string[], before: WorkspaceDocument, after: WorkspaceDocument, pageIds: string[] }} HistoryEntry */
 
@@ -89,23 +87,33 @@ export class Workspace {
     this._commandHooks = [];
 
     /**
-     * Content validators per page type, used on import, export and setPageContent.
-     * @type {Partial<Record<PageType, (content: unknown) => string[]>>}
+     * Per-command registration facts, read by cross-cutting hooks (see `registerCommand`).
+     * @type {Map<string, CommandMeta>}
      */
-    this._contentValidators = {
-      document: validateDocumentContent,
-      sheet: validateSheetContent,
-      presentation: validatePresentationContent
-    };
+    this._commandMeta = new Map();
 
-    // Built-in commands are registered here; engine code may add more later.
+    /**
+     * What a full workspace check adds to the envelope check: content validators per page
+     * type and integrity checks. Empty until a composition root (`domain/`) configures it.
+     * @type {import("./schema.js").ValidationOptions}
+     */
+    this._validation = {};
+
+    // Only the workspace's own commands; features register theirs through `domain/installDomain`.
     registerWorkspaceCommands(this);
-    registerReferenceCommands(this);
   }
 
   /** @returns {import("./schema.js").ValidationOptions} What a full workspace check needs. */
   get validationOptions() {
-    return { contentValidators: this._contentValidators };
+    return this._validation;
+  }
+
+  /**
+   * Set the content validators and integrity checks used by import, export and `setPageContent`.
+   * @param {import("./schema.js").ValidationOptions} options
+   */
+  configureValidation(options) {
+    this._validation = options;
   }
 
   /**
@@ -115,7 +123,7 @@ export class Workspace {
    * @returns {string[]}
    */
   validateContent(type, content) {
-    return this._contentValidators[type]?.(content) ?? [];
+    return this._validation.contentValidators?.[type]?.(content) ?? [];
   }
 
   // -- construction -----------------------------------------------------------
@@ -136,11 +144,14 @@ export class Workspace {
   /**
    * Rehydrate a workspace from serialized JSON.
    * @param {unknown} json Parsed JSON.
+   * @param {{ validation?: import("./schema.js").ValidationOptions }} [options]
+   *   Content validators and integrity checks; without them only the envelope is checked.
    * @returns {Workspace}
    * @throws {WorkspaceFormatError} On invalid or unmigratable data.
    */
-  static fromJSON(json) {
+  static fromJSON(json, options = {}) {
     const workspace = new Workspace();
+    workspace.configureValidation(options.validation ?? {});
     const migrated = migrateWorkspace(json, workspace.validationOptions);
     if (migrated.data === null) {
       throw new WorkspaceFormatError(migrated.errors.join("; "));
@@ -324,12 +335,26 @@ export class Workspace {
    * @param {(store: Workspace, tx: Transaction, payload: unknown) => void} handler
    *   Validates, then mutates `store._data`, recording touched page ids in
    *   `tx.pageIds`. Throw CommandError on invalid payload.
+   * @param {Partial<CommandMeta>} [meta]
+   *   `hot`: cannot move, add or remove structure other content depends on (typing, dragging),
+   *   so cross-cutting hooks skip their expensive checks. `selfManaged`: the handler does its own
+   *   bookkeeping for that structure, so hooks do not capture for it.
    */
-  registerCommand(type, handler) {
+  registerCommand(type, handler, meta = {}) {
     if (this._commands.has(type)) {
       throw new Error(`command "${type}" is already registered`);
     }
     this._commands.set(type, handler);
+    this._commandMeta.set(type, { hot: meta.hot === true, selfManaged: meta.selfManaged === true });
+  }
+
+  /**
+   * Registration facts of a command (both false for an unknown type).
+   * @param {string} type
+   * @returns {CommandMeta}
+   */
+  commandMeta(type) {
+    return this._commandMeta.get(type) ?? { hot: false, selfManaged: false };
   }
 
   /**

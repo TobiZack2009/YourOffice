@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { TableEngines } from "../src/sheet/table-engine.js";
 
 /**
@@ -9,8 +8,7 @@ import { TableEngines } from "../src/sheet/table-engine.js";
  * Report (sheet)     table  Main
  */
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerSheetCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   const page = (title, parentId) => {
     ws.dispatch("createPage", { type: "sheet", title, ...(parentId ? { parentId } : {}) });
     const list = ws.getChildren(parentId ?? null);

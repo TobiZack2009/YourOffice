@@ -25,7 +25,7 @@ The page editor is the whole canvas (no max-width card): `.app` fills `#app`, an
 
 ## Shell (`shell.js`)
 
-`mountApp(root, workspace, options)` builds sidebar, title strip, ribbon and canvas. It owns
+`mountApp(root, workspace, options)` installs the domain on the workspace (idempotent) and builds sidebar, title strip, ribbon and canvas. It owns
 page selection, recreates the editor per page, maps sidebar actions to workspace commands
 (create seeds a starter paragraph) and holds the state that must survive a remount (current
 slide per page via `lastSlideByPage`, presentation view toggles, clipboard, active slide

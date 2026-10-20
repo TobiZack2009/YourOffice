@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
-import { validateWorkspace } from "../src/workspace/schema.js";
+import { createWorkspace, workspaceFromJSON, validateDomain } from "../src/domain/index.js";
 import { findSection } from "../src/references/sections.js";
 import { findReferenceHost } from "../src/references/hosts.js";
 import { TableEngines } from "../src/sheet/table-engine.js";
@@ -15,10 +11,7 @@ import { TableEngines } from "../src/sheet/table-engine.js";
  * Deck (presentation) one slide
  */
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerSheetCommands(ws);
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   const page = (type, title, parentId) => {
     ws.dispatch("createPage", { type, title, ...(parentId ? { parentId } : {}) });
     const list = ws.getChildren(parentId ?? null);
@@ -93,7 +86,7 @@ describe("createSection", () => {
       locator: { tableId: costs, range: { start: { col: 0, row: 0 }, end: { col: 1, row: 1 } } }
     });
     expect(ws.getPage(data).content.sections.t.implicit).toBe(true);
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 });
 
@@ -159,7 +152,7 @@ describe("insertReference", () => {
     embed(deck, "sec1", { slideId: "s1", instanceId: "obj1", x: 10, y: 20 });
     const object = ws.getPage(deck).content.slides.s1.objects.obj1;
     expect(object).toMatchObject({ type: "reference", kind: "embed", sectionId: "sec1", x: 10, y: 20 });
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 });
 
@@ -265,7 +258,7 @@ describe("range sections", () => {
     expect(ws.getPage(data).content.sections.r.locator.range).toEqual(range(0, 2, 2, 3));
     ws.dispatch("deleteRow", { pageId: data, tableId: costs, index: 2, count: 2 });
     expect(ws.getPage(data).content.sections.r).toBeUndefined();
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 });
 
@@ -282,7 +275,7 @@ describe("detached content", () => {
     expect(found.container.origin.pageId).toBe(notes);
     expect(found.container.content.blockOrder).toEqual(["b2"]);
     expect(found.container.content.blocks.b2.runs).toEqual([{ text: "two" }]);
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 
   it("discards the entry, in the same transaction, when the last reader goes; undo brings it back", () => {
@@ -310,7 +303,7 @@ describe("detached content", () => {
     ws.dispatch("deleteBlock", { pageId: other, blockId: "refInner" });
     expect(findSection(raw(), "inner")).not.toBeNull();
     expect(findSection(raw(), "outer").detached).toBe(true);
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
 
     ws.dispatch("removeReference", { pageId: reader, instanceId: "refOuter" });
     expect(raw().detached).toBeUndefined();
@@ -361,7 +354,7 @@ describe("detached content", () => {
     expect(raw().detached).toBeUndefined();
     expect(findSection(raw(), "sec1").containerId).toBe(home);
     expect(blocks(home).slice(0, 3)).toEqual(expect.arrayContaining(["b1", "b2"]));
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
 
     // The wrong kind of page is refused.
     ws.dispatch("deletePage", { pageId: home });
@@ -401,11 +394,11 @@ describe("workspace validation", () => {
     section(notes, "Intro", { startBlockId: "b1", endBlockId: "b2" }, "sec1");
     const broken = ws.serialized;
     broken.pages[notes].content.sections.sec1.locator.endBlockId = "ghost";
-    expect(validateWorkspace(broken).errors.join(" ")).toMatch(/sec1/);
+    expect(validateDomain(broken).errors.join(" ")).toMatch(/sec1/);
 
     const looped = ws.serialized;
     looped.pages[notes].content.blocks.b2 = { id: "b2", type: "sectionRef", kind: "embed", sectionId: "sec1", display: {} };
-    expect(validateWorkspace(looped).errors.join(" ")).toMatch(/loop/);
+    expect(validateDomain(looped).errors.join(" ")).toMatch(/loop/);
   });
 
   it("round-trips through JSON with detached content", () => {
@@ -413,7 +406,7 @@ describe("workspace validation", () => {
     section(notes, "Intro", { startBlockId: "b1", endBlockId: "b1" }, "sec1");
     embed(other, "sec1", { instanceId: "ref1" });
     ws.dispatch("deleteBlock", { pageId: notes, blockId: "b1" });
-    const again = Workspace.fromJSON(JSON.parse(JSON.stringify(ws.serialized)));
+    const again = workspaceFromJSON(JSON.parse(JSON.stringify(ws.serialized)));
     expect(findSection(again._data, "sec1").detached).toBe(true);
   });
 });
@@ -427,7 +420,7 @@ describe("tables, slides and pages that are read elsewhere", () => {
     expect(detached).toHaveLength(1);
     expect(detached[0].type).toBe("sheet");
     expect(detached[0].content.tables[costs].cells["0,0"]).toMatchObject({ value: 5 });
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
     ws.undo();
     expect(raw().detached).toBeUndefined();
   });
@@ -447,7 +440,7 @@ describe("tables, slides and pages that are read elsewhere", () => {
     expect(found.detached).toBe(true);
     expect(found.container.type).toBe("presentation");
     expect(found.container.content.slides.s1).toBeDefined();
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 
   it("deletePage detaches its sections that are read from other pages", () => {
@@ -458,7 +451,7 @@ describe("tables, slides and pages that are read elsewhere", () => {
     const found = findSection(raw(), "sec1");
     expect(found.detached).toBe(true);
     expect(found.container.content.blockOrder).toEqual(["b1", "b2", "b3"]);
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
     ws.undo();
     expect(findSection(raw(), "sec1").detached).toBeFalsy();
   });
@@ -476,7 +469,7 @@ describe("restoreDetached", () => {
     expect(raw().detached).toBeUndefined();
     expect(blocks(notes)).toContain("b1");
     expect(findSection(raw(), "sec1").detached).toBeFalsy();
-    expect(validateWorkspace(ws.serialized).valid).toBe(true);
+    expect(validateDomain(ws.serialized).valid).toBe(true);
   });
 });
 
@@ -485,19 +478,19 @@ describe("validateWorkspace and sections", () => {
     const { ws, notes } = setup();
     ws.dispatch("createSection", { pageId: notes, name: "A", sectionId: "sec1", locator: { startBlockId: "b1", endBlockId: "b2" } });
     const good = ws.serialized;
-    expect(validateWorkspace(good).valid).toBe(true);
+    expect(validateDomain(good).valid).toBe(true);
 
     const dangling = structuredClone(good);
     dangling.pages[notes].content.sections.sec1.locator.endBlockId = "zz";
-    expect(validateWorkspace(dangling).valid).toBe(false);
+    expect(validateDomain(dangling).valid).toBe(false);
 
     const unnamed = structuredClone(good);
     delete unnamed.pages[notes].content.sections.sec1.name;
-    expect(validateWorkspace(unnamed).valid).toBe(false);
+    expect(validateDomain(unnamed).valid).toBe(false);
 
     const clash = structuredClone(good);
     clash.detached = { [notes]: { id: notes, type: "document", origin: { pageId: "x" }, content: {} } };
-    expect(validateWorkspace(clash).valid).toBe(false);
+    expect(validateDomain(clash).valid).toBe(false);
   });
 
   it("rejects a workspace whose embeds loop", () => {
@@ -508,6 +501,6 @@ describe("validateWorkspace and sections", () => {
     const data = structuredClone(ws.serialized);
     data.pages[notes].content.blocks.loop = { id: "loop", type: "sectionRef", kind: "embed", sectionId: "secB" };
     data.pages[notes].content.blockOrder.splice(1, 0, "loop");
-    expect(validateWorkspace(data).valid).toBe(false);
+    expect(validateDomain(data).valid).toBe(false);
   });
 });

@@ -694,12 +694,15 @@ export const presentationCommands = {
   }
 };
 
+/** Commands that cannot add or remove structure others depend on; hooks skip their heavy checks for them. */
+const PRESENTATION_HOT = new Set(["setObjectRuns", "updateObject", "updateObjects", "addAnimation", "updateAnimation", "deleteAnimation", "moveAnimation", "setSlideBackground", "setSlideTransition", "applyTransitionToAll"]);
+
 /**
  * Wire presentation commands into a store.
  * @param {Workspace} store
  */
 export function registerPresentationCommands(store) {
   for (const [type, handler] of Object.entries(presentationCommands)) {
-    store.registerCommand(type, handler);
+    store.registerCommand(type, handler, { hot: PRESENTATION_HOT.has(type) });
   }
 }

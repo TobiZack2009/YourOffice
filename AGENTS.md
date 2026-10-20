@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Next: Phase 7
 (persistence/interchange), then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1104 tests green across 56 files; the single-file build is ~399 kB.** Update these two
+**1135 tests green across 60 files; the single-file build is ~407 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -40,6 +40,7 @@ src/
   document/      block model, commands, renderer
   presentation/  slide model, commands, geometry, animation/slideshow logic, renderer
   references/    scope, sections, reference commands, detached store, fit rule
+  domain/        composition root (installDomain, createWorkspace, full validation rules)
   app/           shell, ribbon, sidebar, editors, popovers
   main.js        vite entry
 docs/            spec and the docs below

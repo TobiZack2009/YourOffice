@@ -6,11 +6,8 @@
  * open page's type (see ribbon-tabs.js).
  */
 
-import { registerDocumentCommands } from "../document/commands.js";
-import { registerSheetCommands } from "../sheet/commands.js";
-import { registerPresentationCommands } from "../presentation/commands.js";
 import { createId } from "../core/ids.js";
-import { exportWorkspaceJSON, importWorkspaceJSON } from "../workspace/format.js";
+import { exportWorkspaceJSON, importWorkspaceJSON, installDomain } from "../domain/index.js";
 import { createSidebar } from "./sidebar.js";
 import { createDocumentEditor } from "./block-editor.js";
 import { createSheetEditor } from "./sheet-editor.js";
@@ -70,9 +67,7 @@ function fileStem(title) {
  * }} [options]
  */
 export function mountApp(root, workspace, options = {}) {
-  if (!workspace.hasCommand("insertBlock")) registerDocumentCommands(workspace);
-  if (!workspace.hasCommand("createTable")) registerSheetCommands(workspace);
-  if (!workspace.hasCommand("createSlide")) registerPresentationCommands(workspace);
+  installDomain(workspace);
 
   /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, zoom: number, slideshow: import("./slideshow.js").SlideshowHandle | null }} */
   const state = { selectedPageId: null, editor: null, sheetEditor: null, presentationEditor: null, zoom: 100, slideshow: null };

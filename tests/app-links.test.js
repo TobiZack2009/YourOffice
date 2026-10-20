@@ -1,13 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createDocumentEditor } from "../src/app/block-editor.js";
 import { buildLinkForm, linkPages, normalizeLinkUrl, pageIdOfLink, pageLinkUrl } from "../src/app/link-form.js";
 
 /** @param {Array<Record<string, unknown>>} blocks */
 function setup(blocks, options = {}) {
-  const ws = Workspace.create({ title: "Doc" });
-  registerDocumentCommands(ws);
+  const ws = createWorkspace({ title: "Doc" });
   ws.dispatch("createPage", { type: "document", title: "Doc" });
   const pageId = ws.getChildren(null)[0];
   for (const block of blocks) ws.dispatch("insertBlock", { pageId, block });

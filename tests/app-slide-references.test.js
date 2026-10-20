@@ -1,16 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createPresentationEditor } from "../src/app/presentation-editor.js";
 import { createSlideStrip } from "../src/app/slide-strip.js";
 import { createPopoverHost } from "../src/app/popover.js";
 import { clearNotice } from "../src/app/notice.js";
 
 function setup(options = {}) {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   ws.dispatch("createPage", { type: "presentation", title: "Deck" });
   ws.dispatch("createPage", { type: "document", title: "Notes" });
   const [pageId, docId] = ws.getChildren(null);
@@ -32,8 +28,7 @@ afterEach(() => {
 
 describe("slide strip handle", () => {
   function strip(extra = {}) {
-    const ws = Workspace.create({ title: "W" });
-    registerPresentationCommands(ws);
+    const ws = createWorkspace({ title: "W" });
     ws.dispatch("createPage", { type: "presentation", title: "Deck" });
     const pageId = ws.getChildren(null)[0];
     ws.dispatch("createSlide", { pageId, layout: "blank", slideId: "s1" });
@@ -136,8 +131,7 @@ describe("presentation slide handle", () => {
 
 describe("slide strip selection", () => {
   function strip(extra = {}) {
-    const ws = Workspace.create({ title: "W" });
-    registerPresentationCommands(ws);
+    const ws = createWorkspace({ title: "W" });
     ws.dispatch("createPage", { type: "presentation", title: "Deck" });
     const pageId = ws.getChildren(null)[0];
     for (const slideId of ["s1", "s2", "s3", "s4"]) ws.dispatch("createSlide", { pageId, layout: "blank", slideId });

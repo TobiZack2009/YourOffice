@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { CommandError } from "../src/core/errors.js";
 
 /** Store with document commands + one document page. */
 function setup() {
-  const ws = Workspace.create({ title: "Docs" });
-  registerDocumentCommands(ws);
+  const ws = createWorkspace({ title: "Docs" });
   ws.dispatch("createPage", { type: "document", title: "Notes" });
   const pageId = ws.getChildren(null)[0];
   return { ws, pageId };

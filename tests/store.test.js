@@ -301,16 +301,6 @@ describe("setPageContent command", () => {
     expect(ws.getPage(id)?.content).toEqual({ tables: {}, tableOrder: [] });
   });
 
-  it("rejects content that is malformed for the page type", () => {
-    const ws = Workspace.create();
-    ws.dispatch("createPage", { type: "document" });
-    const id = ws.getChildren(null)[0];
-    expect(() => ws.dispatch("setPageContent", { pageId: id, content: { tables: {} } })).toThrow(
-      /invalid document content/
-    );
-    expect(ws.getPage(id)?.content).toBeUndefined();
-  });
-
   it("rejects non-object content", () => {
     const ws = Workspace.create();
     ws.dispatch("createPage", { type: "sheet" });

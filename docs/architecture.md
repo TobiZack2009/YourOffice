@@ -34,16 +34,31 @@ src/
   document/      block model, block commands, DOM renderer
   presentation/  slide model, layouts, commands, geometry, animation/slideshow logic, renderer
   references/    scope, sections, reference commands, detached store, fit rule, cross-table rewrites
+  domain/        composition root: installs every feature on a workspace, owns the full validation rules
   app/           shell UI, ribbon, sidebar, editors, popovers, glue
   main.js        vite entry, mounts the shell
 index.html       dev/build shell; vite-plugin-singlefile bundles it into one HTML
 tests/           vitest suites, named after the module they cover
 ```
 
-Layering: `workspace` knows nothing about editors. Each editor registers its commands
-separately (`registerDocumentCommands(store)`, `registerSheetCommands(store)`, ...), so the
-workspace layer never depends on an editor. Pure logic (geometry, scope, fit, slideshow
-steps) is kept apart from DOM code so it is unit-tested without events.
+Layering: `core` <- `workspace` <- `sheet | document | presentation` <- `references` <- `domain`
+<- `app` <- `main`. `workspace` and `core` import nothing from the features. A bare `Workspace`
+registers only the workspace commands and checks only the envelope; `domain/index.js` is the one
+place that wires the rest: `installDomain(workspace)` (idempotent) registers the document, sheet,
+presentation and reference commands, the reference hook and the content validators and integrity
+check; `createWorkspace`, `workspaceFromJSON` and `importWorkspaceJSON` return installed
+workspaces. The app and tests build workspaces through `domain`. Pure logic (geometry, scope,
+fit, slideshow steps) is kept apart from DOM code so it is unit-tested without events.
+
+`tests/architecture.test.js` scans import specifiers and enforces the table above. One known
+exception: `sheet` and `references` depend on each other (formula retargeting and reference
+lookup are shared); the test pins exactly which sheet files may import `references`.
+
+Cross-cutting behaviour hangs off command registration, not hand lists:
+`registerCommand(type, handler, { hot, selfManaged })` records whether a command is `hot`
+(cannot add, move or remove structure others depend on, so hooks skip their checks) or
+`selfManaged` (does its own section bookkeeping). The reference hook reads `commandMeta(type)`.
+Page create/rename/move respell formulas that name pages from that same hook.
 
 ## Key types
 

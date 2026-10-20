@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { defaultTabId, getTabs, EMBED_REASON, THEME_REASON } from "../src/app/ribbon-tabs.js";
 import { createRibbon } from "../src/app/ribbon.js";
 
@@ -102,7 +102,7 @@ describe("getTabs", () => {
 
 describe("createRibbon", () => {
   function setup() {
-    const workspace = Workspace.create({ title: "W" });
+    const workspace = createWorkspace({ title: "W" });
     const docEditor = { activeInfo: vi.fn(() => ({ type: "heading", level: 2 })), setActiveType: vi.fn(), toggleMark: vi.fn() };
     const sheetEditor = {
       canMerge: vi.fn(() => false),

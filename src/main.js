@@ -3,18 +3,12 @@
  */
 
 import "./app/styles.css";
-import { Workspace } from "./workspace/store.js";
-import { registerDocumentCommands } from "./document/commands.js";
-import { registerSheetCommands } from "./sheet/commands.js";
-import { registerPresentationCommands } from "./presentation/commands.js";
+import { createWorkspace } from "./domain/index.js";
 import { createId } from "./core/ids.js";
 /** @typedef {import("./workspace/store.js").Workspace} Workspace */
 import { mountApp } from "./app/shell.js";
 
-const workspace = Workspace.create({ title: "My Workspace" });
-registerDocumentCommands(workspace);
-registerSheetCommands(workspace);
-registerPresentationCommands(workspace);
+const workspace = createWorkspace({ title: "My Workspace" });
 
 workspace.transact("seed welcome document", () => {
   workspace.dispatch("createPage", { type: "document", title: "Welcome" });

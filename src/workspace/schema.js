@@ -6,8 +6,6 @@
  * and tests all exercise the same code path.
  */
 
-import { validateReferences } from "../references/integrity.js";
-
 /** @typedef {"document" | "sheet" | "presentation"} PageType */
 
 /** @type {"YourOffice-workspace"} */
@@ -102,9 +100,12 @@ function checkIdList(list, exists, what, errors) {
 }
 
 /**
- * What a caller adds on top of the envelope check: a content validator per page type.
+ * What a caller adds on top of the envelope check.
  * @typedef {object} ValidationOptions
  * @property {Partial<Record<PageType, (content: unknown) => string[]>>} [contentValidators]
+ *   One content validator per page type, run on every page that has content.
+ * @property {Array<(data: any) => string[]>} [integrityChecks]
+ *   Cross-page checks (sections, references), run once the rest of the document is sound.
  */
 
 /**
@@ -251,8 +252,10 @@ export function validateWorkspace(data, options = {}) {
     }
   }
 
-  // Sections, detached content and the references between them (only once the envelope is sound).
-  if (errors.length === 0) errors.push(...validateReferences(data));
+  // Cross-page integrity (sections, detached content, references), only once the rest is sound.
+  if (errors.length === 0) {
+    for (const check of options.integrityChecks ?? []) errors.push(...check(data));
+  }
 
   return { valid: errors.length === 0, errors };
 }

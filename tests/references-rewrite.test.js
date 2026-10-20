@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { CommandError } from "../src/core/errors.js";
 import { retargetReferences, snapshotReferences } from "../src/references/rewrite.js";
 
@@ -10,8 +9,7 @@ import { retargetReferences, snapshotReferences } from "../src/references/rewrit
  * Report (sheet)         table  Main, with the formulas under test
  */
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerSheetCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   const page = (title, parentId) => {
     ws.dispatch("createPage", { type: "sheet", title, ...(parentId ? { parentId } : {}) });
     const list = parentId ? ws.getChildren(parentId) : ws.getChildren(null);

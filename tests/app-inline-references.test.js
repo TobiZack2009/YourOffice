@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
-import { registerSheetCommands } from "../src/sheet/commands.js";
-import { registerPresentationCommands } from "../src/presentation/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import { createDocumentEditor } from "../src/app/block-editor.js";
 import { clearNotice } from "../src/app/notice.js";
 import { REF_CHAR, validateDocumentContent } from "../src/document/model.js";
@@ -55,10 +52,7 @@ describe("inline reference runs", () => {
 });
 
 function setup() {
-  const ws = Workspace.create({ title: "W" });
-  registerDocumentCommands(ws);
-  registerSheetCommands(ws);
-  registerPresentationCommands(ws);
+  const ws = createWorkspace({ title: "W" });
   const page = (type, title) => {
     ws.dispatch("createPage", { type, title });
     const list = ws.getChildren(null);

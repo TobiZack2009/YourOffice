@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Workspace } from "../src/workspace/store.js";
-import { registerDocumentCommands } from "../src/document/commands.js";
+import { createWorkspace } from "../src/domain/index.js";
 import {
   canIndentBlock,
   canIndentItem,
@@ -11,8 +10,7 @@ import {
 } from "../src/document/model.js";
 
 function setup() {
-  const ws = Workspace.create({ title: "Docs" });
-  registerDocumentCommands(ws);
+  const ws = createWorkspace({ title: "Docs" });
   ws.dispatch("createPage", { type: "document", title: "Notes" });
   const pageId = ws.getChildren(null)[0];
   ws.dispatch("setPageContent", { pageId, content: { blockOrder: [], blocks: {} } });

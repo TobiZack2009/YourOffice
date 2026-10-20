@@ -792,12 +792,15 @@ function overlaps(a, b) {
   );
 }
 
+/** Commands that cannot add or remove structure others depend on; hooks skip their heavy checks for them. */
+const SHEET_HOT = new Set(["setCell", "setRowHeight", "setColumnWidth"]);
+
 /**
  * Wire sheet commands into a store.
  * @param {Workspace} store
  */
 export function registerSheetCommands(store) {
   for (const [type, handler] of Object.entries(sheetCommands)) {
-    store.registerCommand(type, handler);
+    store.registerCommand(type, handler, { hot: SHEET_HOT.has(type) });
   }
 }
