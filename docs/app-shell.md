@@ -1,7 +1,7 @@
 # App shell, ribbon and sidebar
 
 `src/app/`: `shell.js`, `session.js`, `selection.js`, `keyboard.js`, `gesture.js`, `notice.js`,
-`history-scope.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
+`history-scope.js`, `demo-seed.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
 `icons.js`, `quick-find.js`, `dom.js`, `styles.css`.
 
 ## Layout
@@ -51,6 +51,10 @@ controls once per page type and tab and then only `update()`s state, and the sli
 thumbnail per slide id (patching number, `data-index`, current/selected). A thumbnail that draws
 references is redrawn on every pass because it reads other pages. The inspector already syncs
 values into existing inputs, and the animation timeline keeps its own focus handling.
+
+`options.persistence` (an autosave handle, injected by `main.js`) changes what the dirty dot
+means (changes not yet stored), makes Cmd+S flush with a "Saved" notice, and surfaces a failed
+write once. The returned handle has `notify(message)` for start-up messages.
 
 `notice.js` is `createNotice(getContainer)` -> `{ show, clear, guard }`; the shell creates one
 per mount and hands it to its editors (`options.notice`), so two mounted apps do not share

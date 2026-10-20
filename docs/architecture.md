@@ -35,14 +35,16 @@ src/
   presentation/  slide model, layouts, commands, geometry, animation/slideshow logic, renderer
   references/    scope, sections, reference commands, detached store, fit rule, cross-table rewrites
   domain/        composition root: installs every feature on a workspace, owns the full validation rules
-  app/           shell UI, ribbon, sidebar, editors, popovers, glue
+  app/           shell UI, ribbon, sidebar, editors, popovers, glue, demo seed
+  persistence/   storage adapters, autosave, restore (see persistence.md)
   main.js        vite entry, mounts the shell
 index.html       dev/build shell; vite-plugin-singlefile bundles it into one HTML
 tests/           vitest suites, named after the module they cover
 ```
 
 Layering: `core` <- `workspace` <- `sheet | document | presentation` <- `references` <- `domain`
-<- `app` <- `main`. `workspace` and `core` import nothing from the features. A bare `Workspace`
+<- `app` <- `main`; `persistence` sits beside `app` (it needs only `core`, `workspace`, `domain`) and
+is wired to it by `main`. `workspace` and `core` import nothing from the features. A bare `Workspace`
 registers only the workspace commands and checks only the envelope; `domain/index.js` is the one
 place that wires the rest: `installDomain(workspace)` (idempotent) registers the document, sheet,
 presentation and reference commands, the reference hook and the content validators and integrity

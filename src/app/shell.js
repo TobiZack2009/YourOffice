@@ -64,10 +64,22 @@ function fileStem(title) {
  *   download?: (filename: string, text: string) => void,
  *   onImport?: (workspace: Workspace) => void,
  *   onImportError?: (error: Error) => void,
- *   session?: import("./session.js").Session
- * }} [options] `session`: what the user is doing (open page, zoom, folds, selections); a fresh
+ *   session?: import("./session.js").Session,
+ *   persistence?: ShellPersistence
+ * }} [options] `persistence`: autosave (see `persistence/autosave.js`); when given, the dirty dot
+ *   means "not yet stored" and Cmd+S writes now. `session`: what the user is doing (open page, zoom, folds, selections); a fresh
  *   in-memory one by default, so a caller that wants it kept across loads passes a persisted one.
  */
+/**
+ * What the shell needs from autosave; passed in so `app/` does not import `persistence/`.
+ * @typedef {object} ShellPersistence
+ * @property {boolean} pending
+ * @property {string} status
+ * @property {Error | null} error
+ * @property {() => Promise<boolean>} flush
+ * @property {(listener: () => void) => () => void} subscribe
+ */
+
 export function mountApp(root, workspace, options = {}) {
   installDomain(workspace);
 
@@ -139,8 +151,16 @@ export function mountApp(root, workspace, options = {}) {
       workspace.redo();
     },
     save() {
-      workspace.markSaved();
-      updateChrome();
+      const persistence = options.persistence;
+      if (!persistence) {
+        workspace.markSaved();
+        updateChrome();
+        return;
+      }
+      void persistence.flush().then((stored) => {
+        notice.show(stored ? "Saved" : `Could not save: ${persistence.error?.message ?? "storage unavailable"}`, { kind: stored ? "info" : undefined });
+        updateStrip();
+      });
     },
     exportJSON() {
       const text = exportWorkspaceJSON(workspace);
@@ -449,7 +469,7 @@ export function mountApp(root, workspace, options = {}) {
   function updateStrip() {
     undoButton.disabled = !workspace.canUndo;
     redoButton.disabled = !workspace.canRedo;
-    dirtyDot.classList.toggle("is-dirty", workspace.dirty);
+    dirtyDot.classList.toggle("is-dirty", options.persistence ? options.persistence.pending : workspace.dirty);
     const onPresentation = pageType(workspace, selectedPageId()) === "presentation";
     playButton.style.display = onPresentation ? "" : "none";
     playButton.disabled = !state.presentationEditor?.getSlideId();
@@ -628,6 +648,17 @@ export function mountApp(root, workspace, options = {}) {
     { keys: "mod+s", run: () => shellApi.save() }
   ]);
 
+  /** @type {string} */
+  let lastPersistStatus = options.persistence?.status ?? "";
+  const unsubscribePersistence = options.persistence?.subscribe(() => {
+    updateStrip();
+    const status = options.persistence?.status ?? "";
+    if (status === "failed" && lastPersistStatus !== "failed") {
+      notice.show(`Changes could not be saved here: ${options.persistence?.error?.message ?? "storage unavailable"}. Export to keep them.`);
+    }
+    lastPersistStatus = status;
+  });
+
   // Open the page the session names if it still exists, else the first (or leave the empty state).
   const first = pageExists(workspace, selectedPageId()) ? selectedPageId() : (workspace.getChildren(null)[0] ?? null);
   openPage(first);
@@ -637,8 +668,11 @@ export function mountApp(root, workspace, options = {}) {
   renderMain();
 
   return {
+    /** @param {string} message @param {{ kind?: "info" }} [shown] */
+    notify: (message, shown) => void notice.show(message, shown),
     destroy() {
       unsubscribeChange();
+      unsubscribePersistence?.();
       if (ribbonFrame) cancelAnimationFrame(ribbonFrame);
       notice.clear();
       workspace.events.onError = previousOnError;

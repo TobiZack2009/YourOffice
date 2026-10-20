@@ -16,10 +16,10 @@ The product/technical spec is `docs/app.txt` (source of truth for requirements).
 ## Status
 
 Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, presentation
-with animations and slide show, sections/embeds/expression references). Next: Phase 7
-(persistence/interchange), then Phase 8 (standalone export). See `docs/roadmap.md`.
+with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
+done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1228 tests green across 68 files; the single-file build is ~423 kB.** Update these two
+**1248 tests green across 71 files; the single-file build is ~429 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -41,7 +41,8 @@ src/
   presentation/  slide model, commands, geometry, animation/slideshow logic, renderer
   references/    scope, sections, reference commands, detached store, fit rule
   domain/        composition root (installDomain, createWorkspace, full validation rules)
-  app/           shell, ribbon, sidebar, editors, popovers
+  app/           shell, ribbon, sidebar, editors, popovers, demo seed
+  persistence/   storage adapters (IndexedDB, memory), autosave, start-up restore
   main.js        vite entry
 docs/            spec and the docs below
 tests/           vitest suites
@@ -60,6 +61,7 @@ tests/           vitest suites
 | `docs/presentation.md` | Slides, editor, animations, slide show |
 | `docs/references.md` | Sections, embeds, expressions, scope, detached store, limitations |
 | `docs/app-shell.md` | Shell, ribbon, sidebar, popovers, icons |
+| `docs/persistence.md` | IndexedDB storage, autosave, recovery, start-up |
 | `docs/roadmap.md` | Phases and open items |
 
 ## Maintaining the docs

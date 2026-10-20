@@ -159,6 +159,11 @@ export class Workspace {
     registerWorkspaceCommands(this);
   }
 
+  /** @returns {number} Revision of the current state; it changes with every commit, undo and redo. */
+  get revision() {
+    return this.history.headRev;
+  }
+
   /** @returns {boolean} Unsaved-changes flag (spec §11): the head differs from the last saved revision. */
   get dirty() {
     return this.history.dirty;

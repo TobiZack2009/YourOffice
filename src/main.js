@@ -1,113 +1,29 @@
 /**
- * Vite entry: build a workspace, seed a small welcome document, mount the shell.
+ * Vite entry: open the last workspace from local storage (or the welcome workspace), keep it
+ * saved as the user works, and mount the shell.
  */
 
 import "./app/styles.css";
-import { createWorkspace } from "./domain/index.js";
-/** @typedef {import("./workspace/store.js").Workspace} Workspace */
 import { mountApp } from "./app/shell.js";
 import { createSession } from "./app/session.js";
+import { createDemoWorkspace } from "./app/demo-seed.js";
+import { openStorage } from "./persistence/storage.js";
+import { createAutosave, attachPageLifecycle } from "./persistence/autosave.js";
+import { restoreWorkspace, storagePointer } from "./persistence/restore.js";
 
-const workspace = createWorkspace({ title: "My Workspace" });
-
-workspace.transact("seed welcome document", () => {
-  const { pageId } = workspace.dispatch("createPage", { type: "document", title: "Welcome" });
-  workspace.dispatch("insertBlock", {
-    pageId,
-    block: { type: "heading", level: 1, runs: [{ text: "Welcome to YourOffice" }] }
-  });
-  workspace.dispatch("insertBlock", {
-    pageId,
-    block: {
-      type: "paragraph",
-      runs: [
-        { text: "Documents, " },
-        { text: "spreadsheets", marks: { bold: true } },
-        { text: " and presentations share one workspace, one hierarchy and one history." }
-      ]
-    }
-  });
-  workspace.dispatch("insertBlock", {
-    pageId,
-    block: {
-      type: "list",
-      ordered: false,
-      items: [
-        { id: "item-intro-1", runs: [{ text: "Select a block and use the toolbar to restyle it." }] },
-        { id: "item-intro-2", runs: [{ text: "Drag pages in the sidebar to nest them." }] }
-      ]
-    }
-  });
-});
-
-workspace.markSaved();
-
-workspace.transact("seed budget sheet", () => {
-  const { pageId: sheetId } = workspace.dispatch("createPage", { type: "sheet", title: "Budget" });
-  const { tableId } = workspace.dispatch("createTable", {
-    pageId: sheetId,
-    name: "Q1 Budget",
-    rows: 8,
-    columns: 4,
-    x: 32,
-    y: 32
-  });
-  const cells = [
-    [0, 0, "Item"],
-    [1, 0, "Cost"],
-    [2, 0, "Units"],
-    [3, 0, "Total"],
-    [0, 1, "Paper"],
-    [1, 1, 12],
-    [2, 1, 5],
-    [3, 1, "=B2*C2"],
-    [0, 2, "Ink"],
-    [1, 2, 30],
-    [2, 2, 2],
-    [3, 2, "=B3*C3"],
-    [2, 4, "Grand total"],
-    [3, 4, "=SUM(D2:D3)"]
-  ];
-  for (const [col, row, value] of cells) {
-    workspace.dispatch("setCell", {
-      pageId: sheetId,
-      tableId,
-      col: Number(col),
-      row: Number(row),
-      cell: typeof value === "number" ? { value } : { value: String(value) }
-    });
-  }
-});
-
-workspace.markSaved();
-
-workspace.transact("seed demo deck", () => {
-  const { pageId: deckId } = workspace.dispatch("createPage", { type: "presentation", title: "Kickoff deck" });
-  const { slideId: first } = workspace.dispatch("createSlide", { pageId: deckId, layout: "title" });
-  const { slideId: second } = workspace.dispatch("createSlide", { pageId: deckId, layout: "titleContent" });
-  const content = /** @type {any} */ (workspace.getPage(deckId)?.content);
-  const [titleId, subtitleId] = content.slides[first].objectOrder;
-  workspace.dispatch("setObjectRuns", { pageId: deckId, slideId: first, objectId: titleId, runs: [{ text: "YourOffice" }] });
-  workspace.dispatch("setObjectRuns", {
-    pageId: deckId,
-    slideId: first,
-    objectId: subtitleId,
-    runs: [{ text: "Documents, sheets and slides in one workspace" }]
-  });
-  const [heading, body] = content.slides[second].objectOrder;
-  workspace.dispatch("setObjectRuns", { pageId: deckId, slideId: second, objectId: heading, runs: [{ text: "Why local-first" }] });
-  workspace.dispatch("setObjectRuns", {
-    pageId: deckId,
-    slideId: second,
-    objectId: body,
-    runs: [{ text: "Your data stays on your machine" }]
-  });
-});
-
-workspace.markSaved();
+/** @typedef {import("./workspace/store.js").Workspace} Workspace */
 
 const root = document.getElementById("app");
 if (!root) throw new Error("missing #app element");
+
+/** @returns {Pick<Storage, "getItem" | "setItem">} localStorage, or an inert stand-in when blocked. */
+function localStore() {
+  try {
+    return window.localStorage;
+  } catch {
+    return { getItem: () => null, setItem: () => undefined };
+  }
+}
 
 /** Zoom, sidebar and ribbon preferences survive a reload; ids in it are checked on use. */
 function openSession() {
@@ -117,15 +33,79 @@ function openSession() {
     return createSession();
   }
 }
-const session = openSession();
 
-/** @type {ReturnType<typeof mountApp> | null} */
-let app = null;
+async function start() {
+  const session = openSession();
+  const pointer = storagePointer(localStore());
+  const { storage, fallback } = await openStorage();
+  const restored = await restoreWorkspace({ storage, pointer });
 
-/** @param {Workspace} current */
-function mount(current) {
-  app?.destroy();
-  app = mountApp(/** @type {HTMLElement} */ (root), current, { onImport: mount, session });
+  /** @type {string[]} */
+  const notices = [];
+  if (!storage.durable) {
+    notices.push(
+      `This page cannot keep your work between visits (${fallback?.message ?? "no storage"}). Use File > Export to save it.`
+    );
+  }
+  if (restored.failure) {
+    notices.push(
+      `Your saved workspace could not be opened (${restored.failure.error.message}). It was left as it is` +
+        `${restored.failure.recoveryId ? ` and copied to "${restored.failure.recoveryId}"` : ""}; the welcome workspace is open instead.`
+    );
+  }
+
+  /** @type {ReturnType<typeof mountApp> | null} */
+  let app = null;
+  /** @type {ReturnType<typeof createAutosave> | null} */
+  let autosave = null;
+  /** @type {(() => void) | null} */
+  let detach = null;
+
+  /**
+   * @param {Workspace} workspace
+   * @param {{ persisted: boolean, revision: number }} stored Whether the workspace is what storage holds.
+   */
+  function mount(workspace, stored) {
+    detach?.();
+    autosave?.destroy();
+    app?.destroy();
+    autosave = null;
+    detach = null;
+
+    if (storage.durable) {
+      pointer.set(workspace.id);
+      autosave = createAutosave(workspace, storage, {
+        persisted: stored.persisted,
+        revision: stored.revision,
+        onConflict: () => app?.notify("This workspace was changed in another tab; saving here replaces that copy.")
+      });
+      detach = attachPageLifecycle(autosave);
+    } else {
+      const warn = (/** @type {BeforeUnloadEvent} */ event) => {
+        if (!workspace.dirty) return;
+        event.preventDefault();
+        event.returnValue = "";
+      };
+      window.addEventListener("beforeunload", warn);
+      detach = () => window.removeEventListener("beforeunload", warn);
+    }
+
+    app = mountApp(/** @type {HTMLElement} */ (root), workspace, {
+      session,
+      persistence: autosave ?? undefined,
+      onImport: (imported) =>
+        void storage
+          .load(imported.id)
+          .catch(() => undefined)
+          .then((record) => mount(imported, { persisted: false, revision: record?.revision ?? 0 }))
+    });
+    return app;
+  }
+
+  const opened = restored.workspace
+    ? mount(restored.workspace, { persisted: true, revision: restored.revision })
+    : mount(createDemoWorkspace(), { persisted: false, revision: 0 });
+  if (notices.length > 0) opened.notify(notices.join(" "));
 }
 
-mount(workspace);
+void start();

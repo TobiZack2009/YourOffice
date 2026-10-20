@@ -88,8 +88,9 @@ plain model edits; the reference rewrite and detach logic run from the reference
 `exportWorkspaceJSON` / `importWorkspaceJSON(text, { validation, install })`, round-trip tested;
 `domain/` exports the fully configured pair. Malformed or invalid input
 (including malformed page content or an unsafe link) is rejected with `WorkspaceFormatError`;
-export validates first and refuses to write a corrupt workspace. Persistence (IndexedDB autosave) is Phase 7; for now
-the workspace is in memory with a dirty dot, and Cmd/Ctrl+S calls `markSaved`.
+export validates first and refuses to write a corrupt workspace. Autosave to IndexedDB is in `persistence/` (see
+`persistence.md`); `workspace.revision` is the head revision it tracks. Without persistence
+the dirty dot follows `workspace.dirty` and Cmd/Ctrl+S calls `markSaved`.
 
 ## Tests
 

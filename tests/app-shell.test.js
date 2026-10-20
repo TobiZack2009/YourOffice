@@ -735,3 +735,61 @@ describe("stable editors", () => {
     expect(element.querySelector("[data-block-id]")).toBe(block);
   });
 });
+
+describe("mountApp with persistence", () => {
+  function fakeAutosave() {
+    const listeners = new Set();
+    const handle = {
+      pending: true,
+      status: "pending",
+      error: null,
+      flush: vi.fn(async () => {
+        handle.pending = false;
+        handle.status = "saved";
+        listeners.forEach((fn) => fn());
+        return true;
+      }),
+      subscribe: (fn) => (listeners.add(fn), () => listeners.delete(fn)),
+      emit: () => listeners.forEach((fn) => fn())
+    };
+    return handle;
+  }
+  const mountWith = (persistence) => {
+    const ws = createWorkspace({ title: "W" });
+    ws.dispatch("createPage", { type: "document", title: "Doc" });
+    const root = document.createElement("div");
+    document.body.append(root);
+    const app = mountApp(root, ws, { persistence });
+    return { ws, root, app };
+  };
+
+  it("the dirty dot follows what is not yet stored, not the export flag", () => {
+    const persistence = fakeAutosave();
+    const { ws, root, app } = mountWith(persistence);
+    ws.dispatch("renameWorkspace", { title: "X" });
+    expect(ws.dirty).toBe(true);
+    persistence.pending = false;
+    persistence.emit();
+    expect(query(root, ".dirty-dot")?.classList.contains("is-dirty")).toBe(false);
+    persistence.pending = true;
+    persistence.emit();
+    expect(query(root, ".dirty-dot")?.classList.contains("is-dirty")).toBe(true);
+    app.destroy();
+  });
+
+  it("Cmd+S flushes and says Saved; a failing store is reported", async () => {
+    const persistence = fakeAutosave();
+    const { root, app } = mountWith(persistence);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(persistence.flush).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".app-notice")?.textContent).toBe("Saved");
+    expect(query(root, ".dirty-dot")?.classList.contains("is-dirty")).toBe(false);
+
+    persistence.status = "failed";
+    persistence.error = new Error("quota");
+    persistence.emit();
+    expect(document.querySelector(".app-notice")?.textContent).toContain("could not be saved");
+    app.destroy();
+  });
+});
