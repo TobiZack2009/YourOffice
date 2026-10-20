@@ -34,6 +34,7 @@ import { openExpressionEditor } from "./expression-editor.js";
 import { openReferencePicker } from "./reference-picker.js";
 import { createReferenceViews } from "./reference-view.js";
 import { caretOffset, mergeRuns, modelLength, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
+import { pageExists, pageInfo } from "../workspace/selectors.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../document/model.js").Block} Block */
@@ -41,6 +42,7 @@ import { caretOffset, mergeRuns, modelLength, normalizeText, parseInlineRuns, ru
 
 const RUN_TYPES = new Set(["paragraph", "heading", "quote"]);
 const TEXTUAL_TYPES = new Set(["paragraph", "heading", "quote", "list", "code"]);
+/** Commits made of these alone are typing: the DOM already shows them, so the editor keeps its caret. */
 const INLINE_COMMITS = new Set(["setBlockRuns", "updateBlock"]);
 
 const MARK_TAG = { bold: "strong", italic: "em", underline: "u", strike: "s", code: "code" };
@@ -278,12 +280,12 @@ function nestedStore(host, sectionId) {
       return { ...container, content: { ...container.content, blockOrder } };
     },
     transact: (/** @type {string} */ label, /** @type {() => any} */ fn) => host.transact(label, fn),
-    dispatch(/** @type {string} */ type, /** @type {any} */ payload) {
+    dispatch(/** @type {string} */ type, /** @type {any} */ payload, /** @type {any} */ dispatchOptions) {
       return host.transact(type, () => {
         const found = findSection(host.data, sectionId);
         const before = new Set(found ? Object.keys(found.container.content.blocks ?? {}) : []);
         const belong = new Set(found ? sectionBlockIds(found.container.content, found.section.locator) : []);
-        const result = host.dispatch(type, payload);
+        const result = host.dispatch(type, payload, dispatchOptions);
         const after = findSection(host.data, sectionId);
         if (after) for (const id of Object.keys(after.container.content.blocks ?? {})) if (!before.has(id)) belong.add(id);
         fit(belong);
@@ -304,12 +306,15 @@ function nestedStore(host, sectionId) {
  *   onActiveChange?: (info: ActiveInfo) => void,
  *   onChange?: () => void,
  *   sectionId?: string,
+ *   origin?: string,
  *   navigate?: (pageId: string) => void
  * }} [options]
  * @returns {EditorHandle}
  */
 export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   const nested = Boolean(options.sectionId);
+  // One origin per editor tree: an embedded editor's typing is this editor's typing too.
+  const origin = options.origin ?? createId("editor");
   const workspace = nested ? nestedStore(hostWorkspace, /** @type {string} */ (options.sectionId)) : hostWorkspace;
   const element = h("div", {
     class: `document-editor${nested ? " is-embedded" : ""}`,
@@ -318,6 +323,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     tabindex: "-1",
     "data-history": "model"
   });
+
+  /** Dispatch as this editor, so its change events can be recognised as its own. */
+  const dispatch = (/** @type {string} */ type, /** @type {any} */ payload) => workspace.dispatch(type, payload, { origin });
 
   /** Whether a node belongs to this editor rather than to an editor nested in it. */
   const owns = (/** @type {Node | null} */ node) => {
@@ -341,6 +349,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       /** @type {any} */
       const child = createDocumentEditor(hostWorkspace, containerId, {
         sectionId,
+        origin,
         resolvePageTitle: options.resolvePageTitle,
         navigate: options.navigate,
         onActiveChange: () => {
@@ -619,7 +628,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     if (block.type === "code") {
       const text = normalizeText(el.textContent ?? "");
       if (text !== (block.text ?? "")) {
-        workspace.dispatch("updateBlock", { pageId, blockId, patch: { text } });
+        dispatch("updateBlock", { pageId, blockId, patch: { text } });
       }
       return;
     }
@@ -629,13 +638,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const hit = locateItem(itemId);
       if (hit && !runsEqual(hit.item.runs ?? [], runs)) {
         const items = (hit.block.items ?? []).map((item) => (item.id === itemId ? { ...item, runs } : item));
-        workspace.dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
+        dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
       }
       return;
     }
 
     if (!runsEqual(block.runs ?? [], runs)) {
-      workspace.dispatch("setBlockRuns", { pageId, blockId, runs });
+      dispatch("setBlockRuns", { pageId, blockId, runs });
     }
   }
 
@@ -759,7 +768,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
         const doomed = new Set(keys.filter((key) => !parseKey(key).itemId).map((key) => parseKey(key).blockId));
         const run = order();
         if (run.length > 0 && run.every((id) => doomed.has(id))) {
-          workspace.dispatch("insertBlock", {
+          dispatch("insertBlock", {
             pageId,
             block: { type: "paragraph" },
             newBlockId: fallbackId,
@@ -774,14 +783,14 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
         if (!block) continue;
         if (itemId) {
           if ((block.items ?? []).some((item) => item.id === itemId)) {
-            workspace.dispatch("deleteListItem", { pageId, blockId, itemId });
+            dispatch("deleteListItem", { pageId, blockId, itemId });
           }
         } else {
-          workspace.dispatch("deleteBlock", { pageId, blockId });
+          dispatch("deleteBlock", { pageId, blockId });
         }
       }
       if (!nested && order().length === 0) {
-        workspace.dispatch("insertBlock", {
+        dispatch("insertBlock", {
           pageId,
           block: { type: "paragraph" },
           newBlockId: fallbackId
@@ -819,7 +828,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
           if (!hit) continue;
           if (spec.type === "list") {
             if (spec.ordered !== undefined && spec.ordered !== Boolean(hit.block.ordered)) {
-              workspace.dispatch("updateBlock", {
+              dispatch("updateBlock", {
                 pageId,
                 blockId: hit.block.id,
                 patch: { ordered: spec.ordered }
@@ -828,7 +837,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
             resulting.push(unitKey(hit.block.id, itemId));
           } else {
             const newBlockId = createId("block");
-            workspace.dispatch("extractListItem", {
+            dispatch("extractListItem", {
               pageId,
               blockId: hit.block.id,
               itemId,
@@ -842,7 +851,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
         }
         const block = blockOf(blockId);
         if (!block || !TEXTUAL_TYPES.has(block.type)) continue;
-        workspace.dispatch("changeBlockType", { pageId, blockId, type: spec.type, fields });
+        dispatch("changeBlockType", { pageId, blockId, type: spec.type, fields });
         resulting.push(keyOfBlock(blockId));
       }
     });
@@ -883,11 +892,11 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
           const items = (hit.block.items ?? []).map((item) =>
             item.id === target.itemId ? { ...item, runs: restyle(item.runs ?? []) } : item
           );
-          workspace.dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
+          dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
         } else {
           const block = blockOf(target.blockId);
           if (block) {
-            workspace.dispatch("setBlockRuns", {
+            dispatch("setBlockRuns", {
               pageId,
               blockId: target.blockId,
               runs: restyle(block.runs ?? [])
@@ -973,7 +982,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
    */
   function insertBlock(spec, position = {}) {
     const newBlockId = createId("block");
-    workspace.dispatch("insertBlock", { pageId, block: spec, newBlockId, ...position });
+    dispatch("insertBlock", { pageId, block: spec, newBlockId, ...position });
     render();
     focusBlock(newBlockId, "start");
     return newBlockId;
@@ -1013,8 +1022,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
         // Enter on an empty last line leaves the code block.
         const newId = createId("block");
         workspace.transact("exit code block", () => {
-          workspace.dispatch("updateBlock", { pageId, blockId, patch: { text: text.slice(0, -1) } });
-          workspace.dispatch("insertBlock", {
+          dispatch("updateBlock", { pageId, blockId, patch: { text: text.slice(0, -1) } });
+          dispatch("insertBlock", {
             pageId,
             block: { type: "paragraph" },
             afterBlockId: blockId,
@@ -1035,7 +1044,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
     // Enter on an empty nested block lifts it out of the list item.
     if (empty && nested) {
-      workspace.dispatch("outdentBlock", { pageId, blockId });
+      dispatch("outdentBlock", { pageId, blockId });
       render();
       focusKey(blockId, "start");
       return;
@@ -1043,7 +1052,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
     // Enter on an empty quote ends it: the block becomes a plain paragraph.
     if (block.type === "quote" && empty) {
-      workspace.dispatch("changeBlockType", { pageId, blockId, type: "paragraph" });
+      dispatch("changeBlockType", { pageId, blockId, type: "paragraph" });
       render();
       focusKey(blockId, "start");
       return;
@@ -1053,8 +1062,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     const { left, right } = splitRunsAt(runs, caretOffset(el));
     const newId = createId("block");
     workspace.transact("split block", () => {
-      workspace.dispatch("setBlockRuns", { pageId, blockId, runs: left });
-      workspace.dispatch("insertBlock", {
+      dispatch("setBlockRuns", { pageId, blockId, runs: left });
+      dispatch("insertBlock", {
         pageId,
         block: { type: "paragraph", runs: right },
         afterBlockId: blockId,
@@ -1081,13 +1090,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const parent = findContainer(content(), block.id)?.parent;
       if (parent) {
         // Nested: the item moves up one level and stays an item.
-        workspace.dispatch("outdentListItem", { pageId, blockId: block.id, itemId });
+        dispatch("outdentListItem", { pageId, blockId: block.id, itemId });
         render();
         focusKey(unitKey(locateItem(itemId)?.block.id ?? parent.blockId, itemId), "start");
       } else {
         // Top level: the item ends the list and becomes a paragraph.
         const newId = createId("block");
-        workspace.dispatch("outdentListItem", { pageId, blockId: block.id, itemId, newBlockId: newId });
+        dispatch("outdentListItem", { pageId, blockId: block.id, itemId, newBlockId: newId });
         render();
         focusKey(newId, "start");
       }
@@ -1099,7 +1108,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     const nextItems = items.slice();
     nextItems[at] = { ...items[at], runs: left };
     nextItems.splice(at + 1, 0, newItem);
-    workspace.dispatch("updateBlock", { pageId, blockId: block.id, patch: { items: nextItems } });
+    dispatch("updateBlock", { pageId, blockId: block.id, patch: { items: nextItems } });
     render();
     focusKey(unitKey(block.id, newItem.id), "start");
   }
@@ -1122,12 +1131,12 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       if (at === -1) return;
       if (at === 0) {
         if (where?.parent) {
-          workspace.dispatch("outdentListItem", { pageId, blockId, itemId });
+          dispatch("outdentListItem", { pageId, blockId, itemId });
           render();
           focusKey(unitKey(locateItem(itemId)?.block.id ?? blockId, itemId), "start");
         } else {
           const newId = createId("block");
-          workspace.dispatch("outdentListItem", { pageId, blockId, itemId, newBlockId: newId });
+          dispatch("outdentListItem", { pageId, blockId, itemId, newBlockId: newId });
           render();
           focusKey(newId, "start");
         }
@@ -1141,7 +1150,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const nextItems = items.slice();
       nextItems[at - 1] = { ...previous, runs: merged, ...(children.length > 0 ? { children } : {}) };
       nextItems.splice(at, 1);
-      workspace.dispatch("updateBlock", { pageId, blockId, patch: { items: nextItems } });
+      dispatch("updateBlock", { pageId, blockId, patch: { items: nextItems } });
       render();
       focusKey(unitKey(blockId, previous.id), offset);
       return;
@@ -1149,7 +1158,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
     // First block nested in a list item: lift it out.
     if (where?.parent && where.index === 0) {
-      workspace.dispatch("outdentBlock", { pageId, blockId });
+      dispatch("outdentBlock", { pageId, blockId });
       render();
       focusKey(blockId, "start");
       return;
@@ -1159,7 +1168,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     if (!previousKey) {
       // Start of the document: a styled block falls back to a plain paragraph.
       if (block.type !== "paragraph") {
-        workspace.dispatch("changeBlockType", { pageId, blockId, type: "paragraph" });
+        dispatch("changeBlockType", { pageId, blockId, type: "paragraph" });
         render();
         focusKey(blockId, "start");
       }
@@ -1174,7 +1183,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
     workspace.transact("merge blocks", () => {
       if (previous.type === "code") {
-        workspace.dispatch("updateBlock", {
+        dispatch("updateBlock", {
           pageId,
           blockId: previous.id,
           patch: { text: `${previous.text ?? ""}${runsToPlainText(appended)}` }
@@ -1185,16 +1194,16 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
           const items = (hit.block.items ?? []).map((item) =>
             item.id === target.itemId ? { ...item, runs: mergeRuns([...(item.runs ?? []), ...appended]) } : item
           );
-          workspace.dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
+          dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
         }
       } else {
-        workspace.dispatch("setBlockRuns", {
+        dispatch("setBlockRuns", {
           pageId,
           blockId: previous.id,
           runs: mergeRuns([...(previous.runs ?? []), ...appended])
         });
       }
-      workspace.dispatch("deleteBlock", { pageId, blockId });
+      dispatch("deleteBlock", { pageId, blockId });
     });
     render();
     focusKey(previousKey, mergeOffset);
@@ -1224,12 +1233,12 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       let newId = null;
       if (!shift) {
         if (canIndentItem(content(), blockId, itemId)) {
-          workspace.dispatch("indentListItem", { pageId, blockId, itemId });
+          dispatch("indentListItem", { pageId, blockId, itemId });
         }
       } else {
         // Nested items lift one level; a top-level item leaves the list as a paragraph.
         newId = createId("block");
-        workspace.dispatch("outdentListItem", { pageId, blockId, itemId, newBlockId: newId });
+        dispatch("outdentListItem", { pageId, blockId, itemId, newBlockId: newId });
       }
       render();
       const hit = locateItem(itemId);
@@ -1239,9 +1248,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     }
 
     if (!shift && canIndentBlock(content(), blockId)) {
-      workspace.dispatch("indentBlock", { pageId, blockId });
+      dispatch("indentBlock", { pageId, blockId });
     } else if (shift && canOutdentBlock(content(), blockId)) {
-      workspace.dispatch("outdentBlock", { pageId, blockId });
+      dispatch("outdentBlock", { pageId, blockId });
     } else {
       // Nothing to nest under / lift out of: still swallow Tab so focus stays in the page.
       return true;
@@ -1458,7 +1467,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     const url = anchor.getAttribute("href") ?? "";
     const rect = anchor.getBoundingClientRect();
     const pageId = pageIdOfLink(url);
-    const target = pageId ? hostWorkspace.getPage(pageId) : undefined;
+    const target = pageId ? pageInfo(hostWorkspace, pageId) : undefined;
     const card = buildLinkCard({
       url,
       page: pageId
@@ -1657,7 +1666,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     const pageBlockId = anchor?.matches("a.page-link[data-page-id]") ? anchor.dataset.pageId : "";
     if (pageBlockId && element.contains(anchor)) {
       pointer.preventDefault();
-      if (hostWorkspace.getPage(pageBlockId)) options.navigate?.(pageBlockId);
+      if (pageExists(hostWorkspace, pageBlockId)) options.navigate?.(pageBlockId);
       return;
     }
     const el = anchor ? editableFrom(anchor) : null;
@@ -1667,7 +1676,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const href = anchor.getAttribute("href") ?? "";
       const linkedPage = pageIdOfLink(href);
       if (linkedPage) {
-        if (hostWorkspace.getPage(linkedPage)) options.navigate?.(linkedPage);
+        if (pageExists(hostWorkspace, linkedPage)) options.navigate?.(linkedPage);
         return;
       }
       if (normalizeLinkUrl(href)) element.ownerDocument.defaultView?.open(href, "_blank", "noopener,noreferrer");
@@ -1857,7 +1866,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       if (spec.type === "list") {
         // Same kind: only the ordered/bulleted flavour can change.
         if (hit && spec.ordered !== undefined && spec.ordered !== Boolean(hit.block.ordered)) {
-          workspace.dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { ordered: spec.ordered } });
+          dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { ordered: spec.ordered } });
           render();
         }
         return;
@@ -1866,7 +1875,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
         // Only the item under the caret changes type; the rest of the list stays a list.
         const newId = createId("block");
         const offset = activeEditable() ? caretOffset(/** @type {HTMLElement} */ (activeEditable())) : "end";
-        workspace.dispatch("extractListItem", {
+        dispatch("extractListItem", {
           pageId,
           blockId: hit.block.id,
           itemId: hit.item.id,
@@ -1885,7 +1894,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     if (spec.ordered !== undefined) fields.ordered = spec.ordered;
     const keep = activeBlockId;
     const offset = activeEditable() ? caretOffset(/** @type {HTMLElement} */ (activeEditable())) : "end";
-    workspace.dispatch("changeBlockType", { pageId, blockId: keep, type: spec.type, fields });
+    dispatch("changeBlockType", { pageId, blockId: keep, type: spec.type, fields });
     render();
     if (spec.type === "list") focusBlock(keep, "end");
     else focusKey(keep, offset);
@@ -2494,10 +2503,10 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   // Store subscription: skip re-render for inline-only commits so the caret stays.
   const unsubscribe = workspace.events.on("change", (event) => {
-    const payload = /** @type {{ kind?: string, commands?: string[] }} */ (event ?? {});
+    const payload = /** @type {import("../workspace/changes.js").Change} */ (event);
     if (
       payload.kind === "commit" &&
-      Array.isArray(payload.commands) &&
+      payload.origin === origin &&
       payload.commands.length > 0 &&
       payload.commands.every((command) => INLINE_COMMITS.has(command))
     ) {

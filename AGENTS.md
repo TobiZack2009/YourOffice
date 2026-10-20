@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Next: Phase 7
 (persistence/interchange), then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1135 tests green across 60 files; the single-file build is ~407 kB.** Update these two
+**1150 tests green across 62 files; the single-file build is ~408 kB.** Update these two
 numbers when they change.
 
 ## Verification

@@ -6,7 +6,6 @@
  * open page's type (see ribbon-tabs.js).
  */
 
-import { createId } from "../core/ids.js";
 import { exportWorkspaceJSON, importWorkspaceJSON, installDomain } from "../domain/index.js";
 import { createSidebar } from "./sidebar.js";
 import { createDocumentEditor } from "./block-editor.js";
@@ -19,18 +18,16 @@ import { icon } from "./icons.js";
 import { usesModelHistory } from "./history-scope.js";
 import { showNotice } from "./notice.js";
 import { clear, h } from "./dom.js";
+import {
+  breadcrumb as breadcrumbOf,
+  pageContent,
+  pageInfo,
+  pageTitle,
+  pageType
+} from "../workspace/selectors.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../workspace/schema.js").PageType} PageType */
-
-const REGISTRY_COMMANDS = new Set([
-  "createPage",
-  "renamePage",
-  "deletePage",
-  "movePage",
-  "renameWorkspace",
-  "setFavorite"
-]);
 
 const ZOOM_LEVELS = [75, 100, 125, 150];
 
@@ -170,7 +167,7 @@ export function mountApp(root, workspace, options = {}) {
   function getContext() {
     return {
       workspace,
-      page: state.selectedPageId ? workspace.getPage(state.selectedPageId) : undefined,
+      page: pageInfo(workspace, state.selectedPageId),
       docEditor: state.editor,
       sheetEditor: state.sheetEditor,
       presentationEditor: state.presentationEditor,
@@ -225,9 +222,8 @@ export function mountApp(root, workspace, options = {}) {
 
   function documentFirstBlockId() {
     if (!state.selectedPageId) return null;
-    const page = workspace.getPage(state.selectedPageId);
     const content = /** @type {import("../document/model.js").DocumentContent | undefined} */ (
-      page?.content
+      pageContent(workspace, state.selectedPageId)
     );
     return content?.blockOrder?.[0] ?? null;
   }
@@ -277,7 +273,7 @@ export function mountApp(root, workspace, options = {}) {
     clear(canvas);
 
     const pageId = state.selectedPageId;
-    const page = pageId ? workspace.getPage(pageId) : undefined;
+    const page = pageInfo(workspace, pageId);
     shell.setAttribute("data-page-type", page?.type ?? "none");
     ribbon.setPage(page?.type ?? null);
 
@@ -315,7 +311,7 @@ export function mountApp(root, workspace, options = {}) {
 
     if (page.type === "document") {
       const editor = createDocumentEditor(workspace, page.id, {
-        resolvePageTitle: (id) => workspace.getPage(id)?.title,
+        resolvePageTitle: (id) => pageTitle(workspace, id),
         navigate: (id) => selectSidebar(id),
         onActiveChange: () => updateChrome()
       });
@@ -352,16 +348,7 @@ export function mountApp(root, workspace, options = {}) {
     /** @type {string[]} */
     const trail = [workspace.title || "Workspace"];
     const pageId = state.selectedPageId;
-    if (pageId && workspace.getPage(pageId)) {
-      /** @type {string[]} */
-      const ancestors = [];
-      let parent = workspace.getParent(pageId);
-      while (parent) {
-        ancestors.unshift(workspace.getPage(parent)?.title || "Untitled");
-        parent = workspace.getParent(parent);
-      }
-      trail.push(...ancestors, workspace.getPage(pageId)?.title || "Untitled");
-    }
+    for (const page of breadcrumbOf(workspace, pageId)) trail.push(page.title || "Untitled");
     trail.forEach((label, index) => {
       if (index > 0) breadcrumb.append(h("span", { class: "breadcrumb-sep", text: "/", "aria-hidden": "true" }));
       const last = index === trail.length - 1;
@@ -375,7 +362,7 @@ export function mountApp(root, workspace, options = {}) {
     undoButton.disabled = !workspace.canUndo;
     redoButton.disabled = !workspace.canRedo;
     dirtyDot.classList.toggle("is-dirty", workspace.dirty);
-    const onPresentation = state.selectedPageId ? workspace.getPage(state.selectedPageId)?.type === "presentation" : false;
+    const onPresentation = pageType(workspace, state.selectedPageId) === "presentation";
     playButton.style.display = onPresentation ? "" : "none";
     playButton.disabled = !state.presentationEditor?.getSlideId();
     ribbon.update();
@@ -395,16 +382,15 @@ export function mountApp(root, workspace, options = {}) {
        * @param {string | null} [parentId]
        */
       create(type, parentId = null) {
-        workspace.transact(`create ${type}`, () => {
-          workspace.dispatch("createPage", { type, title: defaultTitle(type), parentId });
-          const created = workspace.getChildren(parentId).slice(-1)[0];
-          if (type === "document" && created) {
+        const created = workspace.transact(`create ${type}`, () => {
+          const { pageId: created } = workspace.dispatch("createPage", { type, title: defaultTitle(type), parentId });
+          if (type === "document") {
             workspace.dispatch("insertBlock", {
               pageId: created,
               block: { type: "paragraph", runs: [] }
             });
           }
-          if (type === "sheet" && created) {
+          if (type === "sheet") {
             workspace.dispatch("createTable", {
               pageId: created,
               name: "Table 1",
@@ -414,19 +400,17 @@ export function mountApp(root, workspace, options = {}) {
               y: 32
             });
           }
-          if (type === "presentation" && created) {
-            workspace.dispatch("createSlide", { pageId: created, slideId: createId("slide"), layout: "title" });
+          if (type === "presentation") {
+            workspace.dispatch("createSlide", { pageId: created, layout: "title" });
           }
+          return created;
         });
-        const created = workspace.getChildren(parentId).slice(-1)[0];
-        if (created) {
-          state.selectedPageId = created;
-          refreshSidebar();
-          renderMain();
-          selectSidebar(created);
-          const first = documentFirstBlockId();
-          if (first) state.editor?.focusBlock(first, "start");
-        }
+        state.selectedPageId = created;
+        refreshSidebar();
+        renderMain();
+        selectSidebar(created);
+        const first = documentFirstBlockId();
+        if (first) state.editor?.focusBlock(first, "start");
       },
       /** @param {string} pageId @param {string} title */
       rename(pageId, title) {
@@ -436,12 +420,12 @@ export function mountApp(root, workspace, options = {}) {
       /** @param {string} pageId */
       remove(pageId) {
         const children = workspace.getChildren(pageId);
-        const page = workspace.getPage(pageId);
+        const title = pageTitle(workspace, pageId);
         const ask = options.confirm ?? ((message) => (typeof window !== "undefined" && window.confirm ? window.confirm(message) : true));
         const message =
           children.length > 0
-            ? `Delete “${page?.title ?? "page"}” and its ${children.length} child page(s)?`
-            : `Delete “${page?.title ?? "page"}”?`;
+            ? `Delete “${title ?? "page"}” and its ${children.length} child page(s)?`
+            : `Delete “${title ?? "page"}”?`;
         if (!ask(message)) return;
         workspace.dispatch("deletePage", { pageId, cascade: children.length > 0 });
         if (!workspace.getPage(state.selectedPageId ?? "")) {
@@ -492,25 +476,22 @@ export function mountApp(root, workspace, options = {}) {
   };
 
   const unsubscribeChange = workspace.events.on("change", (event) => {
-    const payload = /** @type {{ kind?: string, commands?: string[], pages?: string[] }} */ (event ?? {});
-    if (payload.kind && payload.kind !== "commit") {
+    const payload = /** @type {import("../workspace/changes.js").Change} */ (event);
+    if (payload.kind !== "commit") {
       renderMain();
       refreshSidebar();
       return;
     }
-    const commands = payload.commands ?? [];
     if (
-      commands.includes("renamePage") &&
+      payload.commands.includes("renamePage") &&
       state.selectedPageId &&
-      (payload.pages ?? []).includes(state.selectedPageId)
+      payload.pages.includes(state.selectedPageId)
     ) {
       renderMain();
       refreshSidebar();
       return;
     }
-    if (commands.some((c) => REGISTRY_COMMANDS.has(c))) {
-      refreshSidebar();
-    }
+    if (payload.registry) refreshSidebar();
     updateChrome();
   });
 

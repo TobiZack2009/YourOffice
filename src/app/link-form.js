@@ -9,6 +9,7 @@
 import { isSafeUrl } from "../core/url.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
+import { pageList } from "../workspace/selectors.js";
 
 /**
  * Turn what the user typed into an address worth storing: trimmed, with `https://`
@@ -53,11 +54,11 @@ export function pageLinkUrl(pageId) {
 
 /**
  * Every page of a workspace as link destinations.
- * @param {{ getPages: () => Array<{ id: string, title?: string, type: string }> }} workspace
+ * @param {import("../workspace/store.js").Workspace} workspace
  * @returns {LinkPage[]}
  */
 export function linkPages(workspace) {
-  return workspace.getPages().map((page) => ({ id: page.id, title: page.title || "Untitled", type: page.type }));
+  return pageList(workspace).map((page) => ({ id: page.id, title: page.title || "Untitled", type: page.type }));
 }
 
 /** Whether typed text is an address rather than words to search pages with. */

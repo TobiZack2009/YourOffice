@@ -246,7 +246,7 @@ function shiftRegion(store, tx, payload, mode) {
     growToFit(table, col, row);
   }
   table.cells = cells;
-  touchPage(tx, page);
+  touchPage(tx, page, table.id);
 }
 
 /** Sheet commands keyed by command type. */
@@ -287,6 +287,7 @@ export const sheetCommands = {
     }
     touchPage(tx, page);
     retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
+    return { tableId: table.id };
   },
 
   /**
@@ -320,7 +321,7 @@ export const sheetCommands = {
     if (name === table.name) return;
     const snapshot = snapshotReferences(store._data);
     table.name = name;
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
     retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
   },
 
@@ -338,7 +339,7 @@ export const sheetCommands = {
       throw new CommandError("x and y must be finite numbers", "invalidPosition");
     }
     table.position = { x: p.x, y: p.y };
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
   },
 
   /**
@@ -357,7 +358,7 @@ export const sheetCommands = {
     const input = p.cell;
     if (input === null || input === undefined) {
       writeCell(table, col, row, null);
-      touchPage(tx, page);
+      touchPage(tx, page, table.id);
       return;
     }
     if (typeof input !== "object" || Array.isArray(input)) {
@@ -379,13 +380,13 @@ export const sheetCommands = {
       (cell.value === null || cell.value === "");
     if (emptyValue) {
       writeCell(table, col, row, null);
-      touchPage(tx, page);
+      touchPage(tx, page, table.id);
       return;
     }
 
     growToFit(table, col, row);
     writeCell(table, col, row, cell);
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
   },
 
   /**
@@ -436,7 +437,7 @@ export const sheetCommands = {
         }
       }
     }
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
   },
 
   /**
@@ -517,7 +518,7 @@ export const sheetCommands = {
       growToFit(table, col + deltaCol, row + deltaRow);
       writeCell(table, col + deltaCol, row + deltaRow, offsetCell(cell, deltaCol, deltaRow));
     }
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
   },
 
   /**
@@ -632,7 +633,7 @@ export const sheetCommands = {
       }
     }
     table.merges.push(merge);
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
   },
 
   /**
@@ -651,7 +652,7 @@ export const sheetCommands = {
       throw new CommandError("no merge covers that cell", "notMerged");
     }
     table.merges = table.merges.filter((candidate) => candidate !== merge);
-    touchPage(tx, page);
+    touchPage(tx, page, table.id);
   }
 };
 
@@ -707,7 +708,7 @@ function insertLines(store, tx, payload, axis) {
   }
   table.merges = shiftMerges(table.merges, shift);
   shiftSectionRanges(content, table.id, shift);
-  touchPage(tx, page);
+  touchPage(tx, page, table.id);
 }
 
 /**
@@ -745,7 +746,7 @@ function deleteLines(store, tx, payload, axis) {
   }
   table.merges = shiftMerges(table.merges, shift);
   shiftSectionRanges(content, table.id, shift);
-  touchPage(tx, page);
+  touchPage(tx, page, table.id);
 }
 
 /**
@@ -775,7 +776,7 @@ function setLineOverride(store, tx, payload, axis) {
     }
     overrides[String(index)] = axis === "row" ? { height: value } : { width: value };
   }
-  touchPage(tx, page);
+  touchPage(tx, page, table.id);
 }
 
 /**

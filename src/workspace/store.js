@@ -15,6 +15,7 @@ import {
   migrateWorkspace
 } from "./schema.js";
 import { registerWorkspaceCommands } from "./commands.js";
+import { WHOLE_PAGE, cloneEntities } from "./changes.js";
 
 /** @typedef {import("./schema.js").PageEnvelope} PageEnvelope */
 /** @typedef {import("./schema.js").PageType} PageType */
@@ -28,15 +29,68 @@ import { registerWorkspaceCommands } from "./commands.js";
  * @property {string} label
  * @property {{ type: string, payload: unknown }[]} commands Applied in order.
  * @property {Set<string>} pageIds Page ids touched, for targeted rerenders.
+ * @property {Map<string, Set<string>>} entities Entity ids touched per page (see `changes.js`).
+ * @property {boolean} registry Whether a command changed the page registry.
+ * @property {string | undefined} origin Who dispatched the first command that named one.
+ * @property {(pageId: string, ...entityIds: string[]) => void} touch Record a touched page and,
+ *   optionally, the entities inside it that changed. With no entities the whole page counts as changed.
  */
 
-/** @typedef {{ hot: boolean, selfManaged: boolean }} CommandMeta */
+/** @typedef {{ hot: boolean, selfManaged: boolean, registry: boolean }} CommandMeta */
 
-/** @typedef {{ id: string, label: string, commands: string[], before: WorkspaceDocument, after: WorkspaceDocument, pageIds: string[] }} HistoryEntry */
+/** @typedef {{ origin?: string }} DispatchOptions */
+
+/** @typedef {{ id: string, label: string, commands: string[], before: WorkspaceDocument, after: WorkspaceDocument, pageIds: string[], entities: Map<string, Set<string>>, registry: boolean }} HistoryEntry */
 
 /** @returns {string} Current time as an ISO 8601 UTC string. */
 function nowIso() {
   return new Date().toISOString();
+}
+
+/**
+ * @param {string} label
+ * @returns {Transaction}
+ */
+function newTransaction(label) {
+  /** @type {Transaction} */
+  const tx = {
+    id: createId("tx"),
+    label,
+    commands: [],
+    pageIds: new Set(),
+    entities: new Map(),
+    registry: false,
+    origin: undefined,
+    touch(pageId, ...entityIds) {
+      tx.pageIds.add(pageId);
+      const set = tx.entities.get(pageId) ?? new Set();
+      if (entityIds.length === 0) set.add(WHOLE_PAGE);
+      for (const id of entityIds) set.add(id);
+      tx.entities.set(pageId, set);
+    }
+  };
+  return tx;
+}
+
+/**
+ * The change event for a history entry. Undo and redo always report `registry: true`: they
+ * restore a whole snapshot, so the page tree may differ whatever the entry touched.
+ * @param {"commit" | "undo" | "redo"} kind
+ * @param {HistoryEntry} entry
+ * @param {string} [origin]
+ * @returns {import("./changes.js").Change}
+ */
+function changeOf(kind, entry, origin) {
+  return {
+    kind,
+    transactionId: entry.id,
+    label: entry.label,
+    commands: entry.commands,
+    pages: [...entry.pageIds],
+    entities: cloneEntities(entry.entities),
+    registry: kind === "commit" ? entry.registry : true,
+    origin
+  };
 }
 
 export class Workspace {
@@ -245,7 +299,7 @@ export class Workspace {
       throw new CommandError("transaction already open", "transactionNested");
     }
     this._before = structuredClone(this._data);
-    this._open = { id: createId("tx"), label, commands: [], pageIds: new Set() };
+    this._open = newTransaction(label);
   }
 
   /** Commit the transaction opened with `beginTransaction`. */
@@ -313,18 +367,14 @@ export class Workspace {
       commands: tx.commands.map((c) => c.type),
       before,
       after: structuredClone(this._data),
-      pageIds: [...tx.pageIds]
+      pageIds: [...tx.pageIds],
+      entities: tx.entities,
+      registry: tx.registry
     });
     this._redo.length = 0;
     this._history.push(entry);
     this.dirty = true;
-    this.events.emit("change", {
-      kind: "commit",
-      transactionId: entry.id,
-      label: entry.label,
-      commands: entry.commands,
-      pages: entry.pageIds
-    });
+    this.events.emit("change", changeOf("commit", entry, tx.origin));
   }
 
   // -- commands -------------------------------------------------------------------
@@ -332,20 +382,26 @@ export class Workspace {
   /**
    * Register a command handler.
    * @param {string} type
-   * @param {(store: Workspace, tx: Transaction, payload: unknown) => void} handler
-   *   Validates, then mutates `store._data`, recording touched page ids in
-   *   `tx.pageIds`. Throw CommandError on invalid payload.
+   * @param {(store: Workspace, tx: Transaction, payload: unknown) => unknown} handler
+   *   Validates, then mutates `store._data`, recording what it touched with `tx.touch` (usually
+   *   through `touchPage`). Throw CommandError on invalid payload. What it returns is the result
+   *   of `dispatch`: handlers that create things return their ids.
    * @param {Partial<CommandMeta>} [meta]
    *   `hot`: cannot move, add or remove structure other content depends on (typing, dragging),
    *   so cross-cutting hooks skip their expensive checks. `selfManaged`: the handler does its own
-   *   bookkeeping for that structure, so hooks do not capture for it.
+   *   bookkeeping for that structure, so hooks do not capture for it. `registry`: it changes the
+   *   page registry (tree, titles, favourites, workspace title), so change events say so.
    */
   registerCommand(type, handler, meta = {}) {
     if (this._commands.has(type)) {
       throw new Error(`command "${type}" is already registered`);
     }
     this._commands.set(type, handler);
-    this._commandMeta.set(type, { hot: meta.hot === true, selfManaged: meta.selfManaged === true });
+    this._commandMeta.set(type, {
+      hot: meta.hot === true,
+      selfManaged: meta.selfManaged === true,
+      registry: meta.registry === true
+    });
   }
 
   /**
@@ -354,7 +410,7 @@ export class Workspace {
    * @returns {CommandMeta}
    */
   commandMeta(type) {
-    return this._commandMeta.get(type) ?? { hot: false, selfManaged: false };
+    return this._commandMeta.get(type) ?? { hot: false, selfManaged: false, registry: false };
   }
 
   /**
@@ -381,9 +437,12 @@ export class Workspace {
    *
    * @param {string} type
    * @param {unknown} payload
+   * @param {DispatchOptions} [options] `origin`: who is dispatching (an editor's own id); it
+   *   comes back on the change event so that editor can skip rendering its own typing.
+   * @returns {any} What the command returns: ids for commands that create things, else undefined.
    * @throws {CommandError} On unknown command or failed validation.
    */
-  dispatch(type, payload) {
+  dispatch(type, payload, options = {}) {
     const handler = this._commands.get(type);
     if (!handler) {
       throw new CommandError(`unknown command: ${type}`, "unknownCommand");
@@ -395,15 +454,15 @@ export class Workspace {
         const after = hook(this, tx, type, payload);
         if (typeof after === "function") afters.push(after);
       }
-      handler(this, tx, payload);
+      const result = handler(this, tx, payload);
       tx.commands.push({ type, payload });
+      if (this.commandMeta(type).registry) tx.registry = true;
+      if (options.origin !== undefined && tx.origin === undefined) tx.origin = options.origin;
       for (const after of afters) after();
+      return result;
     };
-    if (this._open !== null) {
-      run(this._open);
-    } else {
-      this.transact(type, () => run(/** @type {Transaction} */ (this._open)));
-    }
+    if (this._open !== null) return run(this._open);
+    return this.transact(type, () => run(/** @type {Transaction} */ (this._open)));
   }
 
   // -- history ----------------------------------------------------------------
@@ -428,7 +487,7 @@ export class Workspace {
     this._data = structuredClone(entry.before);
     this._redo.push(entry);
     this.dirty = true;
-    this.events.emit("change", { kind: "undo", transactionId: entry.id, label: entry.label });
+    this.events.emit("change", changeOf("undo", entry));
     return true;
   }
 
@@ -442,7 +501,7 @@ export class Workspace {
     this._data = structuredClone(entry.after);
     this._history.push(entry);
     this.dirty = true;
-    this.events.emit("change", { kind: "redo", transactionId: entry.id, label: entry.label });
+    this.events.emit("change", changeOf("redo", entry));
     return true;
   }
 

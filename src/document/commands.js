@@ -226,6 +226,7 @@ export const documentCommands = {
     content.blocks[block.id] = block;
     ids.splice(index, 0, block.id);
     touchPage(tx, page);
+    return { blockId: block.id };
   },
 
   /**
@@ -252,7 +253,7 @@ export const documentCommands = {
       throw new CommandError(`invalid block update: ${errors.join("; ")}`, "invalidBlock");
     }
     content.blocks[existing.id] = candidate;
-    touchPage(tx, page);
+    touchPage(tx, page, existing.id);
   },
 
   /**
@@ -286,7 +287,7 @@ export const documentCommands = {
         throw new CommandError(`invalid block update: ${errors.join("; ")}`, "invalidBlock");
       }
       content.blocks[existing.id] = candidate;
-      touchPage(tx, page);
+      touchPage(tx, page, existing.id);
       return;
     }
 
@@ -315,7 +316,8 @@ export const documentCommands = {
 
     const created = createBlock(type, fields);
     content.blocks[existing.id] = { ...created, id: existing.id };
-    touchPage(tx, page);
+    // Leaving a list moves its nested blocks into the page order: that is a structural change.
+    touchPage(tx, page, ...(existing.type === "list" ? [] : [existing.id]));
   },
 
   /**
@@ -336,7 +338,7 @@ export const documentCommands = {
       throw new CommandError(`invalid runs: ${errors.join("; ")}`, "invalidRuns");
     }
     block.runs = structuredClone(/** @type {InlineRun[]} */ (p.runs));
-    touchPage(tx, page);
+    touchPage(tx, page, block.id);
   },
 
   /**
@@ -462,7 +464,8 @@ export const documentCommands = {
       throw new CommandError("index is out of range", "invalidIndex");
     }
     block.items.splice(/** @type {number} */ (index), 0, item);
-    touchPage(tx, page);
+    touchPage(tx, page, block.id);
+    return { itemId: item.id };
   },
 
   /**
@@ -577,7 +580,7 @@ export const documentCommands = {
       content.blocks[nested.id] = nested;
       previous.children.push(nested.id);
     }
-    touchPage(tx, page);
+    touchPage(tx, page, list.id);
   },
 
   /**

@@ -35,6 +35,27 @@ supports per-transaction undo/redo, tracks dirty state, emits `change` events an
 `canUndo` / `canRedo` / `hasCommand` for the UI. `getFavorites()` returns favourite ids that
 still exist.
 
+### Results, change sets and selectors
+
+- `dispatch(type, payload, { origin })` returns the handler's result. Creating commands return
+  ids: `createPage {pageId}`, `createTable {tableId}`, `createSlide`/`duplicateSlide {slideId}`,
+  `insertObject {objectId}`, `duplicateObjects`/`pasteObjects {objectIds}`, `addAnimation
+  {animationId}`, `insertBlock {blockId}`, `addListItem {itemId}`, `createSection {sectionId}`,
+  `insertReference {instanceId}`. `transact` returns its callback's result.
+- A transaction collects what it touched: `tx.touch(pageId, ...entityIds)`. No entity ids means
+  the whole page (`WHOLE_PAGE`), and a whole-page touch wins over precise ones. Entity ids are
+  block ids (document), table ids (sheet), slide and object ids (presentation; a slide id alone
+  means the slide as a whole).
+- The `change` event is `{ kind: commit|undo|redo, transactionId, label, commands, pages,
+  entities, registry, origin }`. `registry` is true when the page list, titles, hierarchy,
+  favourites or workspace title changed (commands registered with `registry: true`); undo and redo
+  carry the entry's pages and entities with `registry: true`. `origin` is taken from the first
+  command that names one, so an editor can recognise its own commits. Helpers are in
+  `workspace/changes.js` (`touchesPage`, `entitiesOf`).
+- `workspace/selectors.js` answers render-path questions without cloning: `pageExists`,
+  `pageTitle`, `pageType`, `pageInfo`, `pageContent` (live, read-only), `pageList`, `breadcrumb`,
+  `pageTree`. `getPage`/`getPages` remain as explicit snapshot APIs.
+
 ## Built-in commands (`workspace/commands.js`)
 
 `createPage`, `renamePage`, `deletePage` (refuses to orphan children), `movePage` (cannot
@@ -53,4 +74,5 @@ the workspace is in memory with a dirty dot, and Cmd/Ctrl+S calls `markSaved`.
 
 ## Tests
 
-`ids`, `events`, `schema`, `store`, `format`, `workspace-schema` additions.
+`ids`, `events`, `schema`, `store`, `format`, `workspace-schema` additions,
+`workspace-selectors`, `workspace-changes`.

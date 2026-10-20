@@ -8,6 +8,7 @@
 
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
+import { pageInfo } from "../workspace/selectors.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 
@@ -31,7 +32,7 @@ export function findPages(workspace, query) {
    */
   function walk(parentId, trail) {
     for (const id of workspace.getChildren(parentId)) {
-      const page = workspace.getPage(id);
+      const page = pageInfo(workspace, id);
       if (!page) continue;
       const title = page.title || "Untitled";
       const haystack = `${title} ${page.type}`.toLowerCase();

@@ -36,10 +36,12 @@ function isNonEmptyString(value, field, reason, ErrorType) {
  * command modules (e.g. document blocks).
  * @param {Transaction} tx
  * @param {import("./schema.js").PageEnvelope} page
+ * @param {...string} entityIds What inside the page changed (blocks, tables, slides and objects).
+ *   With none, the whole page counts as changed; see `Transaction.touch`.
  */
-export function touchPage(tx, page) {
+export function touchPage(tx, page, ...entityIds) {
   page.modifiedAt = new Date().toISOString();
-  tx.pageIds.add(page.id);
+  tx.touch(page.id, ...entityIds);
 }
 
 /**
@@ -131,7 +133,8 @@ export const commands = {
     if (parentId !== null) {
       store._data.pageOrder[parentId] = /** @type {string[]} */ (siblings);
     }
-    tx.pageIds.add(page.id);
+    tx.touch(page.id);
+    return { pageId: page.id };
   },
 
   /**
@@ -193,7 +196,7 @@ export const commands = {
     for (const id of doomed) {
       delete store._data.pages[id];
       delete store._data.pageOrder[id];
-      tx.pageIds.add(id);
+      tx.touch(id);
     }
 
     const favorites = store._data.settings?.favoritePageIds;
@@ -337,9 +340,12 @@ export const commands = {
 
 /** Registration facts for the commands that need them (see `Workspace.registerCommand`). */
 const COMMAND_META = {
-  deletePage: { selfManaged: true },
-  setFavorite: { hot: true },
-  renameWorkspace: { hot: true }
+  createPage: { registry: true },
+  renamePage: { registry: true },
+  deletePage: { selfManaged: true, registry: true },
+  movePage: { registry: true },
+  setFavorite: { hot: true, registry: true },
+  renameWorkspace: { hot: true, registry: true }
 };
 
 /** @param {Workspace} store */

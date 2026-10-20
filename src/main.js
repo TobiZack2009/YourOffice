@@ -4,15 +4,13 @@
 
 import "./app/styles.css";
 import { createWorkspace } from "./domain/index.js";
-import { createId } from "./core/ids.js";
 /** @typedef {import("./workspace/store.js").Workspace} Workspace */
 import { mountApp } from "./app/shell.js";
 
 const workspace = createWorkspace({ title: "My Workspace" });
 
 workspace.transact("seed welcome document", () => {
-  workspace.dispatch("createPage", { type: "document", title: "Welcome" });
-  const pageId = workspace.getChildren(null)[0];
+  const { pageId } = workspace.dispatch("createPage", { type: "document", title: "Welcome" });
   workspace.dispatch("insertBlock", {
     pageId,
     block: { type: "heading", level: 1, runs: [{ text: "Welcome to YourOffice" }] }
@@ -44,9 +42,8 @@ workspace.transact("seed welcome document", () => {
 workspace.markSaved();
 
 workspace.transact("seed budget sheet", () => {
-  workspace.dispatch("createPage", { type: "sheet", title: "Budget" });
-  const sheetId = workspace.getChildren(null)[1];
-  workspace.dispatch("createTable", {
+  const { pageId: sheetId } = workspace.dispatch("createPage", { type: "sheet", title: "Budget" });
+  const { tableId } = workspace.dispatch("createTable", {
     pageId: sheetId,
     name: "Q1 Budget",
     rows: 8,
@@ -54,7 +51,6 @@ workspace.transact("seed budget sheet", () => {
     x: 32,
     y: 32
   });
-  const tableId = /** @type {any} */ (workspace.getPage(sheetId)?.content).tableOrder[0];
   const cells = [
     [0, 0, "Item"],
     [1, 0, "Cost"],
@@ -85,12 +81,9 @@ workspace.transact("seed budget sheet", () => {
 workspace.markSaved();
 
 workspace.transact("seed demo deck", () => {
-  workspace.dispatch("createPage", { type: "presentation", title: "Kickoff deck" });
-  const deckId = workspace.getChildren(null)[2];
-  const first = createId("slide");
-  workspace.dispatch("createSlide", { pageId: deckId, slideId: first, layout: "title" });
-  const second = createId("slide");
-  workspace.dispatch("createSlide", { pageId: deckId, slideId: second, layout: "titleContent" });
+  const { pageId: deckId } = workspace.dispatch("createPage", { type: "presentation", title: "Kickoff deck" });
+  const { slideId: first } = workspace.dispatch("createSlide", { pageId: deckId, layout: "title" });
+  const { slideId: second } = workspace.dispatch("createSlide", { pageId: deckId, layout: "titleContent" });
   const content = /** @type {any} */ (workspace.getPage(deckId)?.content);
   const [titleId, subtitleId] = content.slides[first].objectOrder;
   workspace.dispatch("setObjectRuns", { pageId: deckId, slideId: first, objectId: titleId, runs: [{ text: "YourOffice" }] });

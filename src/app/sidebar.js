@@ -14,6 +14,7 @@
 import { h, clear } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
+import { pageExists, pageInfo, pageTitle } from "../workspace/selectors.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../workspace/schema.js").PageType} PageType */
@@ -51,11 +52,11 @@ function isSelfOrAncestor(workspace, ancestorId, pageId) {
  * @returns {{ newParentId: string | null, index: number } | null} null when illegal.
  */
 export function planDrop(workspace, dragId, target) {
-  if (!workspace.getPage(dragId)) return null;
+  if (!pageExists(workspace, dragId)) return null;
 
   if (target.type === "onto") {
     const parentId = target.pageId;
-    if (!parentId || !workspace.getPage(parentId)) return null;
+    if (!parentId || !pageExists(workspace, parentId)) return null;
     if (isSelfOrAncestor(workspace, dragId, parentId)) return null;
     const list = workspace.getChildren(parentId).filter((id) => id !== dragId);
     return { newParentId: parentId, index: list.length };
@@ -63,7 +64,7 @@ export function planDrop(workspace, dragId, target) {
 
   if (target.type === "before" || target.type === "after") {
     const anchorId = target.pageId;
-    if (!anchorId || !workspace.getPage(anchorId)) return null;
+    if (!anchorId || !pageExists(workspace, anchorId)) return null;
     const parentId = workspace.getParent(anchorId);
     const list = workspace.getChildren(parentId).filter((id) => id !== dragId);
     let index = list.indexOf(anchorId);
@@ -148,7 +149,7 @@ export function createSidebar(workspace, actions) {
   function commitRename(pageId, value) {
     state.editingPageId = null;
     const title = value.trim();
-    if (title && title !== workspace.getPage(pageId)?.title) actions.rename(pageId, title);
+    if (title && title !== pageTitle(workspace, pageId)) actions.rename(pageId, title);
     refresh();
   }
 
@@ -246,7 +247,7 @@ export function createSidebar(workspace, actions) {
    * @returns {HTMLElement}
    */
   function renderRow(pageId, depth) {
-    const page = workspace.getPage(pageId);
+    const page = pageInfo(workspace, pageId);
     if (!page) return h("div");
 
     const row = h("div", {
@@ -382,7 +383,7 @@ export function createSidebar(workspace, actions) {
 
   /** @param {string} pageId */
   function renderFavorite(pageId) {
-    const page = workspace.getPage(pageId);
+    const page = pageInfo(workspace, pageId);
     if (!page) return null;
     const row = h("div", {
       class: `favorite-row${state.selectedPageId === pageId ? " is-selected" : ""}`,

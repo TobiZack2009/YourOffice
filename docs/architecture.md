@@ -55,7 +55,7 @@ exception: `sheet` and `references` depend on each other (formula retargeting an
 lookup are shared); the test pins exactly which sheet files may import `references`.
 
 Cross-cutting behaviour hangs off command registration, not hand lists:
-`registerCommand(type, handler, { hot, selfManaged })` records whether a command is `hot`
+`registerCommand(type, handler, { hot, selfManaged, registry })` records whether a command is `hot`
 (cannot add, move or remove structure others depend on, so hooks skip their checks) or
 `selfManaged` (does its own section bookkeeping). The reference hook reads `commandMeta(type)`.
 Page create/rename/move respell formulas that name pages from that same hook.
@@ -68,8 +68,8 @@ JSDoc typedefs document the shapes.
   `metadata`, `pageOrder: { root: string[], [parentId]: string[] }`, `pages: { [id]: envelope }`,
   `settings`, `detached`. The page registry/hierarchy/order is separate from page content;
   type-specific content hangs off the page envelope.
-- **Commands**: `dispatch(type, payload)` validates, mutates inside a transaction, bumps
-  `modifiedAt`, marks dirty and emits `change` (`{kind, transactionId, label, commands, pages}`).
+- **Commands**: `dispatch(type, payload, { origin })` validates, mutates inside a transaction, bumps
+  `modifiedAt`, marks dirty and emits `change` (`{kind, transactionId, label, commands, pages, entities, registry, origin}`); it returns the handler's result (created ids). The UI reads through `workspace/selectors.js`, not cloned pages. See `workspace.md`.
   Nested `transact` joins the outer one; a throw rolls back to a snapshot. Failures are
   `CommandError(message, reason)` with a machine-readable `reason`.
 - **History**: per-transaction `structuredClone` snapshots. Planned upgrade to inverse

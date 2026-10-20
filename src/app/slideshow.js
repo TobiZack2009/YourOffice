@@ -22,6 +22,7 @@ import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { pageIdOfLink } from "./link-form.js";
 import { enginesFor, staticReferenceHooks } from "./reference-render.js";
+import { pageTitle } from "../workspace/selectors.js";
 
 /**
  * @typedef {object} SlideshowOptions
@@ -106,7 +107,7 @@ export function createSlideshow(workspace, pageId, options = {}) {
         get book() {
           return (book ??= buildBook(data));
         },
-        resolvePageTitle: (/** @type {string} */ id) => workspace.getPage(id)?.title
+        resolvePageTitle: (/** @type {string} */ id) => pageTitle(workspace, id)
       };
       hooks = staticReferenceHooks(/** @type {any} */ (ctx), pageId, 1);
     }

@@ -324,6 +324,7 @@ export const presentationCommands = {
     content.slides[slide.id] = slide;
     content.slideOrder.splice(index, 0, slide.id);
     touchPage(tx, page);
+    return { slideId: slide.id };
   },
 
   /**
@@ -365,6 +366,7 @@ export const presentationCommands = {
     content.slides[copy.id] = copy;
     content.slideOrder.splice(content.slideOrder.indexOf(source.id) + 1, 0, copy.id);
     touchPage(tx, page);
+    return { slideId: copy.id };
   },
 
   /**
@@ -423,7 +425,7 @@ export const presentationCommands = {
     if (!isColor(p.color)) throw new CommandError("color must be a hex colour", "invalidColor");
     if (slide.background.color === p.color) return;
     slide.background = { color: /** @type {string} */ (p.color) };
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id);
   },
 
   /**
@@ -447,7 +449,7 @@ export const presentationCommands = {
       throw new CommandError("duration must be 0–10000 ms", "invalidTransition");
     }
     slide.transition = { ...slide.transition, ...t };
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id);
   },
 
   /**
@@ -479,7 +481,8 @@ export const presentationCommands = {
     }
     const index = p.index === undefined ? undefined : requireInsertIndex(p.index, "index");
     addObject(slide, structuredClone(/** @type {SlideObject} */ (p.object)), index);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, /** @type {SlideObject} */ (p.object).id);
+    return { objectId: /** @type {SlideObject} */ (p.object).id };
   },
 
   /**
@@ -493,7 +496,7 @@ export const presentationCommands = {
     const { page, content } = requirePresentationPage(store, p.pageId);
     const slide = requireSlide(content, p.slideId);
     applyPatch(requireObject(slide, p.objectId), p.patch);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, /** @type {string} */ (p.objectId));
   },
 
   /**
@@ -510,7 +513,7 @@ export const presentationCommands = {
       throw new CommandError("items must be a non-empty array", "invalidPatch");
     }
     for (const item of p.items) applyPatch(requireObject(slide, item?.objectId), item?.patch);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, ...p.items.map((/** @type {{ objectId: string }} */ item) => item.objectId));
   },
 
   /**
@@ -531,7 +534,7 @@ export const presentationCommands = {
     if (errors.length > 0) throw new CommandError(`invalid runs: ${errors.join("; ")}`, "invalidRuns");
     const runs = structuredClone(/** @type {import("./model.js").TextBody["runs"]} */ (p.runs));
     object.text = { ...(object.text ?? createTextBody({ align: "center", valign: "middle" })), runs };
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, object.id);
   },
 
   /**
@@ -550,7 +553,7 @@ export const presentationCommands = {
       if (ids.has(animation.objectId)) delete slide.animations[animationId];
     }
     slide.animationOrder = slide.animationOrder.filter((id) => slide.animations[id]);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, ...ids);
   },
 
   /**
@@ -572,7 +575,8 @@ export const presentationCommands = {
       typeof p.offset === "number" ? p.offset : COPY_OFFSET
     );
     for (const copy of copies) addObject(slide, copy);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, ...copies.map((copy) => copy.id));
+    return { objectIds: copies.map((copy) => copy.id) };
   },
 
   /**
@@ -594,7 +598,8 @@ export const presentationCommands = {
       typeof p.offset === "number" ? p.offset : COPY_OFFSET
     );
     for (const copy of copies) addObject(slide, copy);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, ...copies.map((copy) => copy.id));
+    return { objectIds: copies.map((copy) => copy.id) };
   },
 
   /**
@@ -621,7 +626,8 @@ export const presentationCommands = {
     if (slide.animations[animation.id]) throw new CommandError(`animation id already in use: ${animation.id}`, "duplicateAnimation");
     slide.animations[animation.id] = animation;
     slide.animationOrder.splice(index, 0, animation.id);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id);
+    return { animationId: animation.id };
   },
 
   /**
@@ -635,7 +641,7 @@ export const presentationCommands = {
     const { page, content } = requirePresentationPage(store, p.pageId);
     const slide = requireSlide(content, p.slideId);
     applyAnimationPatch(requireAnimation(slide, p.animationId), p.patch);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id);
   },
 
   /**
@@ -650,7 +656,7 @@ export const presentationCommands = {
     const animation = requireAnimation(slide, p.animationId);
     delete slide.animations[animation.id];
     slide.animationOrder = slide.animationOrder.filter((id) => id !== animation.id);
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id);
   },
 
   /**
@@ -670,7 +676,7 @@ export const presentationCommands = {
     rest.splice(index, 0, animation.id);
     if (rest.every((id, i) => id === slide.animationOrder[i])) return;
     slide.animationOrder = rest;
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id);
   },
 
   /**
@@ -690,7 +696,7 @@ export const presentationCommands = {
     const next = reorder(slide.objectOrder, new Set(ids), /** @type {"front"} */ (p.op));
     if (next.every((id, i) => id === slide.objectOrder[i])) return;
     slide.objectOrder = next;
-    touchPage(tx, page);
+    touchPage(tx, page, slide.id, ...ids);
   }
 };
 

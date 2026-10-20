@@ -197,6 +197,7 @@ export const referenceCommands = {
     touchContainer(store, tx, containerId);
     // A new name can start shadowing one that formulas already use.
     retargetReferences(store._data, snapshot, (id) => touchContainer(store, tx, id));
+    return { sectionId };
   },
 
   /**
@@ -308,6 +309,7 @@ export const referenceCommands = {
       throw new CommandError("References cannot be placed inside a sheet yet; use a formula there.", "invalidReference");
     }
     assertReferenceValid(store, containerId, instanceId);
+    return { instanceId };
   },
 
   /**

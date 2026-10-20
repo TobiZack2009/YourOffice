@@ -58,6 +58,7 @@ import { buildBook } from "../sheet/table-engine.js";
 import { enginesFor, staticReferenceHooks } from "./reference-render.js";
 import { openExpressionEditor } from "./expression-editor.js";
 import { openReferencePicker } from "./reference-picker.js";
+import { pageList, pageTitle } from "../workspace/selectors.js";
 import {
   promptName,
   referenceCount,
@@ -361,7 +362,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
         get book() {
           return (book ??= buildBook(data));
         },
-        resolvePageTitle: (/** @type {string} */ id) => workspace.getPage(id)?.title
+        resolvePageTitle: (/** @type {string} */ id) => pageTitle(workspace, id)
       };
       const hooks = staticReferenceHooks(/** @type {any} */ (ctx), pageId, 1);
       hookCache = {
@@ -459,7 +460,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     setTransition: (patch) => setTransition(patch),
     applyTransitionToAll: () => applyTransitionToAll(),
     requestSlideSize: (width, height) => requestSlideSize(width, height),
-    listPages: () => workspace.getPages().map((p) => ({ id: p.id, title: p.title, type: p.type })),
+    listPages: () => pageList(workspace),
     listSlides: () => getContent().slideOrder.map((id, i) => ({ id, number: i + 1 }))
   };
   const inspector = createInspector(inspectorApi);
