@@ -27,6 +27,7 @@ describe("getTabs", () => {
       "design",
       "transitions",
       "animations",
+      "slideshow",
       "view"
     ]);
   });

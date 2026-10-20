@@ -71,7 +71,7 @@ labelled groups) → canvas.
   the shell calls it wherever editor or workspace state changes. Buttons cancel
   `mousedown` so the editor selection survives.
 - Contextual tabs: document (Home, Insert), sheet (Home, Insert), presentation
-  (Home, Insert, Design, Transitions, Animations, View; Theme stays a disabled seam), File and View on everything. `data-page-type`
+  (Home, Insert, Design, Transitions, Animations, Slide Show, View; Theme stays a disabled seam), File and View on everything. `data-page-type`
   on `.app` drives the accent (document blue, sheet green, presentation orange).
 - `popover.js` (positioned popovers + `buildMenu`) is shared by the ribbon and the
   sidebar. `icons.js` builds inline SVG icons from the Lucide pack (`lucide` on npm, named imports
@@ -460,8 +460,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     all exercised. Bugs found and fixed: unrounded drag/draw geometry; an inspector
     number field re-committed on blur and swallowed the next click (the change event
     fires on blur after Enter); a heavy focus outline around the sheet canvas.
-  - Deferred: slideshow playback and transition playback,
-    themes, embedding slides in documents (Phase 6), image assets in the registry
+  - Deferred: themes, embedding slides in documents (Phase 6), image assets in the registry
     (Phase 7), resize/rotate of multi-selections.
 - **Sidebar click target and Lucide icons:**
   - The whole `.page-row` / `.favorite-row` selects its page (`selectFromRow`), not just
@@ -631,6 +630,45 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     inline/break choice reads `clientWidth` at render time (0 when unmounted, so tables and
     slides break until re-rendered). A page-title ambiguity gives `#NAME?`. Multi-selection
     resize on slides is still deferred. The slide strip handle is click-only. Multi-slide sections cannot be dragged as a group.
+- **Presentation mode (slide show):**
+  - **Where it plays.** The show is an overlay inside `main.main` (`.slideshow`, absolutely
+    positioned, so it covers the title strip, ribbon and canvas) and the sidebar stays visible.
+    It is *not* browser-fullscreen by default; the bar's fullscreen button (or `F`) requests
+    fullscreen on the overlay and `fullscreenchange` refits the slide. Choosing a page in the
+    sidebar, or anything that re-renders the main column (`renderMain`), ends the show silently
+    (`destroy()`; `exit()` is the one that reports back).
+  - **Starting.** Slide Show ribbon tab (From beginning / From current slide), a play button in
+    the title strip (presentation pages only, from the current slide), Cmd/Ctrl+Enter (from the
+    beginning) and Shift+Cmd/Ctrl+Enter (from the current slide). `ShellApi` gained
+    `startSlideshow(from)` / `isSlideshowActive()`; the shell also returns `getSlideshow()`.
+    Global shortcuts (undo, Quick Find, ...) are ignored while a show is up. On exit the editor
+    is put back on the slide the show reached.
+  - **Controls.** An always-visible bar under the slide: back, `n / total`, forward on the left,
+    fullscreen and exit on the right (end of show disables forward). Keys: Right/Down/PageDown/
+    Space/Enter/N next; Left/Up/PageUp/Backspace/P back; Home/End first/last; F fullscreen;
+    Esc exit. Keys with Cmd/Ctrl/Alt, and keys typed into a field, are left alone. Clicking the
+    slide area advances; clicking a linked object follows it instead (url opens a new tab for
+    http/https/mailto only, page link navigates there and ends the show, slide link jumps), as
+    do inline `a[href]` links in text. The last slide stops, it does not loop.
+  - **Logic (`presentation/slideshow.js`, pure).** A position is `{index, step}` (`-1` = slide
+    just shown; step 0 plays by itself, later steps wait for a press). `lastStep`, `stepEntries`,
+    `stepLength`, `settledAt(slide, step)` (which entrance objects are still hidden, where
+    finished motions sit), `nextPosition` / `previousPosition` (`step | slide | none`,
+    `settle | slide | none`), `transitionBetween` (forward: the incoming slide's transition;
+    back: the slide being left, direction reversed), `transitionKeyframes` (fade = opacity,
+    wipe = `clip-path` inset opening from the chosen side), `hasTransition`.
+  - **Playback (`app/slideshow.js`).** `createSlideshow(workspace, pageId, {startSlideId,
+    onExit, navigate, openUrl})` returns a handle (`start`, `next`, `previous`, `goTo`, `finish`,
+    `getPosition`, `toggleFullscreen`, `exit`, `destroy`) or null for an empty deck. Slides are
+    drawn with the editor's `renderSlide` (read-only, reference hooks built lazily); each slide
+    element is scaled to fit the viewport and refitted by a `ResizeObserver`. Steps run through
+    `playAnimation` (extracted from `animation-preview.js` and shared with the editor preview).
+    A press while a step or transition is still running completes it and is used up. Going
+    back one step re-applies `settledAt` instantly; going back a slide lands on its finished
+    state. Transitions stack the incoming slide over the outgoing one and drop the old one when
+    the duration timer fires.
+  - **Not done.** Presenter notes/view, laser pointer, slide-number jump, auto-advance timings,
+    looping, audio/video, a "from current object" start, a black end-of-show screen.
 - Test suites: `ids`, `events`, `schema`, `store`, `format`, `formula-errors`,
   `references`, `tokenizer`, `parser`, `evaluator`, `recalc`, `document-model`,
   `document-commands`, `document-render`, `sheet-model`, `sheet-shift`,
@@ -642,9 +680,9 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   Phase 6 suites: `formula-functions`, `cross-table`, `sheet-refscan`, `references-scope`,
   `references-rewrite`, `references-catalog`, `references-commands`, `references-fit`,
   `app-references`, `app-block-references`, `app-inline-references`, `app-sheet-references`,
-  `app-slide-references`, `app-presentation-references`, `app-links`, `references-multi-slide`.
-  **1071 tests green across 54 files**; the single-file build inlines JS + CSS into one
-  ~388 kB HTML.
+  `app-slide-references`, `app-presentation-references`, `app-links`, `references-multi-slide`, `presentation-slideshow`, `app-slideshow`.
+  **1104 tests green across 56 files**; the single-file build inlines JS + CSS into one
+  ~399 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 
@@ -662,7 +700,7 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
    dragging, fill-handle / drag-to-move, incremental recalc, cross-table visual polish.
 5. **Phase 5 — presentation** (done): slides on a shared, editable canvas size
    (default 1280×720), stable object IDs, text/image/shape/line, stored transitions.
-   Ordered animations landed afterwards (see the status log); slideshow playback is deferred.
+   Ordered animations and slide show playback landed afterwards (see the status log).
 6. **Phase 6 — references/sections** (landed; limitations in the status log): typed source locators, reference instances,
    live cross-editor embeds, parameters, conditional visibility (small AST language),
    source-vs-instance editing, section dep cycles and invalidation.

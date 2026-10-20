@@ -17,6 +17,32 @@ import { effectKeyframes, initiallyHidden, planPreview } from "../presentation/a
 export const PREVIEW_HOLD = 600;
 
 /**
+ * Play one animation on a rendered object: reveal it, then run its effect with the
+ * Web Animations API. Without that API (jsdom) a motion jumps to its end point.
+ * The effect is held at its end (`fill: both`); the caller cancels the returned
+ * handle to let go of it.
+ * @param {HTMLElement} el
+ * @param {import("../presentation/model.js").Animation} animation
+ * @param {import("../presentation/model.js").SlideObject} object
+ * @param {{ width: number, height: number }} size
+ * @returns {{ cancel: () => void } | null}
+ */
+export function playAnimation(el, animation, object, size) {
+  el.style.visibility = "";
+  if (typeof el.animate === "function") {
+    return el.animate(effectKeyframes(animation, object, size), {
+      duration: animation.duration,
+      easing: animation.effect === "appear" ? "step-end" : "ease-in-out",
+      fill: "both"
+    });
+  }
+  if (animation.effect === "motion" && animation.path) {
+    el.style.translate = `${animation.path.to.x}px ${animation.path.to.y}px`;
+  }
+  return null;
+}
+
+/**
  * @typedef {object} PreviewOptions
  * @property {HTMLElement} slideEl The rendered slide (its children carry `data-object-id`).
  * @property {import("../presentation/model.js").Slide} slide
@@ -65,18 +91,8 @@ export function createPreview({ slideEl, slide, size, onDone }) {
     const object = animation && slide.objects[animation.objectId];
     const el = animation && elements.get(animation.objectId);
     if (!animation || !object || !el) return;
-    el.style.visibility = "";
-    if (typeof el.animate === "function") {
-      running.push(
-        el.animate(effectKeyframes(animation, object, size), {
-          duration: animation.duration,
-          easing: animation.effect === "appear" ? "step-end" : "ease-in-out",
-          fill: "both"
-        })
-      );
-    } else if (animation.effect === "motion" && animation.path) {
-      el.style.translate = `${animation.path.to.x}px ${animation.path.to.y}px`;
-    }
+    const handle = playAnimation(el, animation, object, size);
+    if (handle) running.push(handle);
   }
 
   function restore() {

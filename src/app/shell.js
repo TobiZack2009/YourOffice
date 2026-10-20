@@ -17,6 +17,7 @@ import { createSheetEditor } from "./sheet-editor.js";
 import { createPresentationEditor } from "./presentation-editor.js";
 import { createRibbon } from "./ribbon.js";
 import { createQuickFind } from "./quick-find.js";
+import { createSlideshow } from "./slideshow.js";
 import { icon } from "./icons.js";
 import { clear, h } from "./dom.js";
 
@@ -71,8 +72,8 @@ export function mountApp(root, workspace, options = {}) {
   if (!workspace.hasCommand("createTable")) registerSheetCommands(workspace);
   if (!workspace.hasCommand("createSlide")) registerPresentationCommands(workspace);
 
-  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, zoom: number }} */
-  const state = { selectedPageId: null, editor: null, sheetEditor: null, presentationEditor: null, zoom: 100 };
+  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, zoom: number, slideshow: import("./slideshow.js").SlideshowHandle | null }} */
+  const state = { selectedPageId: null, editor: null, sheetEditor: null, presentationEditor: null, zoom: 100, slideshow: null };
   // Presentation UI state that must survive the editor being rebuilt on undo/redo.
   const presentationView = { inspector: true, snap: true, grid: false, timeline: false };
   const presentationClipboard = { objects: /** @type {any[]} */ ([]), pastes: 0 };
@@ -102,16 +103,25 @@ export function mountApp(root, workspace, options = {}) {
     title: "Redo",
     "aria-label": "Redo"
   }, [icon("redo", { size: 16 })]);
+  const playButton = h("button", {
+    class: "title-button",
+    type: "button",
+    "data-action": "play-slideshow",
+    title: "Start slide show from the current slide (Shift+Cmd/Ctrl+Enter)",
+    "aria-label": "Start slide show"
+  }, [icon("play", { size: 16 })]);
+  playButton.style.display = "none";
   const dirtyDot = h("span", { class: "dirty-dot", title: "Unsaved changes", "aria-hidden": "true" });
   const titleStrip = h("header", { class: "title-strip" }, [
     breadcrumb,
-    h("div", { class: "title-strip-end" }, [undoButton, redoButton, dirtyDot])
+    h("div", { class: "title-strip-end" }, [playButton, undoButton, redoButton, dirtyDot])
   ]);
   titleStrip.addEventListener("mousedown", (event) => {
     if (/** @type {HTMLElement} */ (event.target).closest("button")) event.preventDefault();
   });
   undoButton.addEventListener("click", () => shellApi.undo());
   redoButton.addEventListener("click", () => shellApi.redo());
+  playButton.addEventListener("click", () => shellApi.startSlideshow("current"));
 
   // -- ribbon -------------------------------------------------------------------
 
@@ -155,7 +165,9 @@ export function mountApp(root, workspace, options = {}) {
     toggleSidebar() {
       shell.classList.toggle("sidebar-collapsed");
       ribbon.update();
-    }
+    },
+    startSlideshow,
+    isSlideshowActive: () => state.slideshow !== null
   };
 
   function getContext() {
@@ -223,7 +235,42 @@ export function mountApp(root, workspace, options = {}) {
     return content?.blockOrder?.[0] ?? null;
   }
 
+  /**
+   * Play the open presentation over the main column. The sidebar stays; leaving the show
+   * (Esc, the exit button, or choosing a page) brings back the editor at the slide reached.
+   * @param {"beginning" | "current"} [from]
+   * @returns {boolean} false when there is nothing to play
+   */
+  function startSlideshow(from = "current") {
+    const editor = state.presentationEditor;
+    const pageId = state.selectedPageId;
+    if (state.slideshow) return true;
+    if (!editor || !pageId) return false;
+    // Commit any text being edited, and keep Space/Enter off a focused ribbon button.
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) active.blur();
+    editor.stopPreview();
+    const show = createSlideshow(workspace, pageId, {
+      startSlideId: from === "current" ? editor.getSlideId() : null,
+      navigate: (target) => selectSidebar(target),
+      onExit: (slideId) => {
+        state.slideshow = null;
+        lastSlideByPage.set(pageId, slideId);
+        state.presentationEditor?.selectSlide(slideId);
+        ribbon.update();
+      }
+    });
+    if (!show) return false;
+    state.slideshow = show;
+    main.append(show.element);
+    show.start();
+    show.focus();
+    return true;
+  }
+
   function renderMain() {
+    state.slideshow?.destroy();
+    state.slideshow = null;
     state.editor?.destroy();
     state.editor = null;
     state.sheetEditor?.destroy();
@@ -331,6 +378,9 @@ export function mountApp(root, workspace, options = {}) {
     undoButton.disabled = !workspace.canUndo;
     redoButton.disabled = !workspace.canRedo;
     dirtyDot.classList.toggle("is-dirty", workspace.dirty);
+    const onPresentation = state.selectedPageId ? workspace.getPage(state.selectedPageId)?.type === "presentation" : false;
+    playButton.style.display = onPresentation ? "" : "none";
+    playButton.disabled = !state.presentationEditor?.getSlideId();
     ribbon.update();
   }
 
@@ -462,10 +512,15 @@ export function mountApp(root, workspace, options = {}) {
 
   /** @param {KeyboardEvent} event */
   function onGlobalKeydown(event) {
+    if (state.slideshow) return;
     const mod = event.metaKey || event.ctrlKey;
     if (!mod) return;
     const key = event.key.toLowerCase();
-    if (key === "k") {
+    if (key === "enter") {
+      if (!state.presentationEditor) return;
+      event.preventDefault();
+      startSlideshow(event.shiftKey ? "current" : "beginning");
+    } else if (key === "k") {
       event.preventDefault();
       quickFind.open();
     } else if (key === "z" && !event.shiftKey) {
@@ -494,6 +549,8 @@ export function mountApp(root, workspace, options = {}) {
       document.removeEventListener("keydown", onGlobalKeydown);
       quickFind.destroy();
       ribbon.destroy();
+      state.slideshow?.destroy();
+      state.slideshow = null;
       state.editor?.destroy();
       state.editor = null;
       state.sheetEditor?.destroy();
@@ -514,6 +571,9 @@ export function mountApp(root, workspace, options = {}) {
     getPresentationEditor: () => state.presentationEditor,
     /** @returns {string | null} */
     getSelection: () => selection(),
-    openQuickFind: () => quickFind.open()
+    openQuickFind: () => quickFind.open(),
+    /** @returns {import("./slideshow.js").SlideshowHandle | null} */
+    getSlideshow: () => state.slideshow,
+    startSlideshow
   };
 }

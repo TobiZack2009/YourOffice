@@ -24,6 +24,7 @@ import {
   Check,
   Circle,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ChevronsRight,
@@ -53,6 +54,8 @@ import {
   ListIndentDecrease,
   ListIndentIncrease,
   Magnet,
+  Maximize,
+  Minimize,
   Minus,
   MousePointerClick,
   MoveHorizontal,
@@ -97,6 +100,7 @@ import {
   Undo2,
   Unlink,
   Upload,
+  X,
   ZoomIn
 } from "lucide";
 
@@ -221,6 +225,11 @@ const ICONS = {
   check: { node: Check },
   more: { node: Ellipsis },
   chevron: { node: ChevronRight },
+  back: { node: ChevronLeft },
+  forward: { node: ChevronRight },
+  fullscreen: { node: Maximize },
+  "fullscreen-exit": { node: Minimize },
+  close: { node: X },
   star: { node: Star },
   trash: { node: Trash },
   search: { node: Search },

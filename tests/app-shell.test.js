@@ -107,7 +107,7 @@ describe("contextual ribbon", () => {
     ws.dispatch("createPage", { type: "presentation", title: "Deck" });
     openPage(root, ws.getChildren(null).slice(-1)[0]);
     expect(tabLabels(root)).toEqual(
-      ["File", "Home", "Insert", "Design", "Transitions", "Animations", "View"]
+      ["File", "Home", "Insert", "Design", "Transitions", "Animations", "Slide Show", "View"]
     );
     expect(query(root, '[data-action="new-slide"]')).toBeTruthy();
     query(root, '.ribbon-tab[data-tab="animations"]')?.click();

@@ -51,6 +51,8 @@ import { SIZE_PRESETS } from "../presentation/geometry.js";
  * @property {(percent: number) => void} setZoom
  * @property {() => boolean} isSidebarCollapsed
  * @property {() => void} toggleSidebar
+ * @property {(from: "beginning" | "current") => boolean} startSlideshow
+ * @property {() => boolean} isSlideshowActive
  */
 
 /**
@@ -1465,6 +1467,36 @@ function presentationTabs() {
                 if (editor?.isPreviewing()) editor.stopPreview();
                 else editor?.startPreview();
               }
+            })
+          ]
+        }
+      ]
+    },
+    {
+      id: "slideshow",
+      label: "Slide Show",
+      groups: [
+        {
+          id: "start-show",
+          label: "Start slide show",
+          controls: [
+            button({
+              id: "show-beginning",
+              label: "From beginning",
+              title: "Play from the first slide (Cmd/Ctrl+Enter)",
+              icon: "play",
+              attrs: { "data-action": "show-from-beginning" },
+              enabled: hasSlide,
+              action: (ctx) => ctx.shell.startSlideshow("beginning")
+            }),
+            button({
+              id: "show-current",
+              label: "From current slide",
+              title: "Play from the current slide (Shift+Cmd/Ctrl+Enter)",
+              icon: "play",
+              attrs: { "data-action": "show-from-current" },
+              enabled: hasSlide,
+              action: (ctx) => ctx.shell.startSlideshow("current")
             })
           ]
         }
