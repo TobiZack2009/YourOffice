@@ -11,6 +11,7 @@
  * without simulating drag events.
  */
 
+import { reconcileChildren } from "../core/reconcile.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
@@ -260,18 +261,6 @@ export function createSidebar(workspace, actions, options = {}) {
   }
 
   /**
-   * Make `parent` hold exactly `children`, in order, touching the DOM only when it differs, so
-   * nodes that stay keep their identity (and focus).
-   * @param {HTMLElement} parent
-   * @param {Node[]} children
-   */
-  function syncChildren(parent, children) {
-    const current = parent.childNodes;
-    if (current.length === children.length && children.every((child, index) => current[index] === child)) return;
-    parent.replaceChildren(...children);
-  }
-
-  /**
    * One page and its visible subtree. Nodes are kept per page id: a page whose own look is
    * unchanged keeps its row element across refreshes (selection and depth are patched in
    * place), so adding, renaming or moving one page touches only the rows that differ.
@@ -301,7 +290,7 @@ export function createSidebar(workspace, actions, options = {}) {
     row.classList.toggle("is-selected", selectedPageId() === pageId);
     row.style.setProperty("--depth", String(depth));
     const children = collapsed ? [] : childIds.map((childId) => renderRow(childId, depth + 1));
-    syncChildren(entry.node, [row, ...children]);
+    reconcileChildren(entry.node, [row, ...children]);
     return entry.node;
   }
 
@@ -572,14 +561,14 @@ export function createSidebar(workspace, actions, options = {}) {
     const favorites = workspace.getFavorites();
     const favoriteNodes = favorites.map(renderFavorite).filter((row) => row !== null);
     for (const [id] of favoriteRows) if (!seenFavorites.has(id)) favoriteRows.delete(id);
-    syncChildren(favoritesSection, [favoritesLabel, ...favoriteNodes]);
+    reconcileChildren(favoritesSection, [favoritesLabel, ...favoriteNodes]);
 
     const rootChildren = workspace.getChildren(null);
     const nodes = rootChildren.map((pageId) => renderRow(pageId, 0));
     for (const [id] of rowNodes) if (!seenRows.has(id)) rowNodes.delete(id);
-    syncChildren(tree, nodes.length > 0 ? nodes : [emptyHint]);
+    reconcileChildren(tree, nodes.length > 0 ? nodes : [emptyHint]);
 
-    syncChildren(content, [
+    reconcileChildren(content, [
       header,
       search,
       ...(favoriteNodes.length > 0 ? [favoritesSection] : []),

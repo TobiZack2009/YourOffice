@@ -925,3 +925,95 @@ describe("selection capture and restore", () => {
     expect(editor.dependsOn()).toBeInstanceOf(Set);
   });
 });
+
+describe("keyed rendering", () => {
+  const blocks = () => [
+    { type: "paragraph", runs: [{ text: "one" }] },
+    { type: "paragraph", runs: [{ text: "two" }] },
+    { type: "heading", level: 2, runs: [{ text: "three" }] }
+  ];
+  /** @param {HTMLElement} root @param {string} id */
+  const blockEl = (root, id) => root.querySelector(`[data-block-id="${id}"]`);
+
+  it("keeps every untouched block element when one block changes", () => {
+    const { ws, pageId, editor, order } = setup(blocks());
+    const [a, b, c] = order();
+    const [elA, elB, elC] = [a, b, c].map((id) => blockEl(editor.element, id));
+    ws.dispatch("setBlockRuns", { pageId, blockId: b, runs: [{ text: "changed" }] }, { origin: "elsewhere" });
+    expect(blockEl(editor.element, a)).toBe(elA);
+    expect(blockEl(editor.element, c)).toBe(elC);
+    expect(blockEl(editor.element, b)).not.toBe(elB);
+    expect(blockEl(editor.element, b)?.textContent).toBe("changed");
+    editor.destroy();
+  });
+
+  it("adds, removes and reorders blocks without redrawing the others", () => {
+    const { ws, pageId, editor, order } = setup(blocks());
+    const [a, b, c] = order();
+    const [elA, elC] = [a, c].map((id) => blockEl(editor.element, id));
+    ws.dispatch("deleteBlock", { pageId, blockId: b });
+    expect(blockEl(editor.element, b)).toBeNull();
+    expect(blockEl(editor.element, a)).toBe(elA);
+    expect(blockEl(editor.element, c)).toBe(elC);
+    const { blockId } = ws.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "new" }] } });
+    expect(blockEl(editor.element, blockId)?.textContent).toBe("new");
+    expect(blockEl(editor.element, a)).toBe(elA);
+    expect([...editor.element.querySelectorAll("[data-block-id]")].map((el) => el.getAttribute("data-block-id"))).toEqual(order());
+    editor.destroy();
+  });
+
+  it("keeps the editor in place and the caret in a block that is not the one that changed", () => {
+    const { ws, pageId, editor, order } = setup(blocks());
+    const [a, b] = order();
+    const elA = /** @type {HTMLElement} */ (blockEl(editor.element, a));
+    elA.focus();
+    setCaret(elA, 2);
+    ws.dispatch("setBlockRuns", { pageId, blockId: b, runs: [{ text: "other" }] });
+    expect(blockEl(editor.element, a)).toBe(elA);
+    expect(document.activeElement).toBe(elA);
+    expect(editor.captureSelection()).toMatchObject({ anchor: { blockId: a, offset: 2 } });
+    editor.destroy();
+  });
+
+  it("does not replace a focused block that already shows what the model says", () => {
+    const { ws, pageId, editor, order } = setup(blocks());
+    const [a] = order();
+    const elA = /** @type {HTMLElement} */ (blockEl(editor.element, a));
+    elA.focus();
+    setCaret(elA, 1);
+    // A change from elsewhere that happens to write what the block already holds, plus a style change.
+    ws.dispatch("setBlockRuns", { pageId, blockId: a, runs: [{ text: "one" }] }, { origin: "elsewhere" });
+    elA.textContent = "one!";
+    ws.dispatch("setBlockRuns", { pageId, blockId: a, runs: [{ text: "one!" }] }, { origin: "elsewhere" });
+    expect(blockEl(editor.element, a)).toBe(elA);
+    expect(document.activeElement).toBe(elA);
+    editor.destroy();
+  });
+
+  it("never replaces a block while an input method is composing in it", () => {
+    const { ws, pageId, editor, order } = setup(blocks());
+    const [a] = order();
+    const elA = /** @type {HTMLElement} */ (blockEl(editor.element, a));
+    elA.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+    ws.dispatch("setBlockRuns", { pageId, blockId: a, runs: [{ text: "from elsewhere" }] }, { origin: "elsewhere" });
+    expect(blockEl(editor.element, a)).toBe(elA);
+    elA.dispatchEvent(new Event("compositionend", { bubbles: true }));
+    ws.dispatch("setBlockRuns", { pageId, blockId: a, runs: [{ text: "after" }] }, { origin: "elsewhere" });
+    expect(blockEl(editor.element, a)).not.toBe(elA);
+    expect(blockEl(editor.element, a)?.textContent).toBe("after");
+    editor.destroy();
+  });
+
+  it("redraws a block that holds a reference on every pass", () => {
+    const { ws, pageId, editor, order } = setup([
+      { type: "paragraph", runs: [{ text: "plain" }] },
+      { type: "pageLink", pageId: "x" }
+    ]);
+    const [plain, link] = order();
+    const [elPlain, elLink] = [plain, link].map((id) => blockEl(editor.element, id));
+    editor.refresh();
+    expect(blockEl(editor.element, plain)).toBe(elPlain);
+    expect(blockEl(editor.element, link)).not.toBe(elLink);
+    editor.destroy();
+  });
+});

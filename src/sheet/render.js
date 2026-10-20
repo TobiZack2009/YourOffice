@@ -8,6 +8,7 @@
  * itself). Text is set with textContent only.
  */
 
+import { reconcileChildren } from "../core/reconcile.js";
 import { displayValue } from "./evaluator.js";
 import { explain, isFormulaError } from "./errors.js";
 import {
@@ -410,10 +411,7 @@ export function updateSheet(canvas, content, options) {
     else wrapper = renderTable(table, options);
     next.push(wrapper);
   }
-  const current = canvas.childNodes;
-  if (current.length !== next.length || next.some((wrapper, index) => current[index] !== wrapper)) {
-    canvas.replaceChildren(...next);
-  }
+  reconcileChildren(canvas, next);
   const { width, height } = canvasSize(content);
   canvas.style.minWidth = `${width}px`;
   canvas.style.minHeight = `${height}px`;

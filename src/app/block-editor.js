@@ -13,6 +13,7 @@
  */
 
 import { createId } from "../core/ids.js";
+import { reconcileChildren } from "../core/reconcile.js";
 import { ensureSection } from "../references/catalog.js";
 import {
   canIndentBlock,
@@ -24,7 +25,7 @@ import {
 import { renderBlock, renderRuns } from "../document/render.js";
 import { containerOf } from "../references/containers.js";
 import { findSection, sectionBlockIds, sectionRunIds, sectionsCovering } from "../references/sections.js";
-import { h, clear } from "./dom.js";
+import { h } from "./dom.js";
 import { planBlockMove, promptName, referenceMenuItems, sectionMenuItems, showMenu } from "./handles.js";
 import { icon } from "./icons.js";
 import { NO_LINK, buildLinkCard, buildLinkForm, linkPages, normalizeLinkUrl, pageIdOfLink } from "./link-form.js";
@@ -574,29 +575,116 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     if (((block.runs ?? []).length === 0)) element_.setAttribute("data-placeholder", placeholder);
   }
 
+  /**
+   * What decides how a top-level block looks, as a string; null when the block draws something
+   * that depends on more than its own data (a reference, a page link) and so is drawn on every pass.
+   * @param {Block} block
+   * @returns {string | null}
+   */
+  function blockSignature(block) {
+    /** @type {Block[]} */
+    const parts = [];
+    /** @param {Block} candidate @returns {boolean} */
+    const visit = (candidate) => {
+      if (candidate.type === "pageLink" || candidate.type === "sectionRef") return false;
+      if ((candidate.runs ?? []).some((run) => run.ref)) return false;
+      for (const item of candidate.items ?? []) {
+        if ((item.runs ?? []).some((run) => run.ref)) return false;
+        for (const childId of item.children ?? []) {
+          const child = blockOf(childId);
+          if (child && !visit(child)) return false;
+        }
+      }
+      parts.push(candidate);
+      return true;
+    };
+    return visit(block) ? JSON.stringify(parts) : null;
+  }
+
+  /**
+   * Whether a drawn block should be left exactly as it is although the model changed: the user
+   * is composing in it, or it has the caret and already shows what the model now says (their own
+   * typing, round-tripped). Replacing it would drop the caret or break an input method.
+   * @param {HTMLElement} el
+   * @param {Block} block
+   * @returns {boolean}
+   */
+  function userOwns(el, block) {
+    if (composing && el.contains(composing)) return true;
+    const active = element.ownerDocument.activeElement;
+    if (!active || !el.contains(active) || !owns(active)) return false;
+    if (block.type === "code") {
+      return el.getAttribute("data-block-type") === "code" && normalizeText(active.textContent ?? "") === (block.text ?? "");
+    }
+    if (block.type !== "paragraph" && block.type !== "quote" && block.type !== "heading") return false;
+    const tag = block.type === "quote" ? "blockquote" : block.type === "heading" ? `h${Math.min(3, Math.max(1, block.level ?? 1))}` : "p";
+    if (el !== active || el.tagName.toLowerCase() !== tag) return false;
+    if (!runsEqual(block.runs ?? [], parseInlineRuns(el))) return false;
+    if ((block.runs ?? []).length === 0) el.setAttribute("data-placeholder", block.type === "heading" ? "Heading" : "Write…");
+    else el.removeAttribute("data-placeholder");
+    return true;
+  }
+
+  /** @type {Map<string, { signature: string, el: HTMLElement }>} Drawn top-level blocks by block id. */
+  const blockViews = new Map();
+  /** @type {Node | null} Where an input-method composition is going on. */
+  let composing = null;
+  element.addEventListener("compositionstart", (event) => {
+    composing = /** @type {Node | null} */ (event.target);
+  });
+  element.addEventListener("compositionend", () => {
+    composing = null;
+  });
+
+  /**
+   * Draw the document. Blocks are keyed by id: one whose data is unchanged keeps its element,
+   * so typing elsewhere, or an undo of one block, leaves the rest (and the caret) alone.
+   */
   function render() {
-    clear(element);
     handleTarget = null;
     views.begin();
     const c = content();
     const blocks = c.blockOrder.map((id) => c.blocks[id]).filter(Boolean);
     if (blocks.length === 0) {
       views.end();
+      blockViews.clear();
       const start = h("div", { class: "empty-document", text: "Start writing…" });
       start.addEventListener("mousedown", (event) => {
         event.preventDefault();
         insertAtEnd({ type: "paragraph" });
       });
-      element.append(start);
+      reconcileChildren(element, [start]);
       applySelection();
       return;
     }
+    /** @type {Node[]} */
+    const nodes = [];
+    const live = new Set();
     for (const block of blocks) {
+      live.add(block.id);
+      const signature = blockSignature(block);
+      const entry = blockViews.get(block.id);
+      if (entry && signature !== null && entry.signature === signature) {
+        nodes.push(entry.el);
+        continue;
+      }
+      if (entry && userOwns(entry.el, block)) {
+        entry.signature = signature ?? "";
+        nodes.push(entry.el);
+        continue;
+      }
       const el = renderEditable(block);
-      if (el) element.append(el);
+      if (!el) {
+        blockViews.delete(block.id);
+        continue;
+      }
+      blockViews.set(block.id, { signature: signature ?? "", el });
+      nodes.push(el);
     }
+    for (const id of blockViews.keys()) if (!live.has(id)) blockViews.delete(id);
     views.end();
-    if (blockHandle) element.append(blockHandle);
+    if (blockHandle) nodes.push(blockHandle);
+    reconcileChildren(element, nodes);
     applySelection();
   }
 
