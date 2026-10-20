@@ -53,6 +53,10 @@ export function createRibbon(getContext, options = {}) {
 
   const typeKey = () => pageType ?? "none";
 
+  let built = false;
+  /** @type {string | null} */
+  let builtTab = null;
+
   function activeTabId() {
     const tabs = getTabs(pageType);
     const wanted = session.get().ribbonTabByType[typeKey()] ?? defaultTabId(pageType);
@@ -234,6 +238,7 @@ export function createRibbon(getContext, options = {}) {
     session.set({ ribbonTabByType: { ...session.get().ribbonTabByType, [typeKey()]: tabId } });
     renderTabs();
     renderPanel();
+    builtTab = activeTabId();
     update();
     options.onTabChange?.(tabId);
   }
@@ -279,10 +284,18 @@ export function createRibbon(getContext, options = {}) {
   /** @param {string | null | undefined} type */
   function setPage(type) {
     popovers.close();
-    pageType = type ?? null;
+    const next = type ?? null;
+    // Same page type and tab: the controls already drawn stay; only their state is refreshed.
+    if (built && next === pageType && builtTab === activeTabId()) {
+      update();
+      return;
+    }
+    pageType = next;
     element.setAttribute("data-page-type", pageType ?? "none");
     renderTabs();
     renderPanel();
+    built = true;
+    builtTab = activeTabId();
     update();
   }
 

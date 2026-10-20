@@ -127,6 +127,30 @@ describe("createRibbon", () => {
     return { ribbon, ctx, docEditor, sheetEditor };
   }
 
+  it("keeps its controls when the page type is unchanged, across update and setPage", () => {
+    const { ribbon } = setup();
+    ribbon.setPage("document");
+    const panelControls = [...ribbon.element.querySelectorAll(".ribbon-panel button, .ribbon-panel select")];
+    const tabs = [...ribbon.element.querySelectorAll(".ribbon-tab")];
+    expect(panelControls.length).toBeGreaterThan(3);
+    ribbon.update();
+    ribbon.setPage("document");
+    expect([...ribbon.element.querySelectorAll(".ribbon-panel button, .ribbon-panel select")]).toEqual(panelControls);
+    [...ribbon.element.querySelectorAll(".ribbon-panel button, .ribbon-panel select")].forEach((el, index) =>
+      expect(el).toBe(panelControls[index])
+    );
+    [...ribbon.element.querySelectorAll(".ribbon-tab")].forEach((el, index) => expect(el).toBe(tabs[index]));
+  });
+
+  it("rebuilds when the page type changes", () => {
+    const { ribbon } = setup();
+    ribbon.setPage("document");
+    const tab = ribbon.element.querySelector(".ribbon-tab");
+    ribbon.setPage("sheet");
+    expect(ribbon.element.querySelector(".ribbon-tab")).not.toBe(tab);
+    expect(ribbon.element.getAttribute("data-page-type")).toBe("sheet");
+  });
+
   it("renders only File and View with no page", () => {
     const { ribbon } = setup();
     const tabs = [...ribbon.element.querySelectorAll(".ribbon-tab")].map((tab) => tab.getAttribute("data-tab"));

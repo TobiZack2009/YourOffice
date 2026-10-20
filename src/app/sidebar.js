@@ -11,7 +11,7 @@
  * without simulating drag events.
  */
 
-import { h, clear } from "./dom.js";
+import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { pageExists, pageInfo, pageTitle } from "../workspace/selectors.js";
@@ -111,6 +111,14 @@ export function createSidebar(workspace, actions, options = {}) {
   const content = h("div", { class: "sidebar-content" });
   element.append(content);
   const popovers = createPopoverHost(element);
+  /** @type {Map<string, { signature: string, node: HTMLElement, row: HTMLElement | null }>} Page nodes by page id. */
+  const rowNodes = new Map();
+  /** @type {Map<string, { signature: string, row: HTMLElement }>} Favorite rows by page id. */
+  const favoriteRows = new Map();
+  /** @type {Set<string>} Page ids drawn by the current pass. */
+  let seenRows = new Set();
+  /** @type {Set<string>} */
+  let seenFavorites = new Set();
 
   /** @type {{ editingPageId: string | null, editingTitle: boolean, draggingPageId: string | null }} */
   const state = {
@@ -252,6 +260,21 @@ export function createSidebar(workspace, actions, options = {}) {
   }
 
   /**
+   * Make `parent` hold exactly `children`, in order, touching the DOM only when it differs, so
+   * nodes that stay keep their identity (and focus).
+   * @param {HTMLElement} parent
+   * @param {Node[]} children
+   */
+  function syncChildren(parent, children) {
+    const current = parent.childNodes;
+    if (current.length === children.length && children.every((child, index) => current[index] === child)) return;
+    parent.replaceChildren(...children);
+  }
+
+  /**
+   * One page and its visible subtree. Nodes are kept per page id: a page whose own look is
+   * unchanged keeps its row element across refreshes (selection and depth are patched in
+   * place), so adding, renaming or moving one page touches only the rows that differ.
    * @param {string} pageId
    * @param {number} depth
    * @returns {HTMLElement}
@@ -259,16 +282,43 @@ export function createSidebar(workspace, actions, options = {}) {
   function renderRow(pageId, depth) {
     const page = pageInfo(workspace, pageId);
     if (!page) return h("div");
-
-    const row = h("div", {
-      class: `page-row${selectedPageId() === pageId ? " is-selected" : ""}`,
-      "data-page-id": pageId,
-      draggable: "true",
-      style: `--depth:${depth}`
-    });
+    seenRows.add(pageId);
 
     const childIds = workspace.getChildren(pageId);
     const collapsed = isCollapsed(pageId);
+    const editing = state.editingPageId === pageId;
+    const signature = JSON.stringify([page.type, page.title, childIds.length > 0, collapsed, editing]);
+    let entry = rowNodes.get(pageId);
+    if (!entry) {
+      entry = { signature: "", node: h("div", { class: "page-node", "data-node-id": pageId }), row: null };
+      rowNodes.set(pageId, entry);
+    }
+    if (!entry.row || entry.signature !== signature) {
+      entry.row = buildRow(pageId, page, childIds, collapsed);
+      entry.signature = signature;
+    }
+    const row = entry.row;
+    row.classList.toggle("is-selected", selectedPageId() === pageId);
+    row.style.setProperty("--depth", String(depth));
+    const children = collapsed ? [] : childIds.map((childId) => renderRow(childId, depth + 1));
+    syncChildren(entry.node, [row, ...children]);
+    return entry.node;
+  }
+
+  /**
+   * @param {string} pageId
+   * @param {{ type: string, title: string }} page
+   * @param {string[]} childIds
+   * @param {boolean} collapsed
+   * @returns {HTMLElement}
+   */
+  function buildRow(pageId, page, childIds, collapsed) {
+    const row = h("div", {
+      class: "page-row",
+      "data-page-id": pageId,
+      draggable: "true"
+    });
+
     if (childIds.length > 0) {
       const caret = h("button", {
         class: `page-caret${collapsed ? "" : " is-open"}`,
@@ -369,13 +419,7 @@ export function createSidebar(workspace, actions, options = {}) {
       applyDrop(state.draggingPageId, /** @type {DropTarget} */ (target));
     });
 
-    /** @type {HTMLElement[]} */
-    const children = [];
-    if (!collapsed) {
-      for (const childId of childIds) children.push(renderRow(childId, depth + 1));
-    }
-
-    return h("div", { class: "page-node" }, [row, ...children]);
+    return row;
   }
 
   /**
@@ -394,21 +438,26 @@ export function createSidebar(workspace, actions, options = {}) {
   function renderFavorite(pageId) {
     const page = pageInfo(workspace, pageId);
     if (!page) return null;
-    const row = h("div", {
-      class: `favorite-row${selectedPageId() === pageId ? " is-selected" : ""}`,
-      "data-favorite-id": pageId
-    });
-    row.append(typeGlyph(page.type));
-    row.append(h("button", { class: "favorite-title", type: "button", text: page.title || "Untitled" }));
-    row.addEventListener("click", (event) => selectFromRow(event, pageId));
-    row.append(
-      h("span", { class: "page-actions" }, [
-        rowButton(`Remove ${page.title || "page"} from favorites`, "star", "unfavorite", () =>
-          actions.favorite?.(pageId, false)
-        )
-      ])
-    );
-    return row;
+    seenFavorites.add(pageId);
+    const signature = JSON.stringify([page.type, page.title]);
+    let entry = favoriteRows.get(pageId);
+    if (!entry || entry.signature !== signature) {
+      const row = h("div", { class: "favorite-row", "data-favorite-id": pageId });
+      row.append(typeGlyph(page.type));
+      row.append(h("button", { class: "favorite-title", type: "button", text: page.title || "Untitled" }));
+      row.addEventListener("click", (event) => selectFromRow(event, pageId));
+      row.append(
+        h("span", { class: "page-actions" }, [
+          rowButton(`Remove ${page.title || "page"} from favorites`, "star", "unfavorite", () =>
+            actions.favorite?.(pageId, false)
+          )
+        ])
+      );
+      entry = { signature, row };
+      favoriteRows.set(pageId, entry);
+    }
+    entry.row.classList.toggle("is-selected", selectedPageId() === pageId);
+    return entry.row;
   }
 
   /**
@@ -424,26 +473,72 @@ export function createSidebar(workspace, actions, options = {}) {
     }
   }
 
-  function render() {
-    clear(content);
+  // The skeleton is built once; render() patches it.
+  const titleText = h("span", { class: "workspace-title-text" });
+  const titleRow = h("div", { class: "workspace-title" }, [titleText]);
+  titleText.addEventListener("dblclick", () => {
+    state.editingTitle = true;
+    render();
+    const input = /** @type {HTMLInputElement | null} */ (element.querySelector(".workspace-title-input"));
+    input?.focus();
+    input?.select();
+  });
+  /** @type {HTMLInputElement | null} */
+  let titleInput = null;
 
-    const titleText = h("span", { class: "workspace-title-text", text: workspace.title || "Untitled workspace" });
-    const titleRow = h("div", { class: "workspace-title" }, [titleText]);
-    titleText.addEventListener("dblclick", () => {
-      state.editingTitle = true;
-      render();
-      const input = /** @type {HTMLInputElement | null} */ (element.querySelector(".workspace-title-input"));
-      input?.focus();
-      input?.select();
-    });
-    if (state.editingTitle) {
-      clear(titleRow);
-      const input = h("input", {
-        class: "workspace-title-input",
-        value: workspace.title,
-        "aria-label": "Workspace title"
-      });
+  const newPage = h("button", {
+    class: "new-page-trigger",
+    type: "button",
+    title: "New page",
+    "aria-label": "New page",
+    "data-action": "new-page"
+  });
+  newPage.append(icon("plus", { size: 16 }));
+  newPage.addEventListener("click", () => openTypePicker(newPage));
+  const header = h("div", { class: "sidebar-header" }, [titleRow, newPage]);
+
+  const search = h("button", {
+    class: "sidebar-search",
+    type: "button",
+    "aria-label": "Search pages",
+    "data-action": "quick-find"
+  });
+  search.append(
+    icon("search", { size: 15 }),
+    h("span", { class: "sidebar-search-text", text: "Search" }),
+    h("kbd", { text: "⌘K" })
+  );
+  search.addEventListener("click", () => actions.openQuickFind?.());
+
+  const favoritesLabel = h("div", { class: "sidebar-section-label", text: "Favorites" });
+  const favoritesSection = h("div", { class: "sidebar-section sidebar-favorites" }, [favoritesLabel]);
+  const pagesLabel = h("div", { class: "sidebar-section-label", text: "Pages" });
+  const tree = h("div", { class: "page-tree" });
+  const emptyHint = h("p", { class: "empty-hint", text: "No pages yet — use + to create one." });
+
+  // Root drop zone: dropping here moves a page to the top level.
+  const rootZone = h("div", { class: "root-drop-zone", text: "Drop here to place at top level" });
+  rootZone.addEventListener("dragover", (event) => {
+    if (!state.draggingPageId) return;
+    event.preventDefault();
+    rootZone.classList.add("is-active");
+  });
+  rootZone.addEventListener("dragleave", () => rootZone.classList.remove("is-active"));
+  rootZone.addEventListener("drop", (event) => {
+    if (!state.draggingPageId) return;
+    event.preventDefault();
+    rootZone.classList.remove("is-active");
+    applyDrop(state.draggingPageId, { type: "root" });
+  });
+
+  function renderTitle() {
+    titleText.textContent = workspace.title || "Untitled workspace";
+    if (state.editingTitle && !titleInput) {
+      const input = /** @type {HTMLInputElement} */ (
+        h("input", { class: "workspace-title-input", value: workspace.title, "aria-label": "Workspace title" })
+      );
       const commit = () => {
+        if (!state.editingTitle) return;
         state.editingTitle = false;
         const value = input.value.trim();
         if (value !== workspace.title) actions.renameWorkspace(value);
@@ -460,71 +555,38 @@ export function createSidebar(workspace, actions, options = {}) {
         }
       });
       input.addEventListener("blur", commit);
-      titleRow.append(input);
+      titleInput = input;
+      titleRow.replaceChildren(input);
+    } else if (!state.editingTitle && titleInput) {
+      titleInput = null;
+      titleRow.replaceChildren(titleText);
     }
+  }
 
-    const newPage = h("button", {
-      class: "new-page-trigger",
-      type: "button",
-      title: "New page",
-      "aria-label": "New page",
-      "data-action": "new-page"
-    });
-    newPage.append(icon("plus", { size: 16 }));
-    newPage.addEventListener("click", () => openTypePicker(newPage));
-    content.append(h("div", { class: "sidebar-header" }, [titleRow, newPage]));
+  function render() {
+    renderTitle();
 
-    const search = h("button", {
-      class: "sidebar-search",
-      type: "button",
-      "aria-label": "Search pages",
-      "data-action": "quick-find"
-    });
-    search.append(
-      icon("search", { size: 15 }),
-      h("span", { class: "sidebar-search-text", text: "Search" }),
-      h("kbd", { text: "⌘K" })
-    );
-    search.addEventListener("click", () => actions.openQuickFind?.());
-    content.append(search);
+    seenRows = new Set();
+    seenFavorites = new Set();
 
     const favorites = workspace.getFavorites();
-    if (favorites.length > 0) {
-      const section = h("div", { class: "sidebar-section sidebar-favorites" }, [
-        h("div", { class: "sidebar-section-label", text: "Favorites" })
-      ]);
-      for (const pageId of favorites) {
-        const row = renderFavorite(pageId);
-        if (row) section.append(row);
-      }
-      content.append(section);
-    }
+    const favoriteNodes = favorites.map(renderFavorite).filter((row) => row !== null);
+    for (const [id] of favoriteRows) if (!seenFavorites.has(id)) favoriteRows.delete(id);
+    syncChildren(favoritesSection, [favoritesLabel, ...favoriteNodes]);
 
-    const tree = h("div", { class: "page-tree" });
     const rootChildren = workspace.getChildren(null);
-    for (const pageId of rootChildren) {
-      tree.append(renderRow(pageId, 0));
-    }
-    if (rootChildren.length === 0) {
-      tree.append(h("p", { class: "empty-hint", text: "No pages yet — use + to create one." }));
-    }
-    content.append(h("div", { class: "sidebar-section-label", text: "Pages" }), tree);
+    const nodes = rootChildren.map((pageId) => renderRow(pageId, 0));
+    for (const [id] of rowNodes) if (!seenRows.has(id)) rowNodes.delete(id);
+    syncChildren(tree, nodes.length > 0 ? nodes : [emptyHint]);
 
-    // Root drop zone: dropping here moves a page to the top level.
-    const rootZone = h("div", { class: "root-drop-zone", text: "Drop here to place at top level" });
-    rootZone.addEventListener("dragover", (event) => {
-      if (!state.draggingPageId) return;
-      event.preventDefault();
-      rootZone.classList.add("is-active");
-    });
-    rootZone.addEventListener("dragleave", () => rootZone.classList.remove("is-active"));
-    rootZone.addEventListener("drop", (event) => {
-      if (!state.draggingPageId) return;
-      event.preventDefault();
-      rootZone.classList.remove("is-active");
-      applyDrop(state.draggingPageId, { type: "root" });
-    });
-    content.append(rootZone);
+    syncChildren(content, [
+      header,
+      search,
+      ...(favoriteNodes.length > 0 ? [favoritesSection] : []),
+      pagesLabel,
+      tree,
+      rootZone
+    ]);
   }
 
   function refresh() {

@@ -213,3 +213,83 @@ describe("createSidebar", () => {
     expect(actions.renameWorkspace).toHaveBeenCalledWith("New Name");
   });
 });
+
+describe("sidebar keyed rendering", () => {
+  function mount() {
+    const { ws, a, b, a1 } = tree();
+    const actions = {
+      select: vi.fn(),
+      create: vi.fn(),
+      rename: vi.fn(),
+      remove: vi.fn(),
+      move: vi.fn(),
+      renameWorkspace: vi.fn(),
+      favorite: vi.fn(),
+      openQuickFind: vi.fn()
+    };
+    const sidebar = createSidebar(ws, actions);
+    document.body.append(sidebar.element);
+    /** @param {string} id */
+    const row = (id) => sidebar.element.querySelector(`.page-row[data-page-id="${id}"]`);
+    return { ws, sidebar, a, b, a1, row };
+  }
+
+  it("keeps every row element across a refresh", () => {
+    const { sidebar, a, b, a1, row } = mount();
+    const before = [row(a), row(b), row(a1)];
+    const header = sidebar.element.querySelector(".sidebar-header");
+    sidebar.refresh();
+    expect([row(a), row(b), row(a1)]).toEqual(before);
+    [row(a), row(b), row(a1)].forEach((el, index) => expect(el).toBe(before[index]));
+    expect(sidebar.element.querySelector(".sidebar-header")).toBe(header);
+  });
+
+  it("adds a row for a new page and leaves the others alone", () => {
+    const { ws, sidebar, a, b, a1, row } = mount();
+    const before = [row(a), row(b), row(a1)];
+    const { pageId } = ws.dispatch("createPage", { type: "document", title: "C" });
+    sidebar.refresh();
+    expect(row(pageId)).not.toBeNull();
+    expect([row(a), row(b), row(a1)]).toEqual(before);
+    [row(a), row(b), row(a1)].forEach((el, index) => expect(el).toBe(before[index]));
+  });
+
+  it("rebuilds only the renamed row", () => {
+    const { ws, sidebar, a, b, a1, row } = mount();
+    const [rowA, rowB, rowA1] = [row(a), row(b), row(a1)];
+    ws.dispatch("renamePage", { pageId: b, title: "Renamed" });
+    sidebar.refresh();
+    expect(row(b)).not.toBe(rowB);
+    expect(row(b)?.querySelector(".page-title")?.textContent).toBe("Renamed");
+    expect(row(a)).toBe(rowA);
+    expect(row(a1)).toBe(rowA1);
+  });
+
+  it("changes the selection by patching a class, not by rebuilding rows", () => {
+    const { sidebar, a, b, row } = mount();
+    const rowA = row(a);
+    const rowB = row(b);
+    sidebar.select(b);
+    expect(row(a)).toBe(rowA);
+    expect(row(b)).toBe(rowB);
+    expect(rowB?.classList.contains("is-selected")).toBe(true);
+    expect(rowA?.classList.contains("is-selected")).toBe(false);
+  });
+
+  it("drops the row of a deleted page and keeps its siblings", () => {
+    const { ws, sidebar, a, b, row } = mount();
+    const rowA = row(a);
+    ws.dispatch("deletePage", { pageId: b });
+    sidebar.refresh();
+    expect(row(b)).toBeNull();
+    expect(row(a)).toBe(rowA);
+  });
+
+  it("keeps a row when a sibling is collapsed or its parent folds", () => {
+    const { sidebar, a, b, a1, row } = mount();
+    const rowB = row(b);
+    clickIn(sidebar, `.page-row[data-page-id="${a}"] .page-caret`);
+    expect(row(a1)).toBeNull();
+    expect(row(b)).toBe(rowB);
+  });
+});
