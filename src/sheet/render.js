@@ -118,6 +118,97 @@ function resizeHandle(doc, role, indexAttribute, index) {
   return handle;
 }
 
+/** Structure of a table drawn in a wrapper; while it matches, the wrapper is patched, not rebuilt. */
+const structures = new WeakMap();
+
+/**
+ * @param {Table} table
+ * @param {SheetRenderOptions} [options]
+ * @returns {string}
+ */
+function structureOf(table, options) {
+  return JSON.stringify([table.columnCount, table.rowCount, table.merges, Boolean(options?.interactive)]);
+}
+
+/**
+ * Set a cell's displayed text, leaving any element children (fill handle, in-cell editor) alone.
+ * @param {Document} doc
+ * @param {HTMLElement} cell
+ * @param {string} text
+ */
+function setCellText(doc, cell, text) {
+  let node = null;
+  for (const child of cell.childNodes) {
+    if (child.nodeType === 3) {
+      node = child;
+      break;
+    }
+  }
+  if (text === "") {
+    node?.remove();
+  } else if (node) {
+    if (node.nodeValue !== text) node.nodeValue = text;
+  } else {
+    cell.insertBefore(doc.createTextNode(text), cell.firstChild);
+  }
+}
+
+/**
+ * Everything about a cell that comes from the model and the selection: kind, error, text,
+ * selection classes and the fill handle. Used for the first draw and for in-place patches.
+ * @param {Document} doc
+ * @param {HTMLElement} cell
+ * @param {Table} table
+ * @param {number} col
+ * @param {number} row
+ * @param {SheetRenderOptions | undefined} options
+ */
+function paintCell(doc, cell, table, col, row, options) {
+  const merge = findMerge(table, col, row);
+  const info = resolveCell(table, col, row, options);
+  if (cell.getAttribute("data-kind") !== info.kind) cell.setAttribute("data-kind", info.kind);
+  cell.classList.toggle("is-error", info.error);
+  if (info.error && info.explanation) {
+    if (cell.title !== info.explanation) cell.title = info.explanation;
+  } else if (cell.hasAttribute("title")) {
+    cell.removeAttribute("title");
+  }
+  setCellText(doc, cell, info.display);
+
+  const selected = options?.selected;
+  const ranges = (selected?.ranges ?? (selected?.range ? [selected.range] : [])).filter(
+    (range) => range.tableId === table.id
+  );
+  const handleRange = options?.interactive && ranges.length > 0 ? ranges[ranges.length - 1] : null;
+  // A merged anchor stands for its whole block when testing selection.
+  const block = merge ? { start: merge.start, end: merge.end } : { start: { col, row }, end: { col, row } };
+  const here = Boolean(selected && selected.tableId === table.id);
+  const isSelected = here && rectContains(block, /** @type {any} */ (selected).col, /** @type {any} */ (selected).row);
+  let inRange = false;
+  if (here && ranges.length > 0) {
+    const multiple = ranges.length > 1 || ranges.some((r) => r.start.col !== r.end.col || r.start.row !== r.end.row);
+    inRange = multiple && ranges.some((range) => rectsIntersect(block, range));
+  }
+  cell.classList.toggle("is-selected", isSelected);
+  cell.classList.toggle("is-in-range", inRange);
+  // The fill handle sits in the last cell of the active (last) range.
+  const wantsHandle = here && handleRange !== null && rectContains(block, handleRange.end.col, handleRange.end.row);
+  let handle = null;
+  for (const child of cell.children) {
+    if (child.classList.contains("sheet-fill-handle")) handle = child;
+  }
+  if (wantsHandle && !handle) {
+    const created = doc.createElement("span");
+    created.className = "sheet-fill-handle";
+    created.setAttribute("data-role", "fill-handle");
+    created.title = "Drag to fill";
+    cell.appendChild(created);
+  } else if (!wantsHandle && handle) {
+    handle.remove();
+  }
+  cell.classList.toggle("is-interactive", Boolean(options?.interactive));
+}
+
 /**
  * Render one table as an HTML table with headers.
  * @param {Table} table
@@ -174,10 +265,6 @@ export function renderTable(table, options) {
   const body = doc.createElement("tbody");
   /** @type {Set<string>} */
   const covered = new Set();
-  const ranges = (options?.selected?.ranges ?? (options?.selected?.range ? [options.selected.range] : [])).filter(
-    (range) => range.tableId === table.id
-  );
-  const handleRange = options?.interactive && ranges.length > 0 ? ranges[ranges.length - 1] : null;
 
   for (let row = 0; row < table.rowCount; row++) {
     const tr = doc.createElement("tr");
@@ -215,39 +302,7 @@ export function renderTable(table, options) {
         continue; // defensive: covered cell reached out of order
       }
 
-      const info = resolveCell(table, col, row, options);
-      cell.setAttribute("data-kind", info.kind);
-      if (info.error) {
-        cell.classList.add("is-error");
-        if (info.explanation) cell.title = info.explanation;
-      }
-      cell.textContent = info.display;
-
-      // A merged anchor stands for its whole block when testing selection.
-      const block = merge
-        ? { start: merge.start, end: merge.end }
-        : { start: { col, row }, end: { col, row } };
-      const selected = options?.selected;
-      if (selected && selected.tableId === table.id) {
-        if (rectContains(block, selected.col, selected.row)) cell.classList.add("is-selected");
-        if (ranges.length > 0) {
-          const multiple =
-            ranges.length > 1 || ranges.some((r) => r.start.col !== r.end.col || r.start.row !== r.end.row);
-          if (multiple && ranges.some((range) => rectsIntersect(block, range))) {
-            cell.classList.add("is-in-range");
-          }
-        }
-        // The fill handle sits in the last cell of the active (last) range.
-        if (handleRange && rectContains(block, handleRange.end.col, handleRange.end.row)) {
-          const handle = doc.createElement("span");
-          handle.className = "sheet-fill-handle";
-          handle.setAttribute("data-role", "fill-handle");
-          handle.title = "Drag to fill";
-          cell.appendChild(handle);
-        }
-      }
-      if (options?.interactive) cell.classList.add("is-interactive");
-
+      paintCell(doc, cell, table, col, row, options);
       tr.appendChild(cell);
     }
 
@@ -256,7 +311,53 @@ export function renderTable(table, options) {
 
   grid.appendChild(body);
   wrapper.appendChild(grid);
+  structures.set(wrapper, structureOf(table, options));
   return wrapper;
+}
+
+/**
+ * Bring a drawn table up to date without rebuilding it: the cells stay the same elements and
+ * only text, classes and sizes that differ are written. Valid while `structureOf` is unchanged.
+ * @param {HTMLElement} wrapper
+ * @param {Table} table
+ * @param {SheetRenderOptions} [options]
+ */
+function patchTable(wrapper, table, options) {
+  const doc = getDocument(options);
+  wrapper.style.left = `${table.position.x}px`;
+  wrapper.style.top = `${table.position.y}px`;
+  const name = wrapper.querySelector(".sheet-table-name");
+  if (name && name.textContent !== table.name) name.textContent = table.name;
+
+  for (const col of wrapper.querySelectorAll("col[data-col]")) {
+    const width = `${columnWidthOf(table, Number(col.getAttribute("data-col")))}px`;
+    if (/** @type {HTMLElement} */ (col).style.width !== width) /** @type {HTMLElement} */ (col).style.width = width;
+  }
+  for (const tr of wrapper.querySelectorAll("tbody > tr")) {
+    const height = `${rowHeightOf(table, Number(tr.getAttribute("data-row")))}px`;
+    if (/** @type {HTMLElement} */ (tr).style.height !== height) /** @type {HTMLElement} */ (tr).style.height = height;
+  }
+  for (const grip of wrapper.querySelectorAll(".sheet-resize-handle.is-dragging")) grip.classList.remove("is-dragging");
+  for (const cell of wrapper.querySelectorAll("td.sheet-cell")) {
+    paintCell(doc, /** @type {HTMLElement} */ (cell), table, Number(cell.getAttribute("data-col")), Number(cell.getAttribute("data-row")), options);
+  }
+}
+
+/**
+ * @param {SheetContent} content
+ * @returns {{ width: number, height: number }}
+ */
+function canvasSize(content) {
+  let width = 480;
+  let height = 320;
+  for (const id of content.tableOrder) {
+    const table = content.tables[id];
+    if (!table) continue;
+    const extent = tableExtent(table);
+    width = Math.max(width, table.position.x + extent.width + 48);
+    height = Math.max(height, table.position.y + extent.height + 48);
+  }
+  return { width, height };
 }
 
 /**
@@ -272,19 +373,48 @@ export function renderSheet(content, options) {
   canvas.setAttribute("role", "group");
   canvas.setAttribute("aria-label", "Sheet canvas");
 
-  let width = 480;
-  let height = 320;
-
   for (const id of content.tableOrder) {
     const table = content.tables[id];
-    if (!table) continue;
-    canvas.appendChild(renderTable(table, options));
-    const extent = tableExtent(table);
-    width = Math.max(width, table.position.x + extent.width + 48);
-    height = Math.max(height, table.position.y + extent.height + 48);
+    if (table) canvas.appendChild(renderTable(table, options));
   }
 
+  const { width, height } = canvasSize(content);
   canvas.style.minWidth = `${width}px`;
   canvas.style.minHeight = `${height}px`;
   return canvas;
+}
+
+/**
+ * Update a canvas made by `renderSheet` to match `content`. Tables are keyed by id: a table
+ * whose structure (size, merges) is unchanged keeps its element and its cells, which are
+ * patched in place; a changed table is redrawn; a removed one is dropped. The canvas must hold
+ * nothing but tables (the editor takes its handle off first).
+ * @param {HTMLElement} canvas
+ * @param {SheetContent} content
+ * @param {SheetRenderOptions} [options]
+ */
+export function updateSheet(canvas, content, options) {
+  /** @type {Map<string, HTMLElement>} */
+  const drawn = new Map();
+  for (const child of canvas.children) {
+    const id = child.getAttribute("data-table-id");
+    if (id && child.classList.contains("sheet-table")) drawn.set(id, /** @type {HTMLElement} */ (child));
+  }
+  /** @type {HTMLElement[]} */
+  const next = [];
+  for (const id of content.tableOrder) {
+    const table = content.tables[id];
+    if (!table) continue;
+    let wrapper = drawn.get(id);
+    if (wrapper && structures.get(wrapper) === structureOf(table, options)) patchTable(wrapper, table, options);
+    else wrapper = renderTable(table, options);
+    next.push(wrapper);
+  }
+  const current = canvas.childNodes;
+  if (current.length !== next.length || next.some((wrapper, index) => current[index] !== wrapper)) {
+    canvas.replaceChildren(...next);
+  }
+  const { width, height } = canvasSize(content);
+  canvas.style.minWidth = `${width}px`;
+  canvas.style.minHeight = `${height}px`;
 }

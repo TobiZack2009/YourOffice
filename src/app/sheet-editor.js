@@ -11,7 +11,7 @@
 import { defaultNotice } from "./notice.js";
 import { explain, isFormulaError } from "../sheet/errors.js";
 import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
-import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf } from "../sheet/render.js";
+import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf, updateSheet } from "../sheet/render.js";
 import { TableEngines, changeAffectsBook } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
 import { readSheetSelection } from "./selection.js";
@@ -372,7 +372,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     }
     suppressBlur = true;
     td.classList.add("is-editing");
-    td.append(cellInput);
+    if (cellInput.parentElement !== td) td.append(cellInput);
     if (focus) {
       cellInput.focus({ preventScroll: true });
       const end = cellInput.value.length;
@@ -822,26 +822,31 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     clampSelection();
     if (clipboard && !snapshot.tables[clipboard.tableId]) clipboard = null;
 
-    // Re-rendering replaces the cells, so the in-cell editor is lifted out and put back.
+    // The canvas is patched in place: tables are keyed by id and cells by position, so the
+    // in-cell editor stays where it is unless its table had to be redrawn (a resize, a merge).
     const caret = cellEditing ? [cellInput.selectionStart ?? 0, cellInput.selectionEnd ?? 0] : null;
     const hadFocus = document.activeElement === cellInput;
+    const view = {
+      engines,
+      interactive: true,
+      selected: selection
+        ? {
+            tableId: selection.tableId,
+            col: selection.anchor.col,
+            row: selection.anchor.row,
+            ranges: allRanges()
+          }
+        : null
+    };
     suppressBlur = true;
-    clear(canvasWrap);
+    const canvas = /** @type {HTMLElement | null} */ (canvasWrap.querySelector(":scope > .sheet-canvas"));
+    canvas?.querySelector(".sheet-handle")?.remove();
+    if (canvas) updateSheet(canvas, snapshot, view);
+    else canvasWrap.append(renderSheet(snapshot, view));
+    for (const td of canvasWrap.querySelectorAll("td.is-editing")) {
+      if (!cellEditing || td !== cellInput.parentElement) td.classList.remove("is-editing");
+    }
     suppressBlur = false;
-    canvasWrap.append(
-      renderSheet(snapshot, {
-        engines,
-        interactive: true,
-        selected: selection
-          ? {
-              tableId: selection.tableId,
-              col: selection.anchor.col,
-              row: selection.anchor.row,
-              ranges: allRanges()
-            }
-          : null
-      })
-    );
 
     if (selection) {
       const table = snapshot.tables[selection.tableId];

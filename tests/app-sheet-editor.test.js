@@ -882,3 +882,72 @@ describe("selection capture and restore", () => {
     expect(editor.restoreSelection(null)).toBe(false);
   });
 });
+
+describe("keyed rendering", () => {
+  it("keeps the table and every cell element when a cell's content changes", () => {
+    const { ws, pageId, tableId, editor } = setup();
+    const grid = query(editor.element, ".sheet-table");
+    const cells = [...editor.element.querySelectorAll("td.sheet-cell")];
+    ws.dispatch("setCell", { pageId, tableId, col: 1, row: 1, cell: { value: "hello" } });
+    expect(query(editor.element, ".sheet-table")).toBe(grid);
+    const after = [...editor.element.querySelectorAll("td.sheet-cell")];
+    expect(after).toHaveLength(cells.length);
+    after.forEach((cell, index) => expect(cell).toBe(cells[index]));
+    expect(query(editor.element, '[data-key="1,1"]')?.textContent).toBe("hello");
+    editor.destroy();
+  });
+
+  it("keeps cells when the selection moves, patching classes only", () => {
+    const { editor, tableId } = setup();
+    editor.selectCell(tableId, 0, 0);
+    const first = query(editor.element, '[data-key="0,0"]');
+    const second = query(editor.element, '[data-key="1,1"]');
+    editor.selectCell(tableId, 1, 1);
+    expect(query(editor.element, '[data-key="0,0"]')).toBe(first);
+    expect(query(editor.element, '[data-key="1,1"]')).toBe(second);
+    expect(first?.classList.contains("is-selected")).toBe(false);
+    expect(second?.classList.contains("is-selected")).toBe(true);
+    editor.destroy();
+  });
+
+  it("clears a text that was removed, and the fill handle follows the selection", () => {
+    const { ws, pageId, tableId, editor } = setup();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: "x" } });
+    editor.selectCell(tableId, 0, 0);
+    expect(query(editor.element, '[data-key="0,0"] .sheet-fill-handle')).toBeTruthy();
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: null });
+    expect(query(editor.element, '[data-key="0,0"]')?.getAttribute("data-kind")).toBe("blank");
+    expect(query(editor.element, '[data-key="0,0"]')?.textContent).toBe("");
+    editor.selectCell(tableId, 2, 2);
+    expect(query(editor.element, '[data-key="0,0"] .sheet-fill-handle')).toBeNull();
+    expect(query(editor.element, '[data-key="2,2"] .sheet-fill-handle')).toBeTruthy();
+    editor.destroy();
+  });
+
+  it("redraws only the table whose structure changed", () => {
+    const { ws, pageId, tableId, editor } = setup();
+    ws.dispatch("createTable", { pageId, name: "Other", rows: 2, columns: 2, x: 400, y: 0 });
+    const tables = [...editor.element.querySelectorAll(".sheet-table")];
+    expect(tables).toHaveLength(2);
+    ws.dispatch("setCell", { pageId, tableId, col: 0, row: 0, cell: { value: 1 } });
+    [...editor.element.querySelectorAll(".sheet-table")].forEach((el, index) => expect(el).toBe(tables[index]));
+    ws.dispatch("mergeCells", { pageId, tableId, start: { col: 0, row: 0 }, end: { col: 1, row: 0 } });
+    const after = [...editor.element.querySelectorAll(".sheet-table")];
+    expect(after[0]).not.toBe(tables[0]);
+    expect(after[1]).toBe(tables[1]);
+    editor.destroy();
+  });
+
+  it("leaves the in-cell editor in place while another cell changes", () => {
+    const { ws, pageId, tableId, editor } = setup();
+    editor.selectCell(tableId, 0, 0);
+    const td = query(editor.element, '[data-key="0,0"]');
+    td?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const input = td?.querySelector("input");
+    expect(input).toBeTruthy();
+    ws.dispatch("setCell", { pageId, tableId, col: 2, row: 2, cell: { value: 5 } });
+    expect(query(editor.element, '[data-key="0,0"]')).toBe(td);
+    expect(td?.querySelector("input")).toBe(input);
+    editor.destroy();
+  });
+});
