@@ -47,6 +47,11 @@ s/strike/del, code, a[href]). Ref runs are atomic.
 - Each run-capable block or list item is its own `contenteditable`. Structure changes (Enter
   split, Backspace merge/delete, list item split/exit, arrow navigation) dispatch commands and
   re-render; the browser never restructures the DOM.
+- Rendering is keyed by block id: a block whose data (and nested list children) is unchanged
+  keeps its element, and blocks are reconciled in place. A block the user owns -- composing
+  (`compositionstart..end`), or focused and already showing what the model says -- is never
+  replaced. Page-link, section-embed and inline-reference blocks are redrawn on every pass
+  because they read other pages.
 - Typing commits on `input` via `setBlockRuns` / `updateBlock`. The store `change` handler
   skips re-rendering for inline-only commits, which keeps the caret stable.
 - Marks use `document.execCommand` when available, else a manual Range wrap/unwrap (jsdom).

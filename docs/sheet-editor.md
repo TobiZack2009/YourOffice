@@ -60,8 +60,10 @@ in the cell holding the active range's end (a merged anchor counts for its whole
   `"=..."` -> formula). It refreshes on selection change even when focused unless it holds an
   uncommitted edit (`inputDirty`), and keeps native cut/copy/paste while it has typed text.
 - **In-cell editing.** A persistent `input.sheet-cell-editor` sits inside the active `td`
-  (`placeCellEditor`). `refresh()` re-renders the whole canvas, so it saves caret/focus, lifts
-  the input out under `suppressBlur`, and restores it. Double-click, F2 or a printable key
+  (`placeCellEditor`). `refresh()` patches the canvas with `updateSheet`
+  (tables keyed by id, cells by position; a table whose columns, rows or merges changed is
+  redrawn), so the input normally stays where it is; it still guards with `suppressBlur` and
+  restores caret/focus when its table had to be redrawn. Double-click, F2 or a printable key
   starts an edit; Enter/Tab commit and move, Escape cancels, blur commits. Merged-covered
   cells fall back to the formula bar. Keyboard focus rests on the grid (`canvasWrap`,
   `focusGrid()`).

@@ -641,3 +641,73 @@ describe("selection capture and restore", () => {
     expect(editor.dependsOn().size).toBe(1);
   });
 });
+
+describe("keyed rendering", () => {
+  const thumb = (editor, id) => editor.element.querySelector(`.slide-strip .slide-thumb-wrap[data-slide-id="${id}"]`);
+
+  it("keeps the stage and the objects that did not change when one object changes", () => {
+    const { ws, pageId, slideId, a, b, editor } = setup();
+    const stage = editor.element.querySelector(".stage");
+    const elA = objectEl(editor, a);
+    const elB = objectEl(editor, b);
+    ws.dispatch("updateObject", { pageId, slideId, objectId: a, patch: { x: 140 } });
+    expect(editor.element.querySelector(".stage")).toBe(stage);
+    expect(objectEl(editor, b)).toBe(elB);
+    expect(objectEl(editor, a)).not.toBe(elA);
+    expect(objectEl(editor, a).style.left).toBe("140px");
+  });
+
+  it("adds and removes stage objects without touching the others", () => {
+    const { ws, pageId, slideId, a, b, editor } = setup();
+    const elA = objectEl(editor, a);
+    const extra = createObject("shape", { x: 10, y: 10, width: 50, height: 50 });
+    ws.dispatch("insertObject", { pageId, slideId, object: extra });
+    expect(objectEl(editor, extra.id)).toBeTruthy();
+    expect(objectEl(editor, a)).toBe(elA);
+    ws.dispatch("deleteObjects", { pageId, slideId, objectIds: [b] });
+    expect(objectEl(editor, b)).toBeNull();
+    expect(objectEl(editor, a)).toBe(elA);
+    const order = [...editor.element.querySelectorAll(".stage .slide-object")].map((el) => el.dataset.objectId);
+    expect(order).toEqual([a, extra.id]);
+  });
+
+  it("redraws the object again after a preview swapped its element", () => {
+    const { ws, pageId, slideId, a, editor } = setup();
+    editor.selectObjects([a]);
+    mouse("mousedown", objectEl(editor, a), 150, 120);
+    mouse("mousemove", document, 220, 160);
+    const previewed = objectEl(editor, a);
+    mouse("mouseup", document, 220, 160);
+    expect(objectEl(editor, a)).not.toBe(previewed);
+    expect(objectEl(editor, a).style.left).toBe(`${ws.getPage(pageId).content.slides[slideId].objects[a].x}px`);
+  });
+
+  it("keeps untouched thumbnails when one slide changes, and renumbers when slides move", () => {
+    const { ws, pageId, slideId, a, editor } = setup();
+    editor.newSlide("blank");
+    const [first, second] = editor.getContent().slideOrder;
+    const thumbFirst = thumb(editor, first);
+    const thumbSecond = thumb(editor, second);
+    ws.dispatch("updateObject", { pageId, slideId: first, objectId: a, patch: { x: 300 } });
+    expect(thumb(editor, second)).toBe(thumbSecond);
+    expect(thumb(editor, first)).not.toBe(thumbFirst);
+
+    const kept = thumb(editor, first);
+    editor.moveSlide(second, 0);
+    expect(thumb(editor, first)).toBe(kept);
+    expect(thumb(editor, first).querySelector(".slide-number").textContent).toBe("2");
+    expect(thumb(editor, second).querySelector(".slide-number").textContent).toBe("1");
+    expect([...editor.element.querySelectorAll(".slide-thumb-wrap")].map((el) => el.dataset.slideId)).toEqual([second, first]);
+  });
+
+  it("moves the current mark between thumbnails without replacing them", () => {
+    const { editor } = setup();
+    editor.newSlide("blank");
+    const [first, second] = editor.getContent().slideOrder;
+    const thumbFirst = thumb(editor, first);
+    editor.selectSlide(first);
+    expect(thumb(editor, first)).toBe(thumbFirst);
+    expect(thumbFirst.classList.contains("is-current")).toBe(true);
+    expect(thumb(editor, second).classList.contains("is-current")).toBe(false);
+  });
+});

@@ -44,6 +44,7 @@ import {
 import { renderObject, renderSlide } from "../presentation/render.js";
 import { createPreview } from "./animation-preview.js";
 import { createAnimationTimeline, effectLabel, effectPatch, objectLabel } from "./animation-timeline.js";
+import { reconcileChildren } from "../core/reconcile.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { caretOffset, parseInlineRuns, runsEqual } from "./inline.js";
@@ -276,6 +277,10 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   let scale = 1;
   /** @type {Map<string, HTMLElement>} */
   const objectEls = new Map();
+  /** What each stage object was drawn from, so an unchanged one keeps its element. @type {Map<string, { signature: string | null, el: HTMLElement }>} */
+  const objectViews = new Map();
+  /** Slide, scale and size the stage was built for; the stage is reused while it holds. */
+  let stageKey = "";
   /** @type {ResizeObserver | null} */
   let resizeObserver = null;
   /** @type {string | null} */
@@ -499,18 +504,64 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     return Math.min(MAX_STAGE_SCALE, fitScale(available, getSize()));
   }
 
+  /**
+   * What an object's drawn element depends on, or null when it also reads other pages (a
+   * reference, an inline reference) and so must be redrawn on every pass.
+   * @param {SlideObject} object
+   * @returns {string | null}
+   */
+  function objectSignature(object) {
+    if (object.type === "reference") return null;
+    if ((object.text?.runs ?? []).some((run) => run.ref)) return null;
+    return JSON.stringify(object);
+  }
+
+  /**
+   * Make the slide element hold the slide's objects in order. An object whose data is unchanged
+   * keeps its element (the same node across a change); one that changed, or whose element was
+   * swapped for a preview or the text editor, is drawn again.
+   * @param {Slide} slide
+   * @param {HTMLElement} target
+   */
+  function syncObjects(slide, target) {
+    const hooks = slideHooks();
+    /** @type {HTMLElement[]} */
+    const nodes = [];
+    const seen = new Set();
+    for (const id of slide.objectOrder) {
+      const object = slide.objects[id];
+      if (!object) continue;
+      const signature = objectSignature(object);
+      const view = objectViews.get(id);
+      const kept = view && signature !== null && view.signature === signature && objectEls.get(id) === view.el;
+      const el = kept ? view.el : renderObject(object, { interactive: true, ...hooks });
+      objectViews.set(id, { signature, el });
+      objectEls.set(id, el);
+      nodes.push(el);
+      seen.add(id);
+    }
+    for (const id of [...objectViews.keys()]) {
+      if (seen.has(id)) continue;
+      objectViews.delete(id);
+      objectEls.delete(id);
+    }
+    reconcileChildren(target, nodes);
+  }
+
   function renderStage() {
-    clear(stageArea);
-    objectEls.clear();
-    stage = null;
-    slideEl = null;
-    overlay = null;
     stageArea.dataset.tool = tool ? tool.type : "";
     stageArea.classList.toggle("is-editing", editing !== null);
 
     const content = getContent();
     const slide = getSlide();
     if (!slide) {
+      clear(stageArea);
+      objectEls.clear();
+      objectViews.clear();
+      stage = null;
+      slideEl = null;
+      overlay = null;
+      stageKey = "";
       const add = h("button", { class: "stage-empty-add", type: "button", "data-action": "add-first-slide", text: "Add a slide" });
       add.addEventListener("click", () => newSlide("title", 0));
       stageArea.append(h("div", { class: "stage-empty" }, [h("p", { text: "This presentation has no slides." }), add]));
@@ -519,6 +570,20 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
 
     scale = computeScale();
     const size = content.size;
+    const key = `${slide.id}|${scale}|${size.width}x${size.height}`;
+    if (stage && slideEl && overlay && stage.parentNode === stageArea && stageKey === key) {
+      // Same slide at the same scale: keep the stage and every object that did not change.
+      slideEl.dataset.layout = slide.layout;
+      slideEl.style.background = slide.background?.color ?? "#ffffff";
+      syncObjects(slide, slideEl);
+      measureAutoHeights(slide);
+      renderOverlay();
+      return;
+    }
+
+    clear(stageArea);
+    objectEls.clear();
+    objectViews.clear();
     stage = h("div", { class: "stage", "data-role": "stage" });
     stage.style.width = `${round(size.width * scale)}px`;
     stage.style.height = `${round(size.height * scale)}px`;
@@ -527,12 +592,8 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     stage.style.setProperty("--grid", `${GRID_SIZE * scale}px`);
     stage.classList.toggle("show-grid", view.grid);
 
-    slideEl = renderSlide(slide, { size, scale, interactive: true, ...slideHooks() });
-    for (const child of Array.from(slideEl.children)) {
-      const id = /** @type {HTMLElement} */ (child).dataset.objectId;
-      if (id) objectEls.set(id, /** @type {HTMLElement} */ (child));
-    }
-
+    slideEl = renderSlide({ ...slide, objectOrder: [], objects: {} }, { size, scale, interactive: true });
+    syncObjects(slide, slideEl);
     measureAutoHeights(slide);
 
     overlay = h("div", { class: "stage-overlay", "data-role": "overlay" });
@@ -543,6 +604,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
 
     stage.append(slideEl, overlay);
     stageArea.append(stage);
+    stageKey = key;
     renderOverlay();
   }
 

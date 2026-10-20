@@ -55,6 +55,11 @@ sections; slide background, transition and size when nothing is selected).
 - A `gesture` union (`move | resize | rotate | marquee | draw | path`) previews on the live
   DOM and commits one command on mouseup; geometry lands on whole logical px. Pointer
   conversion uses `rect.width / size.width || 1`, so jsdom (zero rects) works.
+- Rendering is keyed. The strip caches a thumbnail per slide id and the stage keeps its `.stage`
+  and slide element while the slide, scale and size are unchanged; objects are keyed by
+  `data-object-id` with a signature of their data, so only a changed object gets a new element.
+  Reference objects and objects with inline references are redrawn on every pass, and an object
+  whose element was swapped for a gesture preview or the text editor is drawn again.
 - Text edits in place (double-click, F2/Enter, or typing) through a `contenteditable`
   committed with `setObjectRuns`; marks and links share `app/marks.js`.
 - Multi-selection supports move, delete, duplicate, arrange and X/Y; resize and rotate

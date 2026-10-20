@@ -28,7 +28,7 @@ Principles, module layout, key types and the decisions that depart from the spec
 
 ```
 src/
-  core/          stable IDs, event emitter, error types (WorkspaceFormatError, CommandError)
+  core/          stable IDs, event emitter, error types (WorkspaceFormatError, CommandError), `reconcile.js` (keyed child sync)
   workspace/     schema, validation, migrations, store, history, selectors, change sets, built-in commands, import/export
   sheet/         formula engine and the table model/commands/render
   document/      block model, block commands, DOM renderer

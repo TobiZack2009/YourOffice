@@ -17,7 +17,8 @@
 import { LAYOUTS } from "../presentation/layouts.js";
 import { planSlideReorder } from "../presentation/geometry.js";
 import { renderSlide } from "../presentation/render.js";
-import { h, clear } from "./dom.js";
+import { reconcileChildren } from "../core/reconcile.js";
+import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu } from "./popover.js";
 
@@ -141,126 +142,163 @@ export function createSlideStrip(options) {
     return /** @type {const} */ ({ type: after ? "after" : "before", id: slideId });
   }
 
+  /**
+   * One cached thumbnail per slide: the wrap, the add gap after it, and what they were drawn
+   * from. A slide whose data did not change keeps its nodes; only position-dependent text and
+   * the current/selected marks are patched.
+   * @type {Map<string, { signature: string | null, wrap: HTMLElement, gap: HTMLElement, number: HTMLElement, add: HTMLElement, index: number }>}
+   */
+  const views = new Map();
+
+  /**
+   * What a thumbnail's content depends on, or null when it draws references (it reads other
+   * pages, so it is redrawn on every pass).
+   * @param {import("../presentation/model.js").Slide} slide
+   * @param {{ width: number, height: number }} size
+   * @param {number} count Places that read the slide.
+   */
+  function signatureOf(slide, size, count) {
+    for (const id of slide.objectOrder) {
+      const object = slide.objects[id];
+      if (!object) continue;
+      if (object.type === "reference" || (object.text?.runs ?? []).some((run) => run.ref)) return null;
+    }
+    return JSON.stringify([slide, size, count, Boolean(options.onHandle)]);
+  }
+
+  /**
+   * @param {import("../presentation/model.js").Slide} slide
+   * @param {import("../presentation/model.js").PresentationContent} content
+   * @param {number} count
+   */
+  function buildView(slide, content, count) {
+    const slideId = slide.id;
+    const scale = THUMB_WIDTH / content.size.width;
+    const thumb = h("div", { class: "slide-thumb" });
+    thumb.style.width = `${THUMB_WIDTH}px`;
+    thumb.style.height = `${Math.round(content.size.height * scale)}px`;
+    thumb.append(renderSlide(slide, { size: content.size, scale, ...options.slideHooks?.() }));
+
+    const number = h("span", { class: "slide-number" });
+    const wrap = h("div", { class: "slide-thumb-wrap", draggable: "true", "data-slide-id": slideId, role: "button" }, [number, thumb]);
+    if (slide.transition.style !== "none") {
+      wrap.append(h("span", {
+        class: "transition-badge",
+        "data-role": "transition-badge",
+        title: `Transition: ${slide.transition.style}`
+      }, [icon("transition", { size: 12 })]));
+    }
+    const animationCount = slide.animationOrder?.length ?? 0;
+    if (animationCount > 0) {
+      wrap.append(h("span", {
+        class: `animation-badge${slide.transition.style !== "none" ? " has-transition" : ""}`,
+        "data-role": "animation-badge",
+        title: `${animationCount} animation${animationCount === 1 ? "" : "s"}`
+      }, [icon("animation", { size: 12 })]));
+    }
+
+    if (options.onHandle) {
+      const handle = h("button", {
+        class: `section-handle slide-handle${count > 0 ? " has-references" : ""}`,
+        type: "button",
+        draggable: "false",
+        "data-role": "slide-handle",
+        "aria-label": "Slide section options",
+        title: "Slide section options"
+      }, [icon("section", { size: 12 })]);
+      if (count > 0) handle.append(h("span", { class: "handle-badge", text: String(count) }));
+      handle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        options.onHandle?.(selected.has(slideId) ? getSelection() : [slideId], handle);
+      });
+      handle.addEventListener("mousedown", (event) => event.stopPropagation());
+      wrap.append(handle);
+    }
+
+    wrap.addEventListener("click", (event) => clickSlide(slideId, event));
+    wrap.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      if (!selected.has(slideId)) {
+        selected.clear();
+        anchorId = slideId;
+        if (slideId !== options.getCurrent()) options.onSelect(slideId);
+        else render();
+      }
+      openMenu({ x: event.clientX, y: event.clientY }, slideId);
+    });
+    wrap.addEventListener("dragstart", (event) => {
+      dragId = slideId;
+      wrap.classList.add("is-dragging");
+      /** @type {DragEvent} */ (event).dataTransfer?.setData("text/plain", slideId);
+    });
+    wrap.addEventListener("dragend", () => {
+      dragId = null;
+      wrap.classList.remove("is-dragging");
+      clearDropMarks();
+    });
+    wrap.addEventListener("dragover", (event) => {
+      if (!dragId) return;
+      event.preventDefault();
+      clearDropMarks();
+      const target = dropTarget(slideId, /** @type {MouseEvent} */ (event), wrap);
+      if (planSlideReorder(options.getContent().slideOrder, dragId, target)) {
+        wrap.classList.add(target.type === "after" ? "drop-after" : "drop-before");
+      }
+    });
+    wrap.addEventListener("drop", (event) => {
+      if (!dragId) return;
+      event.preventDefault();
+      const dragged = dragId;
+      const target = dropTarget(slideId, /** @type {MouseEvent} */ (event), wrap);
+      dragId = null;
+      clearDropMarks();
+      const plan = planSlideReorder(options.getContent().slideOrder, dragged, target);
+      if (plan) options.onMove(dragged, plan.index);
+    });
+
+    const add = h("button", { class: "slide-add", type: "button", "data-action": "add-slide-after", title: "New slide here" }, [icon("plus", { size: 12 })]);
+    const view = { signature: null, wrap, gap: h("div", { class: "slide-add-gap" }, [add]), number, add, index: 0 };
+    add.addEventListener("click", () => options.onCreate({ index: view.index + 1 }));
+    return view;
+  }
+
   function render() {
     const content = options.getContent();
     pruneSelection();
     const current = options.getCurrent();
     const scrollTop = element.scrollTop;
-    clear(element);
 
-    const scale = THUMB_WIDTH / content.size.width;
-    const thumbHeight = Math.round(content.size.height * scale);
-
+    /** @type {HTMLElement[]} */
+    const nodes = [];
+    const seen = new Set();
     content.slideOrder.forEach((slideId, index) => {
       const slide = content.slides[slideId];
       if (!slide) return;
-      const thumb = h("div", { class: "slide-thumb" });
-      thumb.style.width = `${THUMB_WIDTH}px`;
-      thumb.style.height = `${thumbHeight}px`;
-      thumb.append(renderSlide(slide, { size: content.size, scale, ...options.slideHooks?.() }));
-
-      const wrap = h("div", {
-        class: `slide-thumb-wrap${slideId === current ? " is-current" : ""}${selected.has(slideId) ? " is-selected" : ""}`,
-        draggable: "true",
-        "data-slide-id": slideId,
-        "data-index": index,
-        role: "button",
-        "aria-label": `Slide ${index + 1}`,
-        "aria-current": slideId === current ? "true" : "false",
-        "aria-selected": selected.has(slideId) ? "true" : "false"
-      }, [
-        h("span", { class: "slide-number", text: String(index + 1) }),
-        thumb
-      ]);
-      if (slide.transition.style !== "none") {
-        wrap.append(h("span", {
-          class: "transition-badge",
-          "data-role": "transition-badge",
-          title: `Transition: ${slide.transition.style}`
-        }, [icon("transition", { size: 12 })]));
+      const count = options.onHandle ? options.referenceCount?.(slideId) ?? 0 : 0;
+      const signature = signatureOf(slide, content.size, count);
+      let view = views.get(slideId);
+      if (!view || signature === null || view.signature !== signature) {
+        const fresh = buildView(slide, content, count);
+        fresh.signature = signature;
+        views.set(slideId, fresh);
+        view = fresh;
       }
-      const animationCount = slide.animationOrder?.length ?? 0;
-      if (animationCount > 0) {
-        wrap.append(h("span", {
-          class: `animation-badge${slide.transition.style !== "none" ? " has-transition" : ""}`,
-          "data-role": "animation-badge",
-          title: `${animationCount} animation${animationCount === 1 ? "" : "s"}`
-        }, [icon("animation", { size: 12 })]));
-      }
-
-      if (options.onHandle) {
-        const count = options.referenceCount?.(slideId) ?? 0;
-        const handle = h("button", {
-          class: `section-handle slide-handle${count > 0 ? " has-references" : ""}`,
-          type: "button",
-          draggable: "false",
-          "data-role": "slide-handle",
-          "aria-label": "Slide section options",
-          title: "Slide section options"
-        }, [icon("section", { size: 12 })]);
-        if (count > 0) handle.append(h("span", { class: "handle-badge", text: String(count) }));
-        handle.addEventListener("click", (event) => {
-          event.stopPropagation();
-          options.onHandle?.(selected.has(slideId) ? getSelection() : [slideId], handle);
-        });
-        handle.addEventListener("mousedown", (event) => event.stopPropagation());
-        wrap.append(handle);
-      }
-
-      wrap.addEventListener("click", (event) => clickSlide(slideId, event));
-      wrap.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        if (!selected.has(slideId)) {
-          selected.clear();
-          anchorId = slideId;
-          if (slideId !== options.getCurrent()) options.onSelect(slideId);
-          else render();
-        }
-        openMenu({ x: event.clientX, y: event.clientY }, slideId);
-      });
-      wrap.addEventListener("dragstart", (event) => {
-        dragId = slideId;
-        wrap.classList.add("is-dragging");
-        /** @type {DragEvent} */ (event).dataTransfer?.setData("text/plain", slideId);
-      });
-      wrap.addEventListener("dragend", () => {
-        dragId = null;
-        wrap.classList.remove("is-dragging");
-        clearDropMarks();
-      });
-      wrap.addEventListener("dragover", (event) => {
-        if (!dragId) return;
-        event.preventDefault();
-        clearDropMarks();
-        const target = dropTarget(slideId, /** @type {MouseEvent} */ (event), wrap);
-        if (planSlideReorder(options.getContent().slideOrder, dragId, target)) {
-          wrap.classList.add(target.type === "after" ? "drop-after" : "drop-before");
-        }
-      });
-      wrap.addEventListener("drop", (event) => {
-        if (!dragId) return;
-        event.preventDefault();
-        const dragged = dragId;
-        const target = dropTarget(slideId, /** @type {MouseEvent} */ (event), wrap);
-        dragId = null;
-        clearDropMarks();
-        const plan = planSlideReorder(options.getContent().slideOrder, dragged, target);
-        if (plan) options.onMove(dragged, plan.index);
-      });
-
-      element.append(wrap);
-
-      const add = h("button", {
-        class: "slide-add",
-        type: "button",
-        "data-action": "add-slide-after",
-        "data-index": index + 1,
-        title: "New slide here",
-        "aria-label": `New slide after slide ${index + 1}`
-      }, [icon("plus", { size: 12 })]);
-      add.addEventListener("click", () => options.onCreate({ index: index + 1 }));
-      element.append(h("div", { class: "slide-add-gap" }, [add]));
+      seen.add(slideId);
+      view.index = index;
+      const { wrap, number, add } = view;
+      wrap.classList.toggle("is-current", slideId === current);
+      wrap.classList.toggle("is-selected", selected.has(slideId));
+      wrap.dataset.index = String(index);
+      wrap.setAttribute("aria-label", `Slide ${index + 1}`);
+      wrap.setAttribute("aria-current", slideId === current ? "true" : "false");
+      wrap.setAttribute("aria-selected", selected.has(slideId) ? "true" : "false");
+      if (number.textContent !== String(index + 1)) number.textContent = String(index + 1);
+      add.dataset.index = String(index + 1);
+      add.setAttribute("aria-label", `New slide after slide ${index + 1}`);
+      nodes.push(wrap, view.gap);
     });
+    for (const id of [...views.keys()]) if (!seen.has(id)) views.delete(id);
+    reconcileChildren(element, nodes);
 
     element.scrollTop = scrollTop;
     const currentEl = element.querySelector(".slide-thumb-wrap.is-current");

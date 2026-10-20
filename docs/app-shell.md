@@ -42,6 +42,16 @@ in place. Chrome is split: the undo/redo buttons, dirty dot and play button upda
 change; the breadcrumb only on registry changes; the ribbon at most once per animation frame
 (a test that reads ribbon state after an editor event awaits a frame).
 
+Rendering is keyed everywhere a change used to rebuild a pane, so untouched nodes stay the same
+element and a focused one keeps its caret. The shared primitive is `core/reconcile.js`
+`reconcileChildren(parent, nodes)`: it removes what is no longer wanted and inserts only what is
+out of place. The sidebar caches a row per page id (rebuilt when its title, type, children,
+collapsed or editing state changes; selection and depth are patched), the ribbon builds its
+controls once per page type and tab and then only `update()`s state, and the slide strip caches a
+thumbnail per slide id (patching number, `data-index`, current/selected). A thumbnail that draws
+references is redrawn on every pass because it reads other pages. The inspector already syncs
+values into existing inputs, and the animation timeline keeps its own focus handling.
+
 `notice.js` is `createNotice(getContainer)` -> `{ show, clear, guard }`; the shell creates one
 per mount and hands it to its editors (`options.notice`), so two mounted apps do not share
 messages. A module-level `defaultNotice` serves code mounted without one. Popover hosts are
