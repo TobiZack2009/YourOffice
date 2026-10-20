@@ -322,6 +322,8 @@ export function createReferenceViews(options) {
     render,
     renderInline,
     refreshExpressions,
+    /** @returns {boolean} Whether the last render drew an embed or an expression (content of other pages). */
+    drawsReferences: () => used.size > 0 || updaters.size > 0,
     /** @returns {any[]} Nested editors currently alive. */
     childEditors: () => [...views.values()].map((view) => view.editor),
     destroy() {

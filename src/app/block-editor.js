@@ -2584,6 +2584,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   // Store subscription: skip re-render for inline-only commits so the caret stays.
   const unsubscribe = workspace.events.on("change", (event) => {
     const payload = /** @type {import("../workspace/changes.js").Change} */ (event);
+    // A change to a page this editor neither shows nor draws from is none of its business.
+    if (payload.pages && !payload.pages.includes(pageId) && !views.drawsReferences()) return;
     if (
       payload.kind === "commit" &&
       payload.origin === origin &&
@@ -2595,7 +2597,10 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       options.onChange?.();
       return;
     }
+    // Undo and redo rebuild the blocks under the caret: take the selection across.
+    const carried = payload.kind === "commit" ? null : captureSelection();
     render();
+    if (carried) restoreSelection(carried);
     const staleItem = activeItemId !== null && !locateItem(activeItemId);
     if ((activeBlockId && !blockOf(activeBlockId)) || staleItem) {
       activeBlockId = null;

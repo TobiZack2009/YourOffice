@@ -87,3 +87,34 @@ describe("TableEngines", () => {
     expect(shared.display(table(), 0, 0)).toBe("100");
   });
 });
+
+describe("TableEngines.refresh with a change", () => {
+  function shared() {
+    const { ws, pageId, tableId, table } = setup();
+    ws.dispatch("createPage", { type: "document", title: "Doc" });
+    const docId = ws.getChildren(null)[1];
+    const engines = new TableEngines(() => ws.data);
+    engines.refresh();
+    const book = engines._book;
+    return { ws, pageId, tableId, table, docId, engines, book };
+  }
+
+  it("keeps the calculation when a plain document changes", () => {
+    const { ws, docId, engines, book } = shared();
+    ws.dispatch("insertBlock", { pageId: docId, block: { type: "paragraph", runs: [{ text: "x" }] } });
+    engines.refresh({ pages: [docId], registry: false });
+    expect(engines._book).toBe(book);
+  });
+
+  it("rebuilds for a sheet change, a registry change or no change at all", () => {
+    const { pageId, docId, engines, book } = shared();
+    engines.refresh({ pages: [pageId], registry: false });
+    expect(engines._book).not.toBe(book);
+    const second = engines._book;
+    engines.refresh({ pages: [docId], registry: true });
+    expect(engines._book).not.toBe(second);
+    const third = engines._book;
+    engines.refresh();
+    expect(engines._book).not.toBe(third);
+  });
+});

@@ -52,11 +52,17 @@ export class TableEngines {
   }
 
   /**
-   * Rebuild after the workspace changed. Cheap to call; shared mode rebuilds once.
+   * Rebuild after the workspace changed. Shared mode rebuilds once. Given the change that
+   * happened, it keeps the book it has when that change cannot alter any calculated value
+   * (see `changeAffectsBook`).
+   * @param {{ pages: string[], registry?: boolean } | null} [change]
    * @returns {void}
    */
-  refresh() {
-    if (this._getData) this._book = buildBook(this._getData());
+  refresh(change = null) {
+    if (!this._getData) return;
+    const data = this._getData();
+    if (this._book && change && !changeAffectsBook(data, change)) return;
+    this._book = buildBook(data);
   }
 
   /**
@@ -125,6 +131,24 @@ export class TableEngines {
     if (cell && cell.value !== undefined) return cell.value;
     return null;
   }
+}
+
+/**
+ * Whether a change can alter what the shared engine calculates. Values come from the tables of
+ * sheet pages, from the text of sections that formulas read, and from page names (the registry),
+ * so an edit to a page that is not a sheet and defines no sections leaves the book as it was.
+ * @param {WorkspaceData} data
+ * @param {{ pages: string[], registry?: boolean }} change
+ * @returns {boolean}
+ */
+export function changeAffectsBook(data, change) {
+  if (change.registry) return true;
+  return change.pages.some((id) => {
+    const page = data.pages[id];
+    if (!page) return true;
+    if (page.type === "sheet") return true;
+    return Object.keys(page.content?.sections ?? {}).length > 0;
+  });
 }
 
 /**

@@ -21,6 +21,9 @@ function setup(opts = {}) {
   return { ws, root, app, docPageId };
 }
 
+/** The ribbon refreshes once per animation frame after an editor reports a change. */
+const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+
 /** @param {HTMLElement} root @param {string} selector */
 function query(root, selector) {
   return /** @type {HTMLElement | null} */ (root.querySelector(selector));
@@ -390,7 +393,7 @@ describe("lifecycle", () => {
 });
 
 describe("indent / outdent buttons", () => {
-  it("nest and lift a list item through the ribbon", () => {
+  it("nest and lift a list item through the ribbon", async () => {
     const { root, app, ws, docPageId } = setup();
     ws.dispatch("insertBlock", {
       pageId: docPageId,
@@ -406,6 +409,7 @@ describe("indent / outdent buttons", () => {
     const second = /** @type {HTMLElement} */ (root.querySelectorAll(".block-item[contenteditable=true]")[1]);
     second.focus();
     second.dispatchEvent(new Event("focusin", { bubbles: true }));
+    await frame();
     query(root, '[data-action="indent"]')?.click();
     expect(ws.getPage(docPageId).content.blocks[listId].items).toHaveLength(1);
     expect(root.querySelector(".item-children .block-item")?.textContent).toBe("b");
@@ -414,7 +418,7 @@ describe("indent / outdent buttons", () => {
     expect(app.getEditor()?.activeInfo().itemId).toBeTruthy();
   });
 
-  it("are disabled when there is nothing to nest under, and outdent leaves a top-level list", () => {
+  it("are disabled when there is nothing to nest under, and outdent leaves a top-level list", async () => {
     const { root, ws, docPageId } = setup();
     ws.dispatch("insertBlock", {
       pageId: docPageId,
@@ -426,8 +430,10 @@ describe("indent / outdent buttons", () => {
       el.dispatchEvent(new Event("focusin", { bubbles: true }));
     };
     focus(items[0]);
+    await frame();
     expect(/** @type {HTMLButtonElement} */ (query(root, '[data-action="indent"]')).disabled).toBe(true);
     focus(items[1]);
+    await frame();
     expect(/** @type {HTMLButtonElement} */ (query(root, '[data-action="indent"]')).disabled).toBe(false);
 
     query(root, '[data-action="outdent"]')?.click();
@@ -509,12 +515,13 @@ describe("presentation pages", () => {
     expect(editor()?.classList.contains("show-timeline")).toBe(false);
   });
 
-  it("adds, retimes, reorders and removes animations from the Animations tab", () => {
+  it("adds, retimes, reorders and removes animations from the Animations tab", async () => {
     const { root, app, content } = openDeck();
     const slide = () => content().slides[content().slideOrder[0]];
     query(root, '.ribbon-tab[data-tab="animations"]')?.click();
     const editor = app.getPresentationEditor();
     editor?.selectAll();
+    await frame();
     query(root, '[data-action="animation-fade-in"]')?.click();
     const count = slide().animationOrder.length;
     expect(count).toBeGreaterThan(0);
@@ -548,13 +555,14 @@ describe("presentation pages", () => {
     expect(slide().animations[selectedId]).toBeUndefined();
   });
 
-  it("edits the selected animation's effect, distance and choice from the Animations tab", () => {
+  it("edits the selected animation's effect, distance and choice from the Animations tab", async () => {
     const { root, app, content } = openDeck();
     const slide = () => content().slides[content().slideOrder[0]];
     query(root, '.ribbon-tab[data-tab="animations"]')?.click();
     const editor = app.getPresentationEditor();
     const first = slide().objectOrder[0];
     editor?.selectObjects([first]);
+    await frame();
 
     const gallery = (name) => /** @type {HTMLButtonElement} */ (query(root, `[data-action="animation-${name}"]`));
     gallery("appear").click();
@@ -576,6 +584,7 @@ describe("presentation pages", () => {
     expect(slide().animations[motionId].effect).toBe("motion");
 
     // Motion distance fields move the end point.
+    await frame();
     const moveX = /** @type {HTMLInputElement} */ (query(root, '[data-action="animation-move-x"]'));
     expect(moveX.disabled).toBe(false);
     moveX.value = "300";
@@ -592,6 +601,7 @@ describe("presentation pages", () => {
     expect(picks).toHaveLength(2);
     /** @type {HTMLElement} */ (picks[0]).click();
     expect(editor?.getSelectedAnimation()?.id).toBe(slide().animationOrder[0]);
+    await frame();
     expect(/** @type {HTMLInputElement} */ (query(root, '[data-action="animation-move-x"]')).disabled).toBe(true);
   });
 
@@ -665,5 +675,63 @@ describe("global history shortcuts", () => {
     const title = /** @type {HTMLInputElement} */ (root.querySelector("[data-role=page-title]"));
     expect(press(title, { key: "s", metaKey: true }).defaultPrevented).toBe(true);
     expect(press(title, { key: "k", metaKey: true }).defaultPrevented).toBe(true);
+  });
+});
+
+describe("stable editors", () => {
+  it("keeps the same editor and the caret across undo and redo", () => {
+    const { ws, app, docPageId } = setup();
+    const editor = app.getEditor();
+    const element = editor.element;
+    const blockId = ws.getPage(docPageId).content.blockOrder[0];
+    ws.dispatch("setBlockRuns", { pageId: docPageId, blockId, runs: [{ text: "hello world" }] });
+    editor.restoreSelection({ type: "text", anchor: { blockId, offset: 3 }, focus: { blockId, offset: 3 } });
+    ws.undo();
+    expect(app.getEditor()).toBe(editor);
+    expect(app.getEditor().element).toBe(element);
+    expect(element.textContent).toContain("hello");
+    expect(element.textContent).not.toContain("world");
+    expect(editor.captureSelection()).toEqual({ type: "text", anchor: { blockId, offset: 3 }, focus: { blockId, offset: 3 } });
+    ws.redo();
+    expect(app.getEditor()).toBe(editor);
+    expect(element.textContent).toContain("hello world");
+  });
+
+  it("follows a rename of the open page without rebuilding the editor", () => {
+    const { ws, root, app, docPageId } = setup();
+    const editor = app.getEditor();
+    ws.dispatch("renamePage", { pageId: docPageId, title: "Renamed" });
+    expect(app.getEditor()).toBe(editor);
+    expect(query(root, ".page-title-input")?.value).toBe("Renamed");
+    expect(query(root, ".breadcrumb")?.textContent).toBe("W/Renamed");
+    ws.undo();
+    expect(app.getEditor()).toBe(editor);
+    expect(query(root, ".page-title-input")?.value).toBe("Doc");
+    expect(query(root, ".breadcrumb")?.textContent).toBe("W/Doc");
+  });
+
+  it("moves to another page when undo removes the open one", () => {
+    const { ws, root, app, docPageId } = setup();
+    ws.dispatch("createPage", { type: "sheet", title: "Sheet" });
+    const sheetId = ws.getChildren(null)[1];
+    app.select(sheetId);
+    expect(app.getSheetEditor()).toBeTruthy();
+    ws.undo();
+    expect(app.getSelection()).toBe(docPageId);
+    expect(app.getSheetEditor()).toBeNull();
+    expect(app.getEditor()).toBeTruthy();
+    expect(query(root, ".document-editor")).toBeTruthy();
+  });
+
+  it("does not touch an open document when another page changes", () => {
+    const { ws, app } = setup();
+    ws.dispatch("createPage", { type: "sheet", title: "Sheet" });
+    const sheetId = ws.getChildren(null)[1];
+    const element = app.getEditor().element;
+    const html = element.innerHTML;
+    const block = element.querySelector("[data-block-id]");
+    ws.dispatch("createTable", { pageId: sheetId, name: "T", rows: 2, columns: 2, x: 0, y: 0 });
+    expect(element.innerHTML).toBe(html);
+    expect(element.querySelector("[data-block-id]")).toBe(block);
   });
 });

@@ -76,10 +76,11 @@ export function mountApp(root, workspace, options = {}) {
   /** @param {string | null} pageId */
   const openPage = (pageId) => void session.set({ selectedPageId: pageId });
 
-  /** @type {{ editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, slideshow: import("./slideshow.js").SlideshowHandle | null }} */
-  const state = { editor: null, sheetEditor: null, presentationEditor: null, slideshow: null };
+  /** @type {{ editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, slideshow: import("./slideshow.js").SlideshowHandle | null, titleInput: HTMLInputElement | null }} */
+  const state = { editor: null, sheetEditor: null, presentationEditor: null, slideshow: null, titleInput: null };
   /** The page the current editor was built for (the session may already name another one). */
   let renderedPageId = /** @type {string | null} */ (null);
+  let renderedPageType = /** @type {string | null} */ (null);
 
   clear(root);
   const shell = h("div", { class: "app", "data-page-type": "none" });
@@ -307,11 +308,13 @@ export function mountApp(root, workspace, options = {}) {
     state.sheetEditor = null;
     state.presentationEditor?.destroy();
     state.presentationEditor = null;
+    state.titleInput = null;
     clear(canvas);
 
     const pageId = selectedPageId();
     renderedPageId = pageId;
     const page = pageInfo(workspace, pageId);
+    renderedPageType = page?.type ?? null;
     shell.setAttribute("data-page-type", page?.type ?? "none");
     ribbon.setPage(page?.type ?? null);
 
@@ -335,7 +338,7 @@ export function mountApp(root, workspace, options = {}) {
     });
     const commitTitle = () => {
       const value = titleInput.value.trim();
-      if (value !== page.title) workspace.dispatch("renamePage", { pageId, title: value });
+      if (value !== pageTitle(workspace, pageId)) workspace.dispatch("renamePage", { pageId, title: value });
     };
     titleInput.addEventListener("keydown", (event) => {
       const keyboard = /** @type {KeyboardEvent} */ (event);
@@ -346,12 +349,13 @@ export function mountApp(root, workspace, options = {}) {
     });
     titleInput.addEventListener("blur", commitTitle);
     pageHeader.append(titleInput);
+    state.titleInput = titleInput;
 
     if (page.type === "document") {
       const editor = createDocumentEditor(workspace, page.id, {
         resolvePageTitle: (id) => pageTitle(workspace, id),
         navigate: (id) => selectSidebar(id),
-        onActiveChange: () => updateChrome()
+        onActiveChange: () => updateChromeLater()
       });
       state.editor = editor;
       canvas.append(pageHeader, h("div", { class: "page-body" }, [editor.element]));
@@ -360,8 +364,8 @@ export function mountApp(root, workspace, options = {}) {
     } else if (page.type === "sheet") {
       const sheetEditor = createSheetEditor(workspace, page.id, {
         navigate: (id) => selectSidebar(id),
-        onChange: () => updateChrome(),
-        onSelectionChange: () => ribbon.update()
+        onChange: () => updateChromeLater(),
+        onSelectionChange: () => scheduleRibbonUpdate()
       });
       state.sheetEditor = sheetEditor;
       canvas.append(pageHeader, sheetEditor.element);
@@ -376,8 +380,8 @@ export function mountApp(root, workspace, options = {}) {
       let built = false;
       const presentationEditor = createPresentationEditor(workspace, page.id, {
         navigate: (id) => selectSidebar(id),
-        onChange: () => updateChrome(),
-        onSelectionChange: () => ribbon.update(),
+        onChange: () => updateChromeLater(),
+        onSelectionChange: () => scheduleRibbonUpdate(),
         initialSlideId: session.get().slideByPage[page.id],
         onSlideChange: (slideId) => {
           if (!built) return;
@@ -402,6 +406,14 @@ export function mountApp(root, workspace, options = {}) {
     updateChrome();
   }
 
+  /** Follow a rename of the open page (undo, redo, sidebar) without rebuilding the editor. */
+  function syncTitleInput() {
+    const input = state.titleInput;
+    const title = pageTitle(workspace, selectedPageId());
+    if (!input || title === null || title === undefined) return;
+    if (document.activeElement !== input && input.value !== title) input.value = title;
+  }
+
   function renderBreadcrumb() {
     clear(breadcrumb);
     /** @type {string[]} */
@@ -415,16 +427,43 @@ export function mountApp(root, workspace, options = {}) {
     });
   }
 
-  /** Refresh everything derived from workspace/editor state: strip, dirty dot, ribbon. */
-  function updateChrome() {
-    renderBreadcrumb();
+  /** Undo/redo buttons, dirty dot and the play button: cheap, so refreshed on every change. */
+  function updateStrip() {
     undoButton.disabled = !workspace.canUndo;
     redoButton.disabled = !workspace.canRedo;
     dirtyDot.classList.toggle("is-dirty", workspace.dirty);
     const onPresentation = pageType(workspace, selectedPageId()) === "presentation";
     playButton.style.display = onPresentation ? "" : "none";
     playButton.disabled = !state.presentationEditor?.getSlideId();
+  }
+
+  let ribbonFrame = 0;
+  /** The ribbon asks every control for its state, so editors that report often share one pass per frame. */
+  function scheduleRibbonUpdate() {
+    if (ribbonFrame) return;
+    ribbonFrame = requestAnimationFrame(() => {
+      ribbonFrame = 0;
+      ribbon.update();
+    });
+  }
+
+  function flushRibbonUpdate() {
+    if (ribbonFrame) cancelAnimationFrame(ribbonFrame);
+    ribbonFrame = 0;
     ribbon.update();
+  }
+
+  /** What an editor reports (a change it saw, a selection move): strip now, ribbon once per frame. */
+  function updateChromeLater() {
+    updateStrip();
+    scheduleRibbonUpdate();
+  }
+
+  /** Refresh everything derived from workspace/editor state: breadcrumb, strip, ribbon. */
+  function updateChrome() {
+    renderBreadcrumb();
+    updateStrip();
+    flushRibbonUpdate();
   }
 
   // -- sidebar actions ----------------------------------------------------------
@@ -536,22 +575,29 @@ export function mountApp(root, workspace, options = {}) {
 
   const unsubscribeChange = workspace.events.on("change", (event) => {
     const payload = /** @type {import("../workspace/changes.js").Change} */ (event);
-    if (payload.kind !== "commit") {
-      renderMain();
-      refreshSidebar();
-      return;
-    }
-    if (
-      payload.commands.includes("renamePage") &&
-      selectedPageId() &&
-      payload.pages.includes(selectedPageId() ?? "")
-    ) {
-      renderMain();
-      refreshSidebar();
-      return;
-    }
     if (payload.registry) refreshSidebar();
-    updateChrome();
+    // The editors follow the change themselves; the shell rebuilds one only when the page it
+    // shows is gone or became another kind of page. Anything else (undo, redo, a rename of the
+    // open page) keeps the editor, its focus and its selection.
+    const open = selectedPageId();
+    const firstPage = workspace.getChildren(null)[0] ?? null;
+    if (payload.kind !== "commit" && ((open && !pageExists(workspace, open)) || (!open && firstPage))) {
+      openPage(firstPage);
+      const next = selectedPageId();
+      if (next) selectSidebar(next);
+      renderMain();
+      return;
+    }
+    if (payload.kind !== "commit" && pageType(workspace, open) !== renderedPageType) {
+      renderMain();
+      refreshSidebar();
+      return;
+    }
+    if (payload.registry) {
+      syncTitleInput();
+      renderBreadcrumb();
+    }
+    updateChromeLater();
   });
 
   /** @param {KeyboardEvent} event */
@@ -594,6 +640,7 @@ export function mountApp(root, workspace, options = {}) {
   return {
     destroy() {
       unsubscribeChange();
+      if (ribbonFrame) cancelAnimationFrame(ribbonFrame);
       workspace.events.onError = previousOnError;
       document.removeEventListener("keydown", onGlobalKeydown);
       quickFind.destroy();

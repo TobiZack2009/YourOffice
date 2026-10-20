@@ -257,6 +257,8 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   let cached = null;
   /** @type {string | null} */
   let currentSlideId = options.initialSlideId ?? null;
+  /** @type {string | null} The slide that was current when it disappeared (undo); returned to if it comes back. */
+  let lostSlideId = null;
   /** @type {string[]} */
   let selectedIds = [];
   /** @type {Tool | null} */
@@ -893,7 +895,15 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     hookCache = null;
     drewReferences = false;
     const content = getContent();
+    if (lostSlideId && content.slides[lostSlideId]) {
+      // The slide the user was on came back (redo): go back to it.
+      currentSlideId = lostSlideId;
+      lostSlideId = null;
+      selectedIds = [];
+      options.onSlideChange?.(currentSlideId);
+    }
     if (!currentSlideId || !content.slides[currentSlideId]) {
+      if (currentSlideId) lostSlideId = currentSlideId;
       const next = content.slideOrder[0] ?? null;
       if (next !== currentSlideId) {
         currentSlideId = next;
@@ -946,6 +956,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   function setCurrent(slideId) {
     stopPreview({ quiet: true });
     currentSlideId = slideId;
+    lostSlideId = null;
     selectedIds = [];
     selectedAnimationId = null;
     options.onSlideChange?.(slideId);

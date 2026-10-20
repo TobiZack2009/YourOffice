@@ -12,7 +12,7 @@ import { guard } from "./notice.js";
 import { explain, isFormulaError } from "../sheet/errors.js";
 import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
 import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf } from "../sheet/render.js";
-import { TableEngines } from "../sheet/table-engine.js";
+import { TableEngines, changeAffectsBook } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
 import { readSheetSelection } from "./selection.js";
 import { icon } from "./icons.js";
@@ -813,9 +813,10 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   // -- rendering ---------------------------------------------------------------
 
-  function refresh() {
+  /** @param {{ pages: string[], registry?: boolean } | null} [change] The change being applied, if any. */
+  function refresh(change = null) {
     const snapshot = content();
-    engines.refresh();
+    engines.refresh(change);
     clampSelection();
     if (clipboard && !snapshot.tables[clipboard.tableId]) clipboard = null;
 
@@ -1447,8 +1448,11 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     }
   });
 
-  const unsubscribe = workspace.events.on("change", () => {
-    refresh();
+  const unsubscribe = workspace.events.on("change", (event) => {
+    const change = /** @type {import("../workspace/changes.js").Change} */ (event);
+    // Draws its own page, plus whatever the shared calculation reads from other pages.
+    if (change.pages && !change.pages.includes(pageId) && !changeAffectsBook(workspace.data, change)) return;
+    refresh(change.pages ? change : null);
     options.onChange?.();
   });
 
