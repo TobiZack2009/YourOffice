@@ -1,6 +1,7 @@
 # App shell, ribbon and sidebar
 
-`src/app/`: `shell.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
+`src/app/`: `shell.js`, `session.js`, `selection.js`, `keyboard.js`, `gesture.js`, `notice.js`,
+`history-scope.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
 `icons.js`, `quick-find.js`, `dom.js`, `styles.css`.
 
 ## Layout
