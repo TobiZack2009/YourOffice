@@ -17,6 +17,7 @@
 
 import { createId } from "../core/ids.js";
 import { CommandError } from "../core/errors.js";
+import { isSafeUrl } from "../core/url.js";
 
 /** @type {string[]} Block types accepted in content today. */
 export const BLOCK_TYPES = [
@@ -123,6 +124,8 @@ export function validateRuns(runs) {
           } else if (key === "link") {
             if (typeof value !== "string" || value.length === 0) {
               errors.push(`runs[${index}].marks.link must be a non-empty string`);
+            } else if (!isSafeUrl(value)) {
+              errors.push(`runs[${index}].marks.link is not a safe address`);
             }
           } else if (typeof value !== "boolean") {
             errors.push(`runs[${index}].marks.${key} must be a boolean`);
@@ -513,15 +516,19 @@ export function canIndentItem(content, blockId, itemId) {
 
 /**
  * Ensure a page envelope has document content, initialising it when absent.
+ * Malformed content is never replaced silently: it throws `corruptContent`.
  * @param {import("../workspace/schema.js").PageEnvelope} page
  * @returns {DocumentContent}
  */
 export function ensureDocumentContent(page) {
   const content = /** @type {DocumentContent | undefined} */ (page.content);
-  if (!content || !Array.isArray(content.blockOrder) || !isPlainObject(content.blocks)) {
+  if (content === undefined || content === null) {
     const fresh = createDocumentContent();
     page.content = /** @type {Record<string, unknown>} */ (fresh);
     return fresh;
+  }
+  if (!Array.isArray(content.blockOrder) || !isPlainObject(content.blocks)) {
+    throw new CommandError(`document content of ${page.id} is malformed`, "corruptContent");
   }
   return content;
 }

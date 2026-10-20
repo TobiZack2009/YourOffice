@@ -7,6 +7,8 @@
  * `data-item-id` so editing glue (later phases) can map DOM back to model ids.
  */
 
+import { isSafeUrl } from "../core/url.js";
+
 /** @typedef {import("./model.js").Block} Block */
 /** @typedef {import("./model.js").InlineRun} InlineRun */
 /** @typedef {import("./model.js").DocumentContent} DocumentContent */
@@ -59,7 +61,7 @@ export function renderRuns(runs, options) {
     if (marks.italic) node = wrap(doc, "em", node);
     if (marks.bold) node = wrap(doc, "strong", node);
     if (marks.code) node = wrap(doc, "code", node);
-    if (marks.link) {
+    if (marks.link && isSafeUrl(marks.link)) {
       const anchor = doc.createElement("a");
       anchor.setAttribute("href", marks.link);
       anchor.appendChild(node);

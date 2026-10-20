@@ -623,3 +623,51 @@ describe("presentation pages", () => {
     expect(query(root, ".presentation-editor")?.classList.contains("hide-inspector")).toBe(true);
   });
 });
+
+describe("global history shortcuts", () => {
+  const press = (target, init) => {
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  it("Cmd+Z undoes the model from a document block, and leaves native undo in text fields", () => {
+    const { ws, root, docPageId } = setup();
+    ws.dispatch("insertBlock", { pageId: docPageId, block: { type: "paragraph", runs: [{ text: "second" }] } });
+    const before = ws.getPage(docPageId).content.blockOrder.length;
+
+    const title = /** @type {HTMLInputElement} */ (root.querySelector("[data-role=page-title]"));
+    expect(title).toBeTruthy();
+    const nativeEvent = press(title, { key: "z", metaKey: true });
+    expect(nativeEvent.defaultPrevented).toBe(false);
+    expect(ws.getPage(docPageId).content.blockOrder.length).toBe(before);
+
+    const host = /** @type {HTMLElement} */ (root.querySelector('[contenteditable="true"]'));
+    const modelEvent = press(host, { key: "z", metaKey: true });
+    expect(modelEvent.defaultPrevented).toBe(true);
+    expect(ws.getPage(docPageId).content.blockOrder.length).toBe(before - 1);
+
+    const fresh = /** @type {HTMLElement} */ (root.querySelector('[contenteditable="true"]'));
+    press(fresh, { key: "z", metaKey: true, shiftKey: true });
+    expect(ws.getPage(docPageId).content.blockOrder.length).toBe(before);
+  });
+
+  it("leaves native undo alone in the quick find field and any contenteditable outside a surface", () => {
+    const { ws, root, docPageId } = setup();
+    ws.dispatch("insertBlock", { pageId: docPageId, block: { type: "paragraph", runs: [{ text: "x" }] } });
+    const outside = document.createElement("div");
+    outside.setAttribute("contenteditable", "true");
+    root.append(outside);
+    const count = ws.getPage(docPageId).content.blockOrder.length;
+    expect(press(outside, { key: "z", metaKey: true }).defaultPrevented).toBe(false);
+    expect(press(outside, { key: "y", ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(ws.getPage(docPageId).content.blockOrder.length).toBe(count);
+  });
+
+  it("Cmd+S and Cmd+K stay global even from a text field", () => {
+    const { root } = setup();
+    const title = /** @type {HTMLInputElement} */ (root.querySelector("[data-role=page-title]"));
+    expect(press(title, { key: "s", metaKey: true }).defaultPrevented).toBe(true);
+    expect(press(title, { key: "k", metaKey: true }).defaultPrevented).toBe(true);
+  });
+});

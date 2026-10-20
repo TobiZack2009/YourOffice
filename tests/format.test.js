@@ -10,10 +10,11 @@ describe("JSON round trip", () => {
     ws.dispatch("createPage", { type: "sheet", title: "Budget" });
     const parentId = ws.getChildren(null)[0];
     ws.dispatch("createPage", { type: "document", title: "Child", parentId });
-    ws.dispatch("setPageContent", {
-      pageId: parentId,
-      content: { blocks: [{ id: "b1", type: "paragraph", text: "Hello" }] }
-    });
+    const content = {
+      blockOrder: ["b1"],
+      blocks: { b1: { id: "b1", type: "paragraph", runs: [{ text: "Hello" }] } }
+    };
+    ws.dispatch("setPageContent", { pageId: parentId, content });
 
     const json = exportWorkspaceJSON(ws);
     const restored = importWorkspaceJSON(json);
@@ -23,15 +24,13 @@ describe("JSON round trip", () => {
     expect(restored.getPages()).toEqual(ws.getPages());
     expect(restored.getChildren(null)).toEqual(ws.getChildren(null));
     expect(restored.getChildren(parentId)).toEqual(ws.getChildren(parentId));
-    expect(restored.getPage(parentId)?.content).toEqual({
-      blocks: [{ id: "b1", type: "paragraph", text: "Hello" }]
-    });
+    expect(restored.getPage(parentId)?.content).toEqual(content);
     expect(exportWorkspaceJSON(restored)).toBe(json);
     expect(restored.dirty).toBe(false);
   });
 
   it("supports compact output", () => {
-    const ws = Workspace.create();
+    const ws = Workspace.create({ title: "Compact" });
     expect(exportWorkspaceJSON(ws, { pretty: false })).not.toContain("\n");
   });
 

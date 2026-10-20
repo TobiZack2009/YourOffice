@@ -293,12 +293,22 @@ describe("setPageContent command", () => {
     const ws = Workspace.create();
     ws.dispatch("createPage", { type: "sheet", title: "Budget" });
     const id = ws.getChildren(null)[0];
-    ws.dispatch("setPageContent", { pageId: id, content: { tables: [{ name: "Expenses" }] } });
-    expect(ws.getPage(id)?.content).toEqual({ tables: [{ name: "Expenses" }] });
+    ws.dispatch("setPageContent", { pageId: id, content: { tables: {}, tableOrder: [] } });
+    expect(ws.getPage(id)?.content).toEqual({ tables: {}, tableOrder: [] });
     // structural clones protect the model
     const page = ws.getPage(id);
-    page.content.tables.push("tampered");
-    expect(ws.getPage(id)?.content).toEqual({ tables: [{ name: "Expenses" }] });
+    page.content.tableOrder.push("tampered");
+    expect(ws.getPage(id)?.content).toEqual({ tables: {}, tableOrder: [] });
+  });
+
+  it("rejects content that is malformed for the page type", () => {
+    const ws = Workspace.create();
+    ws.dispatch("createPage", { type: "document" });
+    const id = ws.getChildren(null)[0];
+    expect(() => ws.dispatch("setPageContent", { pageId: id, content: { tables: {} } })).toThrow(
+      /invalid document content/
+    );
+    expect(ws.getPage(id)?.content).toBeUndefined();
   });
 
   it("rejects non-object content", () => {

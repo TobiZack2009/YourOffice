@@ -43,3 +43,41 @@ describe("Emitter", () => {
     expect(called).toBe(0);
   });
 });
+
+describe("Emitter hardening", () => {
+  it("skips a listener unsubscribed by an earlier listener of the same emit", () => {
+    const emitter = new Emitter();
+    const calls = [];
+    let offSecond = () => {};
+    emitter.on("e", () => {
+      calls.push("first");
+      offSecond();
+    });
+    offSecond = emitter.on("e", () => calls.push("second"));
+    emitter.emit("e");
+    expect(calls).toEqual(["first"]);
+  });
+
+  it("routes listener errors to onError", () => {
+    const seen = [];
+    const emitter = new Emitter({ onError: (error, event) => seen.push([error.message, event]) });
+    emitter.on("e", () => {
+      throw new Error("boom");
+    });
+    emitter.emit("e");
+    expect(seen).toEqual([["boom", "e"]]);
+  });
+
+  it("strict mode rethrows after every listener ran", () => {
+    const emitter = new Emitter({ strict: true, onError: () => {} });
+    let ran = false;
+    emitter.on("e", () => {
+      throw new Error("boom");
+    });
+    emitter.on("e", () => {
+      ran = true;
+    });
+    expect(() => emitter.emit("e")).toThrow("boom");
+    expect(ran).toBe(true);
+  });
+});

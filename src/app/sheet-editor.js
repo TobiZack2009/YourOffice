@@ -178,7 +178,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   const bar = h("div", { class: "sheet-bar" }, [address, input]);
   const message = h("div", { class: "formula-message", role: "status", "data-role": "formula-message" });
-  const canvasWrap = h("div", { class: "sheet-canvas-wrap", tabindex: "-1" });
+  const canvasWrap = h("div", { class: "sheet-canvas-wrap", tabindex: "-1", "data-history": "model" });
   element.append(bar, message, canvasWrap);
   const popovers = createPopoverHost(document.body);
 
@@ -416,7 +416,6 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   cellInput.addEventListener("keydown", (event) => {
     const keyboard = /** @type {KeyboardEvent} */ (event);
-    keyboard.stopPropagation();
     if (handleShortcut(keyboard, true, cellInput)) {
       keyboard.preventDefault();
       return;
@@ -1391,7 +1390,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
   });
 
   element.addEventListener("keydown", (event) => {
-    if (event.target === input) return;
+    if (event.target === input || event.target === cellInput) return;
     const keyboard = /** @type {KeyboardEvent} */ (event);
     if (!selection) return;
     if (handleShortcut(keyboard, false)) {

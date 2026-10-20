@@ -237,7 +237,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   const popovers = createPopoverHost(document.body);
 
   const root = h("div", { class: "presentation-editor", tabindex: "-1", "data-role": "presentation-editor" });
-  const stageArea = h("div", { class: "stage-area", tabindex: "0", "data-role": "stage-area", "aria-label": "Slide" });
+  const stageArea = h("div", { class: "stage-area", tabindex: "0", "data-role": "stage-area", "aria-label": "Slide", "data-history": "model" });
   const imageInput = /** @type {HTMLInputElement} */ (
     h("input", { type: "file", accept: "image/*", class: "visually-hidden", tabindex: "-1", "data-role": "image-file" })
   );
@@ -1559,6 +1559,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     const host = /** @type {HTMLElement} */ (fresh.querySelector(".slide-text"));
     host.setAttribute("contenteditable", "true");
     host.setAttribute("tabindex", "-1");
+    host.setAttribute("data-history", "model");
     host.setAttribute("spellcheck", "false");
     host.dataset.editing = "true";
     editing = { id: object.id, host, original: structuredClone(object.text?.runs ?? []), lastRange: null };

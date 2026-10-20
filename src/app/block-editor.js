@@ -315,7 +315,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     class: `document-editor${nested ? " is-embedded" : ""}`,
     role: "group",
     "aria-label": "Document body",
-    tabindex: "-1"
+    tabindex: "-1",
+    "data-history": "model"
   });
 
   /** Whether a node belongs to this editor rather than to an editor nested in it. */

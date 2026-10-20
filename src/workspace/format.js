@@ -7,7 +7,7 @@
 
 import { WorkspaceFormatError } from "../core/errors.js";
 import { Workspace } from "./store.js";
-import { migrateWorkspace } from "./schema.js";
+import { migrateWorkspace, validateWorkspace } from "./schema.js";
 
 /** @typedef {import("./store.js").Workspace} Workspace */
 /** @typedef {import("./schema.js").WorkspaceDocument} WorkspaceDocument */
@@ -16,9 +16,14 @@ import { migrateWorkspace } from "./schema.js";
  * @param {Workspace} store
  * @param {{ pretty?: boolean }} [options]
  * @returns {string} JSON text. Dirty-state clearing is the caller's job.
+ * @throws {WorkspaceFormatError} When the workspace is corrupt: it is never written out.
  */
 export function exportWorkspaceJSON(store, options = {}) {
   const doc = store.serialized;
+  const check = validateWorkspace(doc, store.validationOptions);
+  if (!check.valid) {
+    throw new WorkspaceFormatError(`refusing to export a corrupt workspace: ${check.errors.join("; ")}`);
+  }
   return options.pretty === false ? JSON.stringify(doc) : JSON.stringify(doc, null, 2);
 }
 

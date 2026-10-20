@@ -19,6 +19,8 @@ import { createRibbon } from "./ribbon.js";
 import { createQuickFind } from "./quick-find.js";
 import { createSlideshow } from "./slideshow.js";
 import { icon } from "./icons.js";
+import { usesModelHistory } from "./history-scope.js";
+import { showNotice } from "./notice.js";
 import { clear, h } from "./dom.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
@@ -487,6 +489,13 @@ export function mountApp(root, workspace, options = {}) {
 
   // -- store + global wiring ----------------------------------------------------
 
+  // A listener that throws must not take the others down; tell the person instead of the console only.
+  const previousOnError = workspace.events.onError;
+  workspace.events.onError = (error) => {
+    console.error("change listener threw", error);
+    showNotice("Something went wrong while updating the view.");
+  };
+
   const unsubscribeChange = workspace.events.on("change", (event) => {
     const payload = /** @type {{ kind?: string, commands?: string[], pages?: string[] }} */ (event ?? {});
     if (payload.kind && payload.kind !== "commit") {
@@ -524,9 +533,11 @@ export function mountApp(root, workspace, options = {}) {
       event.preventDefault();
       quickFind.open();
     } else if (key === "z" && !event.shiftKey) {
+      if (!usesModelHistory(event.target)) return;
       event.preventDefault();
       shellApi.undo();
     } else if ((key === "z" && event.shiftKey) || key === "y") {
+      if (!usesModelHistory(event.target)) return;
       event.preventDefault();
       shellApi.redo();
     } else if (key === "s") {
@@ -546,6 +557,7 @@ export function mountApp(root, workspace, options = {}) {
   return {
     destroy() {
       unsubscribeChange();
+      workspace.events.onError = previousOnError;
       document.removeEventListener("keydown", onGlobalKeydown);
       quickFind.destroy();
       ribbon.destroy();

@@ -7,6 +7,7 @@
  * elements correspond to which marks.
  */
 
+import { isSafeUrl } from "../core/url.js";
 import { REF_CHAR } from "../document/model.js";
 
 /** @typedef {import("../document/model.js").InlineRun} InlineRun */
@@ -125,7 +126,7 @@ export function parseInlineRuns(root) {
       if (mark) next[/** @type {keyof typeof next} */ (mark)] = true;
       if (element.tagName === "A") {
         const href = element.getAttribute("href");
-        if (href) next.link = href;
+        if (href && isSafeUrl(href)) next.link = href;
       }
       walk(element, next);
     }

@@ -336,6 +336,10 @@ export const commands = {
     if (!page) {
       throw new CommandError(`page does not exist: ${p.pageId}`, "unknownPage");
     }
+    const problems = store.validateContent(page.type, p.content);
+    if (problems.length > 0) {
+      throw new CommandError(`invalid ${page.type} content: ${problems.join("; ")}`, "invalidContent");
+    }
     page.content = structuredClone(p.content);
     touchPage(tx, page);
   }

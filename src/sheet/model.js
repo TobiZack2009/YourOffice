@@ -416,10 +416,13 @@ export function createTable(fields = {}) {
  */
 export function ensureSheetContent(page) {
   const content = /** @type {SheetContent | undefined} */ (page.content);
-  if (!content || !isPlainObject(content.tables) || !Array.isArray(content.tableOrder)) {
+  if (content === undefined || content === null) {
     const fresh = createSheetContent();
     page.content = /** @type {Record<string, unknown>} */ (fresh);
     return fresh;
+  }
+  if (!isPlainObject(content.tables) || !Array.isArray(content.tableOrder)) {
+    throw new CommandError(`sheet content of ${page.id} is malformed`, "corruptContent");
   }
   for (const table of Object.values(content.tables)) {
     if (!isPlainObject(table.cells)) table.cells = {};

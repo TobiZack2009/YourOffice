@@ -3,9 +3,18 @@
  * transaction; renderers and the persistence layer subscribe. Kept dependency-free.
  */
 export class Emitter {
-  constructor() {
+  /**
+   * @param {{ onError?: (error: unknown, event: string) => void, strict?: boolean }} [options]
+   *   `onError` receives what a listener threw (default: console.error); `strict` rethrows
+   *   after every listener has run, so tests see failures that production isolates.
+   */
+  constructor(options = {}) {
     /** @type {Map<string, Set<(payload: unknown) => void>>} */
     this._listeners = new Map();
+    /** @type {((error: unknown, event: string) => void) | undefined} */
+    this.onError = options.onError;
+    /** @type {boolean} */
+    this.strict = options.strict === true;
   }
 
   /**
@@ -28,19 +37,26 @@ export class Emitter {
   }
 
   /**
-   * Emit an event to all current listeners, listener errors isolated.
+   * Emit an event to the listeners subscribed now. A listener unsubscribed by an earlier
+   * listener of the same emit is skipped. Listener errors are isolated and routed to `onError`.
    * @param {string} event
    * @param {unknown} [payload]
    */
   emit(event, payload) {
     const set = this._listeners.get(event);
     if (!set) return;
+    /** @type {unknown[]} */
+    const failures = [];
     for (const listener of [...set]) {
+      if (!set.has(listener)) continue;
       try {
         listener(payload);
       } catch (error) {
-        console.error(`listener for "${event}" threw`, error);
+        failures.push(error);
+        if (this.onError) this.onError(error, event);
+        else console.error(`listener for "${event}" threw`, error);
       }
     }
+    if (this.strict && failures.length > 0) throw failures[0];
   }
 }

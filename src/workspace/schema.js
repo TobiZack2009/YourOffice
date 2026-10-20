@@ -102,13 +102,20 @@ function checkIdList(list, exists, what, errors) {
 }
 
 /**
+ * What a caller adds on top of the envelope check: a content validator per page type.
+ * @typedef {object} ValidationOptions
+ * @property {Partial<Record<PageType, (content: unknown) => string[]>>} [contentValidators]
+ */
+
+/**
  * Validate a workspace JSON document against the current schema.
  * Pure: takes any parsed JSON, returns an error list. Never throws.
  *
  * @param {unknown} data Parsed JSON of unknown shape.
+ * @param {ValidationOptions} [options]
  * @returns {ValidationErrors}
  */
-export function validateWorkspace(data) {
+export function validateWorkspace(data, options = {}) {
   /** @type {string[]} */
   const errors = [];
 
@@ -164,6 +171,11 @@ export function validateWorkspace(data) {
       }
       if (!isIsoUtc(envelope.modifiedAt)) {
         errors.push(`pages["${id}"].modifiedAt must be an ISO 8601 UTC datetime`);
+      }
+      // A page without content is a fresh page; present content must be well formed.
+      const validateContent = options.contentValidators?.[/** @type {PageType} */ (envelope.type)];
+      if (validateContent && envelope.content !== undefined && envelope.content !== null) {
+        errors.push(...validateContent(envelope.content).map((m) => `pages["${id}"].content: ${m}`));
       }
     }
   }
@@ -261,9 +273,10 @@ export const migrations = /** @type {Migration[]} */ ([]);
  * could not resolve.
  *
  * @param {unknown} data
+ * @param {ValidationOptions} [options]
  * @returns {{ data: WorkspaceDocument | null, appliedMigrationSteps: number, errors: string[] }}
  */
-export function migrateWorkspace(data) {
+export function migrateWorkspace(data, options = {}) {
   if (!isPlainObject(data)) {
     return { data: null, appliedMigrationSteps: 0, errors: ["workspace must be a JSON object"] };
   }
@@ -287,7 +300,7 @@ export function migrateWorkspace(data) {
       ]
     };
   }
-  const check = validateWorkspace(current);
+  const check = validateWorkspace(current, options);
   if (!check.valid) {
     return { data: null, appliedMigrationSteps: steps, errors: check.errors };
   }

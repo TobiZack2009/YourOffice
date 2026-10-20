@@ -51,7 +51,7 @@ export const THUMB_WIDTH = 168;
  */
 export function createSlideStrip(options) {
   const { popovers } = options;
-  const element = h("nav", { class: "slide-strip", tabindex: "0", "aria-label": "Slides", "data-role": "slide-strip" });
+  const element = h("nav", { class: "slide-strip", tabindex: "0", "aria-label": "Slides", "data-role": "slide-strip", "data-history": "model" });
   /** @type {string | null} */
   let dragId = null;
   /** @type {Set<string>} Selected slides when more than one; empty otherwise. */

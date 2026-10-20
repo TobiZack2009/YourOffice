@@ -9,6 +9,7 @@
  * as text nodes (no HTML injection).
  */
 
+import { isSafeUrl } from "../core/url.js";
 import { renderRuns } from "../document/render.js";
 
 /** @typedef {import("./model.js").Slide} Slide */
@@ -99,7 +100,7 @@ export function renderObject(object, options = {}) {
   if (object.rotation) element.style.transform = `rotate(${object.rotation}deg)`;
   if (object.link) {
     element.dataset.linkKind = object.link.kind;
-    if (object.link.kind === "url") element.dataset.href = object.link.url;
+    if (object.link.kind === "url" && isSafeUrl(object.link.url)) element.dataset.href = object.link.url;
   }
 
   if (object.type === "shape") {

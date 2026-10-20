@@ -14,6 +14,10 @@ Principles, module layout, key types and the decisions that depart from the spec
   transaction. Undo/redo operates on transactions, not DOM diffs.
 - **Versioned schema from day one.** Workspace JSON has `schemaVersion` and a migration
   list; validation is a separate, exported, tested function. New fields are additive.
+- **Boundaries validate.** Imported data, `setPageContent` and export all run the per-type content
+  validators. `ensure*Content` initialises only absent content; malformed content throws
+  `CommandError(..., "corruptContent")` instead of being replaced with an empty page. Link targets
+  must pass `core/url.js` `isSafeUrl`, in the validators and again in the renderers.
 - **No eval.** The formula engine and expressions are parsed to ASTs.
 - **Separate dependency graphs.** Data deps (formulas, references) vs rendering deps
   (views to rerender), spec §9.

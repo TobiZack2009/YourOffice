@@ -36,7 +36,11 @@ handle includes `getSlideshow` and `startSlideshow`.
 - **View tab**: canvas zoom as a `--zoom` CSS variable, show/hide sidebar. Both are shell UI
   state, not model.
 - **Global keys**: Cmd/Ctrl+K Quick Find, Cmd/Ctrl+S mark saved, undo/redo, Cmd/Ctrl+Enter slide
-  show. All are ignored while a slide show is up.
+  show. All are ignored while a slide show is up. Undo/redo is the model's only on editing
+  surfaces (`data-history="model"`: document editor, sheet grid, slide stage, slide strip, slide
+  text editor) and when nothing editable has focus; text fields (page title, quick find, rename,
+  link form, inspector, formula bar, in-cell input) and contenteditables outside a surface keep
+  the browser's text undo (`history-scope.js`).
 
 ## Ribbon
 

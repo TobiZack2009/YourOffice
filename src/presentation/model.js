@@ -14,6 +14,8 @@
  */
 
 import { createId } from "../core/ids.js";
+import { CommandError } from "../core/errors.js";
+import { isSafeUrl } from "../core/url.js";
 import { validateRuns, validateReferenceFields } from "../document/model.js";
 
 /** @typedef {import("../document/model.js").InlineRun} InlineRun */
@@ -323,7 +325,8 @@ export function validateTextBody(text) {
 export function validateLink(link) {
   if (!isPlainObject(link)) return ["link must be an object"];
   if (link.kind === "url") {
-    return typeof link.url === "string" && link.url.length > 0 ? [] : ["link.url must be a non-empty string"];
+    if (typeof link.url !== "string" || link.url.length === 0) return ["link.url must be a non-empty string"];
+    return isSafeUrl(link.url) ? [] : ["link.url is not a safe address"];
   }
   if (link.kind === "page") {
     return typeof link.pageId === "string" && link.pageId.length > 0 ? [] : ["link.pageId must be a non-empty string"];
@@ -587,10 +590,13 @@ export function validatePresentationContent(content) {
  */
 export function ensurePresentationContent(page) {
   const content = /** @type {PresentationContent | undefined} */ (page.content);
-  if (!content || !isPlainObject(content.slides) || !Array.isArray(content.slideOrder)) {
+  if (content === undefined || content === null) {
     const fresh = createPresentationContent();
     page.content = /** @type {Record<string, unknown>} */ (fresh);
     return fresh;
+  }
+  if (!isPlainObject(content.slides) || !Array.isArray(content.slideOrder)) {
+    throw new CommandError(`presentation content of ${page.id} is malformed`, "corruptContent");
   }
   if (!isPlainObject(content.size) || validateSize(content.size).length > 0) {
     content.size = { width: SLIDE_DEFAULTS.width, height: SLIDE_DEFAULTS.height };

@@ -16,6 +16,9 @@ import {
 } from "./schema.js";
 import { registerWorkspaceCommands } from "./commands.js";
 import { registerReferenceCommands } from "../references/commands.js";
+import { validateDocumentContent } from "../document/model.js";
+import { validateSheetContent } from "../sheet/model.js";
+import { validatePresentationContent } from "../presentation/model.js";
 
 /** @typedef {import("./schema.js").PageEnvelope} PageEnvelope */
 /** @typedef {import("./schema.js").PageType} PageType */
@@ -85,9 +88,34 @@ export class Workspace {
      */
     this._commandHooks = [];
 
+    /**
+     * Content validators per page type, used on import, export and setPageContent.
+     * @type {Partial<Record<PageType, (content: unknown) => string[]>>}
+     */
+    this._contentValidators = {
+      document: validateDocumentContent,
+      sheet: validateSheetContent,
+      presentation: validatePresentationContent
+    };
+
     // Built-in commands are registered here; engine code may add more later.
     registerWorkspaceCommands(this);
     registerReferenceCommands(this);
+  }
+
+  /** @returns {import("./schema.js").ValidationOptions} What a full workspace check needs. */
+  get validationOptions() {
+    return { contentValidators: this._contentValidators };
+  }
+
+  /**
+   * Content problems for a page type; empty when the content is well formed.
+   * @param {PageType} type
+   * @param {unknown} content
+   * @returns {string[]}
+   */
+  validateContent(type, content) {
+    return this._contentValidators[type]?.(content) ?? [];
   }
 
   // -- construction -----------------------------------------------------------
@@ -112,11 +140,11 @@ export class Workspace {
    * @throws {WorkspaceFormatError} On invalid or unmigratable data.
    */
   static fromJSON(json) {
-    const migrated = migrateWorkspace(json);
+    const workspace = new Workspace();
+    const migrated = migrateWorkspace(json, workspace.validationOptions);
     if (migrated.data === null) {
       throw new WorkspaceFormatError(migrated.errors.join("; "));
     }
-    const workspace = new Workspace();
     workspace._data = migrated.data;
     return workspace;
   }

@@ -6,11 +6,9 @@
  * and what applying does.
  */
 
+import { isSafeUrl } from "../core/url.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
-
-/** Schemes that run code or smuggle a document into the page. */
-const UNSAFE_SCHEME = /^(javascript|data|vbscript|file):/i;
 
 /**
  * Turn what the user typed into an address worth storing: trimmed, with `https://`
@@ -20,9 +18,11 @@ const UNSAFE_SCHEME = /^(javascript|data|vbscript|file):/i;
  */
 export function normalizeLinkUrl(raw) {
   const value = String(raw ?? "").trim();
-  if (!value || UNSAFE_SCHEME.test(value)) return "";
-  if (/^(https?:|mailto:|tel:|#|\/)/i.test(value)) return value;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z0-9.-]+:\d+/i.test(value)) return value;
+  if (!value) return "";
+  // "host:8080" reads as a scheme but is an address without one.
+  const hostPort = /^[a-z0-9.-]+:\d+/i.test(value);
+  if (!hostPort && /^[a-z][a-z0-9+.-]*:/i.test(value)) return isSafeUrl(value) ? value : "";
+  if (/^(#|\/)/.test(value)) return value;
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return `mailto:${value}`;
   return `https://${value}`;
 }
