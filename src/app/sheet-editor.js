@@ -17,6 +17,7 @@ import { clear, h } from "./dom.js";
 import { readSheetSelection } from "./selection.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
+import { createGestureScope } from "./gesture.js";
 import { findSectionByLocator } from "../references/sections.js";
 import { promptName, referenceCount, sectionMenuItems, showMenu, showReferenceList } from "./handles.js";
 
@@ -1132,6 +1133,9 @@ export function createSheetEditor(workspace, pageId, options = {}) {
   });
 
   /** Follow the pointer while a header edge is dragged, resizing the live DOM without re-rendering. */
+  /** Document-level listeners of this editor's drags; aborted on destroy. */
+  const gestures = createGestureScope(document);
+
   const dragResize = (/** @type {Event} */ event) => {
     if (gesture?.type === "tablemove") {
       const mouse = /** @type {MouseEvent} */ (event);
@@ -1161,7 +1165,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     );
     if (line) /** @type {HTMLElement} */ (line).style[gesture.axis === "col" ? "width" : "height"] = `${gesture.size}px`;
   };
-  document.addEventListener("mousemove", dragResize);
+  gestures.listen("mousemove", dragResize);
 
   /** Finish the gesture on mouse release: commit a fill, move or resize, or treat a bare grab as a click. */
   const finishGesture = () => {
@@ -1200,7 +1204,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
       selectCell(done.tableId, done.grab.col, done.grab.row);
     }
   };
-  document.addEventListener("mouseup", finishGesture);
+  gestures.listen("mouseup", finishGesture);
 
   // -- section handle ------------------------------------------------------------
 
@@ -1455,8 +1459,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     refresh,
     destroy: () => {
       unsubscribe();
-      document.removeEventListener("mouseup", finishGesture);
-      document.removeEventListener("mousemove", dragResize);
+      gestures.abort();
       popovers.destroy();
     },
     getSelection: () =>

@@ -60,6 +60,7 @@ import { enginesFor, staticReferenceHooks } from "./reference-render.js";
 import { openExpressionEditor } from "./expression-editor.js";
 import { openReferencePicker } from "./reference-picker.js";
 import { pageList, pageTitle } from "../workspace/selectors.js";
+import { createGestureScope } from "./gesture.js";
 import {
   promptName,
   referenceCount,
@@ -1922,14 +1923,19 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     startDocumentListeners();
   }
 
+  /** Document-level listeners of the running gesture; aborted on destroy. */
+  const gestureScope = createGestureScope(document);
+  /** @type {Array<() => void>} */
+  let gestureStops = [];
+
   function startDocumentListeners() {
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
+    stopDocumentListeners();
+    gestureStops = [gestureScope.listen("mousemove", onMouseMove), gestureScope.listen("mouseup", onMouseUp)];
   }
 
   function stopDocumentListeners() {
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
+    for (const stop of gestureStops) stop();
+    gestureStops = [];
   }
 
   /** @param {{ x: number, y: number }} startClient @param {MouseEvent} event */
@@ -2317,6 +2323,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       destroyed = true;
       stopPreview({ quiet: true });
       stopDocumentListeners();
+      gestureScope.abort();
       document.removeEventListener("selectionchange", onSelectionChange);
       unsubscribe();
       resizeObserver?.disconnect();

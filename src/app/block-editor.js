@@ -36,6 +36,7 @@ import { createReferenceViews } from "./reference-view.js";
 import { caretOffset, mergeRuns, modelLength, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
 import { pageExists, pageInfo } from "../workspace/selectors.js";
 import { clampDocumentSelection, readDocumentSelection } from "./selection.js";
+import { createGestureScope } from "./gesture.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../document/model.js").Block} Block */
@@ -707,6 +708,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   let sel = null;
   /** @type {string | null} Unit where the current mouse drag began. */
   let dragAnchor = null;
+  /** Document-level listeners of this editor's drags; aborted on destroy. */
+  const gestures = createGestureScope(element.ownerDocument);
 
   /** @returns {string[]} Selected unit keys, in reading order. */
   function selectedKeys() {
@@ -1706,7 +1709,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   const onMouseUp = () => {
     dragAnchor = null;
   };
-  element.ownerDocument.addEventListener("mouseup", onMouseUp);
+  gestures.listen("mouseup", onMouseUp);
 
   element.addEventListener("input", (event) => {
     if (!owns(/** @type {Node} */ (event.target))) return;
@@ -2452,9 +2455,15 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       dropIndicator.style.top = `${best.el.offsetTop + (drag.side === "after" ? best.el.offsetHeight : 0)}px`;
     };
 
+    /** @type {Array<() => void>} */
+    let dragStops = [];
+    const stopDragListeners = () => {
+      for (const stop of dragStops) stop();
+      dragStops = [];
+    };
+
     const onDragEnd = () => {
-      doc.removeEventListener("mousemove", onDragMove);
-      doc.removeEventListener("mouseup", onDragEnd);
+      stopDragListeners();
       const finished = drag;
       drag = null;
       handleBusy = false;
@@ -2473,8 +2482,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       if (event.button !== 0 || !handleTarget) return;
       event.preventDefault();
       drag = { blockId: handleTarget, startY: event.clientY, active: false, target: null, side: "after" };
-      doc.addEventListener("mousemove", onDragMove);
-      doc.addEventListener("mouseup", onDragEnd);
+      stopDragListeners();
+      dragStops = [gestures.listen("mousemove", onDragMove), gestures.listen("mouseup", onDragEnd)];
     });
 
     blockHandle.addEventListener("click", (event) => {
@@ -2484,11 +2493,14 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const items = handleMenuItems(handleTarget);
       handleBusy = true;
       showMenu(popovers, blockHandle, items);
-      const release = () => {
-        handleBusy = false;
-        doc.removeEventListener("mousedown", release, true);
-      };
-      doc.addEventListener("mousedown", release, true);
+      const stopRelease = gestures.listen(
+        "mousedown",
+        () => {
+          handleBusy = false;
+          stopRelease();
+        },
+        true
+      );
     });
 
     element.addEventListener("mouseover", (event) => {
@@ -2628,7 +2640,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       unsubscribe();
       views.destroy();
       popovers.destroy();
-      element.ownerDocument.removeEventListener("mouseup", onMouseUp);
+      gestures.abort();
     }
   };
 }
