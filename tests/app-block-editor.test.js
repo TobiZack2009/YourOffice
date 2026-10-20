@@ -147,6 +147,18 @@ describe("typing commits to the model", () => {
     expect(order()).toHaveLength(1);
   });
 
+  it("undoes a run of typing in one block as a single step", () => {
+    const { editor, ws, order, block } = setup([{ type: "paragraph", runs: [{ text: "old" }] }]);
+    const el = editable(editor.element.querySelector("[contenteditable=true]"));
+    for (const text of ["n", "ne", "new"]) {
+      el.textContent = text;
+      el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    }
+    expect(block(order()[0]).runs).toEqual([{ text: "new" }]);
+    ws.undo();
+    expect(block(order()[0]).runs).toEqual([{ text: "old" }]);
+  });
+
   it("updates code text on input", () => {
     const { editor, order, block } = setup([{ type: "code", text: "x" }]);
     const el = editable(editor.element.querySelector("code[contenteditable=true]"));

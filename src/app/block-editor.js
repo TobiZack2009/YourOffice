@@ -325,7 +325,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   });
 
   /** Dispatch as this editor, so its change events can be recognised as its own. */
-  const dispatch = (/** @type {string} */ type, /** @type {any} */ payload) => workspace.dispatch(type, payload, { origin });
+  const dispatch = (/** @type {string} */ type, /** @type {any} */ payload, /** @type {string | undefined} */ coalesce) =>
+    workspace.dispatch(type, payload, { origin, coalesce });
 
   /** Whether a node belongs to this editor rather than to an editor nested in it. */
   const owns = (/** @type {Node | null} */ node) => {
@@ -624,11 +625,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     const itemId = el.getAttribute("data-item-id");
     const block = blockId ? blockOf(blockId) : undefined;
     if (!block) return;
+    // Typing in one block or list item is one undo step until the user pauses.
+    const typing = `typing:${pageId}:${blockId}:${itemId ?? ""}`;
 
     if (block.type === "code") {
       const text = normalizeText(el.textContent ?? "");
       if (text !== (block.text ?? "")) {
-        dispatch("updateBlock", { pageId, blockId, patch: { text } });
+        dispatch("updateBlock", { pageId, blockId, patch: { text } }, typing);
       }
       return;
     }
@@ -638,13 +641,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const hit = locateItem(itemId);
       if (hit && !runsEqual(hit.item.runs ?? [], runs)) {
         const items = (hit.block.items ?? []).map((item) => (item.id === itemId ? { ...item, runs } : item));
-        dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
+        dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } }, typing);
       }
       return;
     }
 
     if (!runsEqual(block.runs ?? [], runs)) {
-      dispatch("setBlockRuns", { pageId, blockId, runs });
+      dispatch("setBlockRuns", { pageId, blockId, runs }, typing);
     }
   }
 

@@ -31,9 +31,28 @@ integrityChecks })` sets the rules used by `setPageContent`, import and export (
 supplies the full set; a bare store checks the envelope only).
 
 `Workspace` runs command dispatch inside transactions, rolls back by snapshot on throw,
-supports per-transaction undo/redo, tracks dirty state, emits `change` events and exposes
+supports per-transaction undo/redo, tracks dirty state through its history, emits `change` events and exposes
 `canUndo` / `canRedo` / `hasCommand` for the UI. `getFavorites()` returns favourite ids that
 still exist.
+
+### History (`workspace/history.js`)
+
+Whole-state snapshots, one per transaction. A commit clones the workspace once (the state
+before the transaction); an entry keeps the state on its other side, and undo/redo swap it with
+the live data, so stepping through history clones nothing.
+
+- **Coalescing**: `dispatch(type, payload, { coalesce: key })`. A commit whose commands all carry
+  the same key merges into the previous entry when that entry has the key, nothing has happened
+  since (another commit, undo, redo or save) and it is within `history.coalesceWindow` (1000 ms).
+  One undo then reverts the whole run. Each commit still emits its own `change` event. The
+  document editor keys typing per block (or list item); a transaction whose commands disagree on
+  the key does not merge.
+- **Cap**: `history.maxEntries` (200); the oldest entries are dropped.
+- **Revisions and dirty**: every commit or merge takes the next revision; the head revision is
+  the last entry's, or `baseRev` when the stack is empty or trimmed. `markSaved()` stores
+  `savedRev`, and `workspace.dirty` is a getter (`headRev !== savedRev`). Undoing back to the
+  saved state is clean; a saved state trimmed out of reach stays dirty. `markSaved()` also stops
+  later commits from merging into earlier ones.
 
 ### Results, change sets and selectors
 
@@ -75,4 +94,4 @@ the workspace is in memory with a dirty dot, and Cmd/Ctrl+S calls `markSaved`.
 ## Tests
 
 `ids`, `events`, `schema`, `store`, `format`, `workspace-schema` additions,
-`workspace-selectors`, `workspace-changes`.
+`workspace-selectors`, `workspace-changes`, `workspace-history`.

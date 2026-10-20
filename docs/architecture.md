@@ -29,7 +29,7 @@ Principles, module layout, key types and the decisions that depart from the spec
 ```
 src/
   core/          stable IDs, event emitter, error types (WorkspaceFormatError, CommandError)
-  workspace/     schema, validation, migrations, store, built-in commands, import/export
+  workspace/     schema, validation, migrations, store, history, selectors, change sets, built-in commands, import/export
   sheet/         formula engine and the table model/commands/render
   document/      block model, block commands, DOM renderer
   presentation/  slide model, layouts, commands, geometry, animation/slideshow logic, renderer
@@ -72,8 +72,9 @@ JSDoc typedefs document the shapes.
   `modifiedAt`, marks dirty and emits `change` (`{kind, transactionId, label, commands, pages, entities, registry, origin}`); it returns the handler's result (created ids). The UI reads through `workspace/selectors.js`, not cloned pages. See `workspace.md`.
   Nested `transact` joins the outer one; a throw rolls back to a snapshot. Failures are
   `CommandError(message, reason)` with a machine-readable `reason`.
-- **History**: per-transaction `structuredClone` snapshots. Planned upgrade to inverse
-  patches when data volumes demand it.
+- **History** (`workspace/history.js`): per-transaction whole-state snapshots (one clone per
+  commit, none for undo/redo), same-key coalescing, a 200-entry cap and a saved revision that
+  drives `dirty`. Inverse patches stay a possible upgrade when data volumes demand it.
 - **Formula engine** (`sheet/`): `tokenize` -> `parseFormula` (AST) -> `evaluate` in a
   context; `RecalcEngine` owns the dependency graph. See `formulas.md`.
 - **Document content**: `{ blockOrder, blocks, sections }`; rich text is a list of inline

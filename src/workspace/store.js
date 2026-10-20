@@ -1,9 +1,7 @@
 /**
- * Workspace store: in-memory model, command dispatch, transactions, history,
- * dirty state. The DOM is never mutated here; renderers listen for `change`.
- *
- * Phase-1 history keeps whole-state snapshots per transaction (see AGENTS.md),
- * which is simple and correct; inverse patches are a planned upgrade.
+ * Workspace store: in-memory model, command dispatch, transactions, dirty state. The DOM is
+ * never mutated here; renderers listen for `change`. Undo/redo live in `history.js`
+ * (whole-state snapshots, coalescing, a cap and saved-revision tracking).
  */
 
 import { createId } from "../core/ids.js";
@@ -16,6 +14,7 @@ import {
 } from "./schema.js";
 import { registerWorkspaceCommands } from "./commands.js";
 import { WHOLE_PAGE, cloneEntities } from "./changes.js";
+import { History } from "./history.js";
 
 /** @typedef {import("./schema.js").PageEnvelope} PageEnvelope */
 /** @typedef {import("./schema.js").PageType} PageType */
@@ -32,15 +31,22 @@ import { WHOLE_PAGE, cloneEntities } from "./changes.js";
  * @property {Map<string, Set<string>>} entities Entity ids touched per page (see `changes.js`).
  * @property {boolean} registry Whether a command changed the page registry.
  * @property {string | undefined} origin Who dispatched the first command that named one.
+ * @property {string | null | undefined} coalesce History merge key shared by every command in it
+ *   (`null` once two commands disagree, `undefined` before the first command).
  * @property {(pageId: string, ...entityIds: string[]) => void} touch Record a touched page and,
  *   optionally, the entities inside it that changed. With no entities the whole page counts as changed.
  */
 
 /** @typedef {{ hot: boolean, selfManaged: boolean, registry: boolean }} CommandMeta */
 
-/** @typedef {{ origin?: string }} DispatchOptions */
+/**
+ * @typedef {object} DispatchOptions
+ * @property {string} [origin] Who is dispatching (an editor's own id).
+ * @property {string} [coalesce] History merge key: consecutive commits with the same key, close in
+ *   time, become one undo step (typing, dragging a value).
+ */
 
-/** @typedef {{ id: string, label: string, commands: string[], before: WorkspaceDocument, after: WorkspaceDocument, pageIds: string[], entities: Map<string, Set<string>>, registry: boolean }} HistoryEntry */
+/** @typedef {import("./history.js").HistoryEntry} HistoryEntry */
 
 /** @returns {string} Current time as an ISO 8601 UTC string. */
 function nowIso() {
@@ -61,6 +67,7 @@ function newTransaction(label) {
     entities: new Map(),
     registry: false,
     origin: undefined,
+    coalesce: undefined,
     touch(pageId, ...entityIds) {
       tx.pageIds.add(pageId);
       const set = tx.entities.get(pageId) ?? new Set();
@@ -76,7 +83,7 @@ function newTransaction(label) {
  * The change event for a history entry. Undo and redo always report `registry: true`: they
  * restore a whole snapshot, so the page tree may differ whatever the entry touched.
  * @param {"commit" | "undo" | "redo"} kind
- * @param {HistoryEntry} entry
+ * @param {{ id: string, label: string, commands: string[], pageIds: string[], entities: Map<string, Set<string>>, registry: boolean }} entry
  * @param {string} [origin]
  * @returns {import("./changes.js").Change}
  */
@@ -112,13 +119,8 @@ export class Workspace {
 
     /** @type {Emitter} */
     this.events = new Emitter();
-    /** @type {boolean} Unsaved-changes flag (spec §11 dirty-state tracking). */
-    this.dirty = false;
-
-    /** @type {HistoryEntry[]} Committed transactions, most recent last. */
-    this._history = [];
-    /** @type {HistoryEntry[]} Undone transactions available for redo. */
-    this._redo = [];
+    /** Undo/redo stacks, revisions and the saved marker (see `history.js`). */
+    this.history = new History();
 
     /** @type {Transaction | null} Open transaction when batching, else null. */
     this._open = null;
@@ -155,6 +157,11 @@ export class Workspace {
 
     // Only the workspace's own commands; features register theirs through `domain/installDomain`.
     registerWorkspaceCommands(this);
+  }
+
+  /** @returns {boolean} Unsaved-changes flag (spec §11): the head differs from the last saved revision. */
+  get dirty() {
+    return this.history.dirty;
   }
 
   /** @returns {import("./schema.js").ValidationOptions} What a full workspace check needs. */
@@ -361,20 +368,19 @@ export class Workspace {
   _commit(tx, before) {
     // modifiedAt belongs inside the "after" snapshot so undo/redo restore it.
     this._data.metadata.modifiedAt = nowIso();
-    const entry = /** @type {HistoryEntry} */ ({
+    const commit = {
       id: tx.id,
       label: tx.label,
       commands: tx.commands.map((c) => c.type),
       before,
-      after: structuredClone(this._data),
       pageIds: [...tx.pageIds],
       entities: tx.entities,
       registry: tx.registry
-    });
-    this._redo.length = 0;
-    this._history.push(entry);
-    this.dirty = true;
-    this.events.emit("change", changeOf("commit", entry, tx.origin));
+    };
+    // The event describes this commit alone, even if history merges it into the previous entry.
+    const change = changeOf("commit", commit, tx.origin);
+    this.history.record(commit, typeof tx.coalesce === "string" ? tx.coalesce : null);
+    this.events.emit("change", change);
   }
 
   // -- commands -------------------------------------------------------------------
@@ -455,6 +461,8 @@ export class Workspace {
         if (typeof after === "function") afters.push(after);
       }
       const result = handler(this, tx, payload);
+      if (tx.commands.length === 0) tx.coalesce = options.coalesce ?? null;
+      else if (tx.coalesce !== (options.coalesce ?? null)) tx.coalesce = null;
       tx.commands.push({ type, payload });
       if (this.commandMeta(type).registry) tx.registry = true;
       if (options.origin !== undefined && tx.origin === undefined) tx.origin = options.origin;
@@ -469,12 +477,12 @@ export class Workspace {
 
   /** @returns {boolean} Whether there is a transaction to undo. */
   get canUndo() {
-    return this._history.length > 0;
+    return this.history.canUndo;
   }
 
   /** @returns {boolean} Whether there is a transaction to redo. */
   get canRedo() {
-    return this._redo.length > 0;
+    return this.history.canRedo;
   }
 
   /**
@@ -482,12 +490,10 @@ export class Workspace {
    * @returns {boolean} Whether anything was undone.
    */
   undo() {
-    const entry = this._history.pop();
-    if (!entry) return false;
-    this._data = structuredClone(entry.before);
-    this._redo.push(entry);
-    this.dirty = true;
-    this.events.emit("change", changeOf("undo", entry));
+    const step = this.history.undo(this._data);
+    if (!step) return false;
+    this._data = step.data;
+    this.events.emit("change", changeOf("undo", step.entry));
     return true;
   }
 
@@ -496,19 +502,17 @@ export class Workspace {
    * @returns {boolean} Whether anything was redone.
    */
   redo() {
-    const entry = this._redo.pop();
-    if (!entry) return false;
-    this._data = structuredClone(entry.after);
-    this._history.push(entry);
-    this.dirty = true;
-    this.events.emit("change", changeOf("redo", entry));
+    const step = this.history.redo(this._data);
+    if (!step) return false;
+    this._data = step.data;
+    this.events.emit("change", changeOf("redo", step.entry));
     return true;
   }
 
   // -- persistence ------------------------------------------------------------
 
-  /** Clear dirty state after a successful save/export. */
+  /** Record the current state as saved (after a successful save/export). */
   markSaved() {
-    this.dirty = false;
+    this.history.markSaved();
   }
 }
