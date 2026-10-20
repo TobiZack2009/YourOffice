@@ -927,8 +927,12 @@ function animationIndex(ctx) {
   return selected && editor ? editor.getAnimations().findIndex((animation) => animation.id === selected.id) : -1;
 }
 
+/** @param {RibbonContext} ctx */
+const canApplyEffect = (ctx) => hasObjects(ctx) || hasAnimation(ctx);
+
 /**
- * A button that animates the selected objects with one effect.
+ * A gallery button: it sets the effect of the selected animation, or, when none is selected
+ * (or it belongs to another object), animates the selected objects with it.
  * @param {"appear" | "fade-in" | "motion"} effect
  * @param {string} label
  * @param {string} title
@@ -942,10 +946,38 @@ function animationEffectButton(effect, label, title, iconName) {
     title,
     icon: iconName,
     attrs: { "data-action": `animation-${effect}` },
-    enabled: hasObjects,
+    enabled: canApplyEffect,
     disabledReason: ANIMATION_SELECT_REASON,
-    action: (ctx) => ctx.presentationEditor?.addAnimation(effect)
+    active: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.effect === effect,
+    action: (ctx) => ctx.presentationEditor?.applyAnimationEffect(effect)
   });
+}
+
+/**
+ * Number field for how far the selected motion animation travels along one axis (px). The
+ * start point stays where it is; the end point moves.
+ * @param {"x" | "y"} axis
+ * @returns {Control}
+ */
+function animationDistanceField(axis) {
+  return {
+    id: `animation-move-${axis}`,
+    kind: "field",
+    label: `Move ${axis.toUpperCase()} (px)`,
+    icon: "motion-path",
+    attrs: { "data-action": `animation-move-${axis}` },
+    enabled: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.effect === "motion",
+    disabledReason: "Distance applies to Motion path animations",
+    value: (ctx) => {
+      const path = ctx.presentationEditor?.getSelectedAnimation()?.path;
+      return path ? Math.round(path.to[axis] - path.from[axis]) : "";
+    },
+    apply: (ctx, value) => {
+      const path = ctx.presentationEditor?.getSelectedAnimation()?.path;
+      if (!path) return;
+      ctx.presentationEditor?.updateAnimation({ path: { from: path.from, to: { ...path.to, [axis]: path.from[axis] + value } } });
+    }
+  };
 }
 
 /**
@@ -1287,16 +1319,38 @@ function presentationTabs() {
               title: "Slide the object in from an edge",
               icon: "slide",
               attrs: { "data-action": "animation-slide-in" },
-              enabled: hasObjects,
+              enabled: canApplyEffect,
               disabledReason: ANIMATION_SELECT_REASON,
+              active: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.effect === "slide-in",
               items: (ctx) =>
                 TRANSITION_DIRECTION_OPTIONS.map((option) => ({
                   label: option.label,
                   attrs: { "data-action": "animation-slide-in-item", "data-direction": option.value },
-                  action: () => ctx.presentationEditor?.addAnimation("slide-in", { direction: /** @type {any} */ (option.value) })
+                  action: () => ctx.presentationEditor?.applyAnimationEffect("slide-in", { direction: /** @type {any} */ (option.value) })
                 }))
             }),
-            animationEffectButton("motion", "Motion path", "Move the object from one point to another", "motion-path")
+            animationEffectButton("motion", "Motion path", "Move the object from one point to another", "motion-path"),
+            button({
+              id: "animation-add",
+              kind: "menu",
+              label: "Add animation",
+              title: "Give the selected objects another animation, keeping the ones they have",
+              icon: "plus",
+              attrs: { "data-action": "animation-add" },
+              enabled: hasObjects,
+              disabledReason: ANIMATION_SELECT_REASON,
+              items: (ctx) => [
+                { label: "Appear", icon: "animation", attrs: { "data-action": "animation-add-item", "data-effect": "appear" }, action: () => ctx.presentationEditor?.addAnimation("appear") },
+                { label: "Fade in", icon: "transition", attrs: { "data-action": "animation-add-item", "data-effect": "fade-in" }, action: () => ctx.presentationEditor?.addAnimation("fade-in") },
+                ...TRANSITION_DIRECTION_OPTIONS.map((option) => ({
+                  label: `Slide in ${option.label.toLowerCase()}`,
+                  icon: "slide",
+                  attrs: { "data-action": "animation-add-item", "data-effect": "slide-in", "data-direction": option.value },
+                  action: () => ctx.presentationEditor?.addAnimation("slide-in", { direction: /** @type {any} */ (option.value) })
+                })),
+                { label: "Motion path", icon: "motion-path", attrs: { "data-action": "animation-add-item", "data-effect": "motion" }, action: () => ctx.presentationEditor?.addAnimation("motion") }
+              ]
+            })
           ]
         },
         {
@@ -1330,13 +1384,33 @@ function presentationTabs() {
               disabledReason: "Direction applies to Slide in animations",
               value: (ctx) => ctx.presentationEditor?.getSelectedAnimation()?.direction ?? "left",
               onSelect: (ctx, value) => ctx.presentationEditor?.updateAnimation({ direction: value })
-            }
+            },
+            animationDistanceField("x"),
+            animationDistanceField("y")
           ]
         },
         {
           id: "animation-order",
           label: "Order",
           controls: [
+            button({
+              id: "animation-pick",
+              kind: "menu",
+              label: "Animations",
+              title: "Choose which animation on this slide to edit",
+              icon: "list",
+              attrs: { "data-action": "animation-pick" },
+              enabled: (ctx) => (ctx.presentationEditor?.getAnimations().length ?? 0) > 0,
+              disabledReason: "This slide has no animations",
+              items: (ctx) =>
+                (ctx.presentationEditor?.describeAnimations() ?? []).map((entry) => ({
+                  label: `${entry.number}. ${entry.label}`,
+                  icon: entry.selected ? "check" : undefined,
+                  className: entry.selected ? "is-current" : undefined,
+                  attrs: { "data-action": "animation-pick-item", "data-animation-id": entry.id },
+                  action: () => ctx.presentationEditor?.selectAnimation(entry.id)
+                }))
+            }),
             button({
               id: "animation-earlier",
               size: "small",

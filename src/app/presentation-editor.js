@@ -43,7 +43,7 @@ import {
 } from "../presentation/model.js";
 import { renderObject, renderSlide } from "../presentation/render.js";
 import { createPreview } from "./animation-preview.js";
-import { createAnimationTimeline } from "./animation-timeline.js";
+import { createAnimationTimeline, effectLabel, effectPatch, objectLabel } from "./animation-timeline.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { caretOffset, parseInlineRuns, runsEqual } from "./inline.js";
@@ -906,6 +906,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
 
   /** Selection/tool/view/edit changed without a model change. */
   function afterStateChange() {
+    syncAnimationToSelection();
     renderOverlay();
     stageArea.dataset.tool = tool ? tool.type : "";
     stageArea.classList.toggle("is-editing", editing !== null);
@@ -1219,6 +1220,28 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     return (selectedAnimationId && getSlide()?.animations?.[selectedAnimationId]) || null;
   }
 
+  /** Selection key the animation was last synced to, so only a real change re-syncs. */
+  let syncedSelection = "";
+
+  /**
+   * When the selected objects change, the animation being edited follows them: it stays if
+   * it belongs to one of them, else the first animation of a selected object is picked, else
+   * none. Emptying the selection leaves the animation alone (the timeline keeps editing it).
+   */
+  function syncAnimationToSelection() {
+    const key = selectedIds.join(",");
+    if (key === syncedSelection) return;
+    syncedSelection = key;
+    const slide = getSlide();
+    if (!slide || selectedIds.length === 0) return;
+    const current = selectedAnimationId ? slide.animations[selectedAnimationId] : null;
+    if (current && selectedIds.includes(current.objectId)) return;
+    const next = slide.animationOrder.find((id) => selectedIds.includes(slide.animations[id]?.objectId)) ?? null;
+    if (next === selectedAnimationId) return;
+    selectedAnimationId = next;
+    timeline.select();
+  }
+
   /** @param {string | null} id */
   function selectAnimation(id) {
     const next = id && getSlide()?.animations?.[id] ? id : null;
@@ -1260,6 +1283,42 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
         });
       });
     });
+  }
+
+  /**
+   * The Animations ribbon's effect gallery. With an animation selected (and its object among
+   * the selected objects, or nothing selected) the effect of that animation is replaced;
+   * otherwise each selected object gets a new animation. Add animation always adds.
+   * @param {Animation["effect"]} effect
+   * @param {{ direction?: Animation["direction"] }} [opts]
+   * @returns {boolean}
+   */
+  function applyAnimationEffect(effect, opts = {}) {
+    const current = getSelectedAnimation();
+    const objects = getSelectedObjects();
+    if (!current || !(objects.length === 0 || objects.some((object) => object.id === current.objectId))) {
+      return addAnimation(effect, opts);
+    }
+    const sameDirection = !opts.direction || opts.direction === current.direction;
+    if (current.effect === effect && sameDirection) return true;
+    return updateAnimation({
+      ...(current.effect === effect ? {} : effectPatch(current, effect)),
+      ...(effect === "slide-in" && opts.direction ? { direction: opts.direction } : {})
+    });
+  }
+
+  /**
+   * The slide's animations in playback order, for pickers.
+   * @returns {{ id: string, number: number, label: string, selected: boolean }[]}
+   */
+  function describeAnimations() {
+    const slide = getSlide();
+    return getAnimations().map((animation, index) => ({
+      id: animation.id,
+      number: index + 1,
+      label: `${effectLabel(animation)} · ${objectLabel(slide?.objects[animation.objectId])}`,
+      selected: animation.id === selectedAnimationId
+    }));
   }
 
   /**
@@ -2292,6 +2351,8 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     getSelectedAnimation,
     selectAnimation,
     addAnimation,
+    applyAnimationEffect,
+    describeAnimations,
     updateAnimation,
     removeAnimation,
     moveAnimation,

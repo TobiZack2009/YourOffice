@@ -649,6 +649,10 @@ svg.icon {
   color: var(--accent);
 }
 
+.menu-item.is-current {
+  font-weight: 600;
+}
+
 .menu-item.is-danger {
   color: var(--danger);
 }

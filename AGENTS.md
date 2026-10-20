@@ -514,6 +514,16 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
     and Preview groups; Delay/Duration are in ms like the transition duration field.
   - Browser smoke (playwright-core, system Chrome): add/retime/reorder/preview, motion
     endpoint drag, tab switch hiding the timeline, no console errors.
+  - **Editing from the ribbon.** The Animations tab edits animations, not only the timeline.
+    The effect gallery (Appear, Fade in, Slide in menu, Motion path) *replaces* the selected
+    animation's effect (`applyAnimationEffect`, via `updateAnimation` + `effectPatch`; a no-op
+    when nothing changes) and highlights the current effect; with no animation selected, or one
+    belonging to an object other than the selected one, it adds. A separate "Add animation" menu
+    always adds. Timing gains Move X / Move Y fields (motion only; offset = `path.to - path.from`),
+    and the Order group starts with an "Animations" picker menu listing every animation on the slide
+    (`describeAnimations`, current one checked). `syncAnimationToSelection` makes selecting an
+    object select its first animation (unless the current one already belongs to it; an empty
+    selection keeps the current one), so Timing controls enable without visiting the timeline.
 - **Phase 6 — sections, embeds and expression references:**
   - **Language (`src/sheet/`).** The tokenizer gives every token an `end` offset and adds `!`,
     `'quoted names'` (`''` escape) and an optional leading `=`. The parser adds a `path` node
@@ -633,8 +643,8 @@ Key types (JSDoc typedefs document the shapes; there is no static type checker):
   `references-rewrite`, `references-catalog`, `references-commands`, `references-fit`,
   `app-references`, `app-block-references`, `app-inline-references`, `app-sheet-references`,
   `app-slide-references`, `app-presentation-references`, `app-links`, `references-multi-slide`.
-  **1063 tests green across 54 files**; the single-file build inlines JS + CSS into one
-  ~385 kB HTML.
+  **1071 tests green across 54 files**; the single-file build inlines JS + CSS into one
+  ~388 kB HTML.
 
 ## Roadmap (from spec §16, reordered to land testable foundations first)
 

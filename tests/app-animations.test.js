@@ -39,6 +39,98 @@ afterEach(() => {
   delete Element.prototype.animate;
 });
 
+describe("editing animations from the ribbon", () => {
+  it("replaces the selected animation's effect instead of adding another", () => {
+    const { editor, slide, a } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("appear");
+    const [id] = slide().animationOrder;
+    expect(editor.applyAnimationEffect("fade-in")).toBe(true);
+    expect(slide().animationOrder).toEqual([id]);
+    // Appear is instant, so switching to Fade in follows the new default duration.
+    expect(slide().animations[id]).toMatchObject({ effect: "fade-in", duration: 500 });
+    editor.applyAnimationEffect("slide-in", { direction: "up" });
+    expect(slide().animations[id]).toMatchObject({ effect: "slide-in", direction: "up" });
+    editor.applyAnimationEffect("slide-in", { direction: "right" });
+    expect(slide().animations[id].direction).toBe("right");
+    expect(slide().animationOrder).toEqual([id]);
+  });
+
+  it("keeps a custom duration when the effect changes", () => {
+    const { editor, slide, a } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("fade-in");
+    const [id] = slide().animationOrder;
+    editor.updateAnimation({ duration: 1234 });
+    editor.applyAnimationEffect("motion");
+    expect(slide().animations[id]).toMatchObject({ effect: "motion", duration: 1234 });
+    expect(slide().animations[id].path).toBeTruthy();
+  });
+
+  it("does nothing when the effect is already set", () => {
+    const { editor, slide, a } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("fade-in");
+    const before = JSON.stringify(slide().animations);
+    expect(editor.applyAnimationEffect("fade-in")).toBe(true);
+    expect(slide().animationOrder).toHaveLength(1);
+    expect(JSON.stringify(slide().animations)).toBe(before);
+  });
+
+  it("adds a new animation when the selected one belongs to another object", () => {
+    const { editor, slide, a, b } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("appear");
+    editor.selectObjects([b]);
+    // Selecting b drops a's animation from the selection.
+    expect(editor.getSelectedAnimation()).toBeNull();
+    editor.applyAnimationEffect("fade-in");
+    expect(slide().animationOrder).toHaveLength(2);
+    expect(editor.getAnimations().map((x) => x.objectId)).toEqual([a, b]);
+  });
+
+  it("changes the selected animation from the timeline with no object selected", () => {
+    const { editor, slide, a } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("appear");
+    editor.selectObjects([]);
+    expect(editor.getSelectedAnimation()).not.toBeNull();
+    editor.applyAnimationEffect("fade-in");
+    expect(slide().animationOrder).toHaveLength(1);
+    expect(editor.getAnimations()[0].effect).toBe("fade-in");
+  });
+
+  it("selects an object's animation when the object is selected", () => {
+    const { editor, slide, a, b } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("appear");
+    editor.addAnimation("fade-in"); // a's second animation (replaces nothing: add)
+    editor.selectObjects([b]);
+    editor.addAnimation("appear");
+    const [a1, a2, b1] = slide().animationOrder;
+    editor.selectObjects([a]);
+    expect(editor.getSelectedAnimation().id).toBe(a1);
+    // An animation picked on the timeline stays while its object is selected.
+    editor.selectAnimation(a2);
+    editor.selectObjects([a, b]);
+    expect(editor.getSelectedAnimation().id).toBe(a2);
+    editor.selectObjects([b]);
+    expect(editor.getSelectedAnimation().id).toBe(b1);
+  });
+
+  it("lists the slide's animations for the picker", () => {
+    const { editor, a, b } = setup();
+    editor.selectObjects([a]);
+    editor.addAnimation("appear");
+    editor.selectObjects([b]);
+    editor.addAnimation("slide-in", { direction: "left" });
+    const list = editor.describeAnimations();
+    expect(list.map((x) => [x.number, x.selected])).toEqual([[1, false], [2, true]]);
+    expect(list[0].label).toBe("Appear · Rectangle");
+    expect(list[1].label).toContain("Slide in from left");
+  });
+});
+
 describe("editor animation handle", () => {
   it("animates the selected objects: the first on click, the rest with it", () => {
     const { editor, slide, a, b } = setup();

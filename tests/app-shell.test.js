@@ -552,6 +552,53 @@ describe("presentation pages", () => {
     expect(slide().animations[selectedId]).toBeUndefined();
   });
 
+  it("edits the selected animation's effect, distance and choice from the Animations tab", () => {
+    const { root, app, content } = openDeck();
+    const slide = () => content().slides[content().slideOrder[0]];
+    query(root, '.ribbon-tab[data-tab="animations"]')?.click();
+    const editor = app.getPresentationEditor();
+    const first = slide().objectOrder[0];
+    editor?.selectObjects([first]);
+
+    const gallery = (name) => /** @type {HTMLButtonElement} */ (query(root, `[data-action="animation-${name}"]`));
+    gallery("appear").click();
+    expect(gallery("appear").classList.contains("is-active")).toBe(true);
+    expect(slide().animationOrder).toHaveLength(1);
+
+    // The gallery now edits the animation rather than adding a second one.
+    gallery("fade-in").click();
+    expect(slide().animationOrder).toHaveLength(1);
+    expect(Object.values(slide().animations)[0].effect).toBe("fade-in");
+    expect(gallery("fade-in").classList.contains("is-active")).toBe(true);
+    expect(gallery("appear").classList.contains("is-active")).toBe(false);
+
+    // Add animation always adds, keeping the existing one.
+    query(root, '[data-action="animation-add"]')?.click();
+    /** @type {HTMLElement | null} */ (document.querySelector('[data-action="animation-add-item"][data-effect="motion"]'))?.click();
+    expect(slide().animationOrder).toHaveLength(2);
+    const motionId = slide().animationOrder[1];
+    expect(slide().animations[motionId].effect).toBe("motion");
+
+    // Motion distance fields move the end point.
+    const moveX = /** @type {HTMLInputElement} */ (query(root, '[data-action="animation-move-x"]'));
+    expect(moveX.disabled).toBe(false);
+    moveX.value = "300";
+    moveX.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(slide().animations[motionId].path.to.x - slide().animations[motionId].path.from.x).toBe(300);
+    const moveY = /** @type {HTMLInputElement} */ (query(root, '[data-action="animation-move-y"]'));
+    moveY.value = "-40";
+    moveY.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(slide().animations[motionId].path.to.y).toBe(-40);
+
+    // The picker chooses which animation the ribbon edits.
+    query(root, '[data-action="animation-pick"]')?.click();
+    const picks = [...document.querySelectorAll('[data-action="animation-pick-item"]')];
+    expect(picks).toHaveLength(2);
+    /** @type {HTMLElement} */ (picks[0]).click();
+    expect(editor?.getSelectedAnimation()?.id).toBe(slide().animationOrder[0]);
+    expect(/** @type {HTMLInputElement} */ (query(root, '[data-action="animation-move-x"]')).disabled).toBe(true);
+  });
+
   it("keeps the timeline open across undo while the Animations tab is active", () => {
     const { root, app } = openDeck();
     query(root, '.ribbon-tab[data-tab="animations"]')?.click();
