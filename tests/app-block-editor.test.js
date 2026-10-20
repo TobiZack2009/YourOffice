@@ -1004,6 +1004,23 @@ describe("keyed rendering", () => {
     editor.destroy();
   });
 
+  it("undo of typing redraws the block, although the model returns to what it was drawn from", () => {
+    const { ws, pageId, editor, order } = setup(blocks());
+    const [a, b] = order();
+    const elA = /** @type {HTMLElement} */ (blockEl(editor.element, a));
+    const elB = blockEl(editor.element, b);
+    elA.focus();
+    elA.textContent = "one typed";
+    elA.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(ws.getPage(pageId).content.blocks[a].runs[0].text).toBe("one typed");
+    ws.undo();
+    expect(blockEl(editor.element, a)?.textContent).toBe("one");
+    expect(blockEl(editor.element, b)).toBe(elB);
+    ws.redo();
+    expect(blockEl(editor.element, a)?.textContent).toBe("one typed");
+    editor.destroy();
+  });
+
   it("redraws a block that holds a reference on every pass", () => {
     const { ws, pageId, editor, order } = setup([
       { type: "paragraph", runs: [{ text: "plain" }] },

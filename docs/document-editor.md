@@ -50,7 +50,8 @@ s/strike/del, code, a[href]). Ref runs are atomic.
 - Rendering is keyed by block id: a block whose data (and nested list children) is unchanged
   keeps its element, and blocks are reconciled in place. A block the user owns -- composing
   (`compositionstart..end`), or focused and already showing what the model says -- is never
-  replaced. Page-link, section-embed and inline-reference blocks are redrawn on every pass
+  replaced. An inline commit marks the blocks it touched as stale (the DOM, not the model they
+  were drawn from, is the truth), so undoing typing redraws them. Page-link, section-embed and inline-reference blocks are redrawn on every pass
   because they read other pages.
 - Typing commits on `input` via `setBlockRuns` / `updateBlock`. The store `change` handler
   skips re-rendering for inline-only commits, which keeps the caret stable.

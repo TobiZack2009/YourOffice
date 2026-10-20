@@ -14,6 +14,7 @@
 
 import { createId } from "../core/ids.js";
 import { reconcileChildren } from "../core/reconcile.js";
+import { entitiesOf } from "../workspace/changes.js";
 import { ensureSection } from "../references/catalog.js";
 import {
   canIndentBlock,
@@ -625,6 +626,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     return true;
   }
 
+  const STALE = "\u0000stale";
   /** @type {Map<string, { signature: string, el: HTMLElement }>} Drawn top-level blocks by block id. */
   const blockViews = new Map();
   /** @type {Node | null} Where an input-method composition is going on. */
@@ -635,6 +637,25 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   element.addEventListener("compositionend", () => {
     composing = null;
   });
+
+  /**
+   * Mark drawn blocks as no longer matching the model they were drawn from (the user typed in
+   * them), so the next pass re-examines them instead of trusting the cached signature.
+   * @param {Set<string> | null} ids Touched entity ids, or null for every block.
+   */
+  function staleViews(ids) {
+    if (!ids) {
+      for (const entry of blockViews.values()) entry.signature = STALE;
+      return;
+    }
+    for (const id of ids) {
+      for (const node of element.querySelectorAll(`[data-block-id="${id}"], [data-item-id="${id}"]`)) {
+        let top = /** @type {Node | null} */ (node);
+        while (top && top.parentNode !== element) top = top.parentNode;
+        for (const entry of blockViews.values()) if (entry.el === top) entry.signature = STALE;
+      }
+    }
+  }
 
   /**
    * Draw the document. Blocks are keyed by id: one whose data is unchanged keeps its element,
@@ -2687,6 +2708,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       payload.commands.length > 0 &&
       payload.commands.every((command) => INLINE_COMMITS.has(command))
     ) {
+      // The DOM, not the model signature a block was drawn from, is the truth now: an undo that
+      // brings the model back to that signature must still redraw the block.
+      staleViews(entitiesOf(payload, pageId));
       syncCopies();
       views.refreshExpressions();
       options.onChange?.();
