@@ -22,7 +22,7 @@ import { isHandle } from "../sheet/values.js";
 import { buildBook } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
-import { showNotice } from "./notice.js";
+import { defaultNotice } from "./notice.js";
 import {
   DEFAULT_SLIDE_WIDTH,
   enginesFor,
@@ -42,12 +42,14 @@ import {
  * @property {(record: any, anchor: HTMLElement) => void} onHandle The handle was pressed.
  * @property {(record: any, frame: HTMLElement) => void} [onEditExpression] Double-click on an expression result.
  * @property {(pageId: string) => string | undefined} [resolvePageTitle]
+ * @property {import("./notice.js").Notice} [notice] Where messages go (the default host when absent).
  */
 
 /**
  * @param {ReferenceViewsOptions} options
  */
 export function createReferenceViews(options) {
+  const notice = options.notice ?? defaultNotice;
   /** @type {Map<string, { signature: string, editor: any }>} */
   const views = new Map();
   /** @type {Set<string>} */
@@ -192,7 +194,7 @@ export function createReferenceViews(options) {
       frame.setAttribute("data-result", result.type);
       const shown = renderValue(context(), result.value);
       if (shown.classList.contains("is-error")) {
-        shown.addEventListener("click", () => showNotice(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
+        shown.addEventListener("click", () => notice.show(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
       }
       body.append(shown);
     };
@@ -285,7 +287,7 @@ export function createReferenceViews(options) {
       if (record.kind === "expression" && !found) {
         const shown = renderValue(context(), result.value);
         if (shown.classList.contains("is-error")) {
-          shown.addEventListener("click", () => showNotice(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
+          shown.addEventListener("click", () => notice.show(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
         }
         body.append(shown);
       } else if (!found) {

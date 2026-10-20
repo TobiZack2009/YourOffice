@@ -17,7 +17,8 @@ import { createQuickFind } from "./quick-find.js";
 import { createSlideshow } from "./slideshow.js";
 import { icon } from "./icons.js";
 import { usesModelHistory } from "./history-scope.js";
-import { showNotice } from "./notice.js";
+import { createKeyboard } from "./keyboard.js";
+import { createNotice } from "./notice.js";
 import { clear, h } from "./dom.js";
 import {
   breadcrumb as breadcrumbOf,
@@ -71,6 +72,8 @@ export function mountApp(root, workspace, options = {}) {
   installDomain(workspace);
 
   const session = options.session ?? createSession();
+  /** This app's own notice host: two mounted apps never share a message. */
+  const notice = createNotice();
   /** The open page is session state: `selectedPageId()` reads it, `openPage` writes it. */
   const selectedPageId = () => session.get().selectedPageId;
   /** @param {string | null} pageId */
@@ -245,6 +248,14 @@ export function mountApp(root, workspace, options = {}) {
     return content?.blockOrder?.[0] ?? null;
   }
 
+  /** @type {(() => void) | null} Pops the modal keyboard scope pushed while a show runs. */
+  let leaveShowScope = null;
+
+  function releaseShowScope() {
+    leaveShowScope?.();
+    leaveShowScope = null;
+  }
+
   /**
    * Play the open presentation over the main column. The sidebar stays; leaving the show
    * (Esc, the exit button, or choosing a page) brings back the editor at the slide reached.
@@ -265,6 +276,7 @@ export function mountApp(root, workspace, options = {}) {
       navigate: (target) => selectSidebar(target),
       onExit: (slideId) => {
         state.slideshow = null;
+        releaseShowScope();
         if (slideId) session.set({ slideByPage: { ...session.get().slideByPage, [pageId]: slideId } });
         state.presentationEditor?.selectSlide(slideId);
         ribbon.update();
@@ -272,6 +284,8 @@ export function mountApp(root, workspace, options = {}) {
     });
     if (!show) return false;
     state.slideshow = show;
+    releaseShowScope();
+    leaveShowScope = keyboard.push("slideshow", { modal: true });
     main.append(show.element);
     show.start();
     show.focus();
@@ -302,6 +316,7 @@ export function mountApp(root, workspace, options = {}) {
     saveEditorSelection();
     state.slideshow?.destroy();
     state.slideshow = null;
+    releaseShowScope();
     state.editor?.destroy();
     state.editor = null;
     state.sheetEditor?.destroy();
@@ -353,6 +368,7 @@ export function mountApp(root, workspace, options = {}) {
 
     if (page.type === "document") {
       const editor = createDocumentEditor(workspace, page.id, {
+        notice,
         resolvePageTitle: (id) => pageTitle(workspace, id),
         navigate: (id) => selectSidebar(id),
         onActiveChange: () => updateChromeLater()
@@ -363,6 +379,7 @@ export function mountApp(root, workspace, options = {}) {
       if (samePage) editor.restoreSelection(session.get().selections[page.id]);
     } else if (page.type === "sheet") {
       const sheetEditor = createSheetEditor(workspace, page.id, {
+        notice,
         navigate: (id) => selectSidebar(id),
         onChange: () => updateChromeLater(),
         onSelectionChange: () => scheduleRibbonUpdate()
@@ -379,6 +396,7 @@ export function mountApp(root, workspace, options = {}) {
       // keep the remembered slide, so redo can return to it.
       let built = false;
       const presentationEditor = createPresentationEditor(workspace, page.id, {
+        notice,
         navigate: (id) => selectSidebar(id),
         onChange: () => updateChromeLater(),
         onSelectionChange: () => scheduleRibbonUpdate(),
@@ -570,7 +588,7 @@ export function mountApp(root, workspace, options = {}) {
   const previousOnError = workspace.events.onError;
   workspace.events.onError = (error) => {
     console.error("change listener threw", error);
-    showNotice("Something went wrong while updating the view.");
+    notice.show("Something went wrong while updating the view.");
   };
 
   const unsubscribeChange = workspace.events.on("change", (event) => {
@@ -600,34 +618,15 @@ export function mountApp(root, workspace, options = {}) {
     updateChromeLater();
   });
 
-  /** @param {KeyboardEvent} event */
-  function onGlobalKeydown(event) {
-    if (state.slideshow) return;
-    const mod = event.metaKey || event.ctrlKey;
-    if (!mod) return;
-    const key = event.key.toLowerCase();
-    if (key === "enter") {
-      if (!state.presentationEditor) return;
-      event.preventDefault();
-      startSlideshow(event.shiftKey ? "current" : "beginning");
-    } else if (key === "k") {
-      event.preventDefault();
-      quickFind.open();
-    } else if (key === "z" && !event.shiftKey) {
-      if (!usesModelHistory(event.target)) return;
-      event.preventDefault();
-      shellApi.undo();
-    } else if ((key === "z" && event.shiftKey) || key === "y") {
-      if (!usesModelHistory(event.target)) return;
-      event.preventDefault();
-      shellApi.redo();
-    } else if (key === "s") {
-      event.preventDefault();
-      shellApi.save();
-    }
-  }
-
-  document.addEventListener("keydown", onGlobalKeydown);
+  const keyboard = createKeyboard(document);
+  keyboard.define([
+    { keys: "mod+enter", when: () => state.presentationEditor !== null, run: () => void startSlideshow("beginning") },
+    { keys: "mod+shift+enter", when: () => state.presentationEditor !== null, run: () => void startSlideshow("current") },
+    { keys: "mod+k", run: () => quickFind.open() },
+    { keys: "mod+z", when: (event) => usesModelHistory(event.target), run: () => shellApi.undo() },
+    { keys: "mod+shift+z|mod+y", when: (event) => usesModelHistory(event.target), run: () => shellApi.redo() },
+    { keys: "mod+s", run: () => shellApi.save() }
+  ]);
 
   // Open the page the session names if it still exists, else the first (or leave the empty state).
   const first = pageExists(workspace, selectedPageId()) ? selectedPageId() : (workspace.getChildren(null)[0] ?? null);
@@ -641,8 +640,9 @@ export function mountApp(root, workspace, options = {}) {
     destroy() {
       unsubscribeChange();
       if (ribbonFrame) cancelAnimationFrame(ribbonFrame);
+      notice.clear();
       workspace.events.onError = previousOnError;
-      document.removeEventListener("keydown", onGlobalKeydown);
+      keyboard.destroy();
       quickFind.destroy();
       ribbon.destroy();
       state.slideshow?.destroy();

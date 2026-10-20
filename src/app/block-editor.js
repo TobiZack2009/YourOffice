@@ -28,7 +28,7 @@ import { h, clear } from "./dom.js";
 import { planBlockMove, promptName, referenceMenuItems, sectionMenuItems, showMenu } from "./handles.js";
 import { icon } from "./icons.js";
 import { NO_LINK, buildLinkCard, buildLinkForm, linkPages, normalizeLinkUrl, pageIdOfLink } from "./link-form.js";
-import { guard } from "./notice.js";
+import { defaultNotice } from "./notice.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { openExpressionEditor } from "./expression-editor.js";
 import { openReferencePicker } from "./reference-picker.js";
@@ -309,11 +309,14 @@ function nestedStore(host, sectionId) {
  *   onChange?: () => void,
  *   sectionId?: string,
  *   origin?: string,
- *   navigate?: (pageId: string) => void
+ *   navigate?: (pageId: string) => void,
+ *   notice?: import("./notice.js").Notice
  * }} [options]
  * @returns {EditorHandle}
  */
 export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
+  const notice = options.notice ?? defaultNotice;
+  const guard = notice.guard;
   const nested = Boolean(options.sectionId);
   // One origin per editor tree: an embedded editor's typing is this editor's typing too.
   const origin = options.origin ?? createId("editor");
@@ -345,6 +348,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   const popovers = createPopoverHost(element.ownerDocument.body);
 
   const views = createReferenceViews({
+    notice,
     workspace: hostWorkspace,
     hostId: pageId,
     resolvePageTitle: options.resolvePageTitle,
@@ -353,6 +357,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       const child = createDocumentEditor(hostWorkspace, containerId, {
         sectionId,
         origin,
+        notice,
         resolvePageTitle: options.resolvePageTitle,
         navigate: options.navigate,
         onActiveChange: () => {
@@ -2258,7 +2263,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
             popovers,
             anchor,
             sectionId: section.id,
-            navigate: options.navigate
+            navigate: options.navigate,
+            guard
           })
         });
       }
@@ -2289,6 +2295,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
    */
   function referenceItems(record, anchor) {
     return referenceMenuItems({
+      guard,
       workspace: /** @type {any} */ (hostWorkspace),
       popovers,
       anchor,

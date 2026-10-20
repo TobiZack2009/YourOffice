@@ -15,7 +15,7 @@ import { findSection } from "../references/sections.js";
 import { formatA1 } from "../sheet/references.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
-import { guard } from "./notice.js";
+import { guard as defaultGuard } from "./notice.js";
 import { buildMenu } from "./popover.js";
 
 /**
@@ -149,7 +149,7 @@ export function sectionMenuItems(ctx) {
         promptName(ctx.popovers, ctx.anchor(), {
           title: "Section name",
           initial: found.section.name ?? "",
-          onSubmit: (name) => guard(() => ctx.workspace.dispatch("renameSection", { sectionId: ctx.sectionId, name }))
+          onSubmit: (name) => (ctx.guard ?? defaultGuard)(() => ctx.workspace.dispatch("renameSection", { sectionId: ctx.sectionId, name }))
         })
     },
     {
@@ -163,7 +163,7 @@ export function sectionMenuItems(ctx) {
       icon: "trash",
       danger: true,
       attrs: { "data-action": "section-remove" },
-      action: () => void guard(() => ctx.workspace.dispatch("removeSection", { sectionId: ctx.sectionId }))
+      action: () => void (ctx.guard ?? defaultGuard)(() => ctx.workspace.dispatch("removeSection", { sectionId: ctx.sectionId }))
     }
   ];
 }
@@ -191,7 +191,7 @@ export function referenceMenuItems(ctx) {
     icon: "trash",
     danger: true,
     attrs: { "data-action": "reference-remove" },
-    action: () => void guard(() => ctx.workspace.dispatch("removeReference", { pageId: ctx.hostId, instanceId: record.id }))
+    action: () => void (ctx.guard ?? defaultGuard)(() => ctx.workspace.dispatch("removeReference", { pageId: ctx.hostId, instanceId: record.id }))
   };
 
   if (record.kind === "expression") {
@@ -224,7 +224,7 @@ export function referenceMenuItems(ctx) {
       disabled: !restorable,
       attrs: { "data-action": "reference-restore" },
       action: () =>
-        void guard(() => ctx.workspace.dispatch("restoreDetached", { detachedId: found.containerId, pageId: origin }))
+        void (ctx.guard ?? defaultGuard)(() => ctx.workspace.dispatch("restoreDetached", { detachedId: found.containerId, pageId: origin }))
     });
   }
   if (ctx.replaceSource) {

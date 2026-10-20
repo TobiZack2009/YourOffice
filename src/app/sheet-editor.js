@@ -8,7 +8,7 @@
  * table, rebuilt whenever the sheet changes.
  */
 
-import { guard } from "./notice.js";
+import { defaultNotice } from "./notice.js";
 import { explain, isFormulaError } from "../sheet/errors.js";
 import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
 import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf } from "../sheet/render.js";
@@ -111,10 +111,12 @@ export function rawCellText(cell) {
  * Create a sheet editor bound to one sheet page.
  * @param {Workspace} workspace
  * @param {string} pageId
- * @param {{ onChange?: () => void, onSelectionChange?: () => void, navigate?: (pageId: string) => void }} [options]
+ * @param {{ onChange?: () => void, onSelectionChange?: () => void, navigate?: (pageId: string) => void, notice?: import("./notice.js").Notice }} [options]
  * @returns {SheetEditorHandle}
  */
 export function createSheetEditor(workspace, pageId, options = {}) {
+  const notice = options.notice ?? defaultNotice;
+  const guard = notice.guard;
   const engines = new TableEngines(() => workspace._data);
   const element = h("div", { class: "sheet-editor" });
   /**
@@ -1253,7 +1255,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
           })
       });
     } else if (found?.name) {
-      items.push(...sectionMenuItems({ workspace, popovers, anchor, sectionId: found.id, navigate: options.navigate }));
+      items.push(...sectionMenuItems({ workspace, popovers, anchor, sectionId: found.id, navigate: options.navigate, guard }));
       return items;
     } else {
       items.push({

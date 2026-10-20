@@ -15,7 +15,7 @@
  * The handle returned here is the ribbon's whole interface, and the inspector's.
  */
 
-import { guard, showNotice, clearNotice } from "./notice.js";
+import { defaultNotice } from "./notice.js";
 import { createId } from "../core/ids.js";
 import {
   fitScale,
@@ -91,6 +91,7 @@ import {
  * @typedef {object} PresentationEditorOptions
  * @property {() => void} [onChange] Called after the editor re-rendered from a model change.
  * @property {(pageId: string) => void} [navigate] Go to another page (used by reference lists).
+ * @property {import("./notice.js").Notice} [notice] Where refused commands are reported.
  * @property {() => void} [onSelectionChange] Called when selection, tool, view or edit state changes.
  * @property {string | null} [initialSlideId] Slide to open on (falls back to the first).
  * @property {(slideId: string | null) => void} [onSlideChange]
@@ -235,6 +236,7 @@ function runsFromHost(host) {
  * @param {PresentationEditorOptions} [options]
  */
 export function createPresentationEditor(workspace, pageId, options = {}) {
+  const notice = options.notice ?? defaultNotice;
   /** @type {View} */
   const view = { inspector: true, snap: true, grid: false, timeline: false, ...options.view };
   let clipboard = structuredClone(options.clipboard ?? { objects: [], pastes: 0 });
@@ -345,12 +347,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
    * @returns {boolean}
    */
   function run(fn) {
-    return guard(fn, refresh);
+    return notice.guard(fn, refresh);
   }
 
   /** @param {string} message */
   function notify(message) {
-    showNotice(message);
+    notice.show(message);
   }
 
   // -- references on slides --------------------------------------------------------
@@ -424,7 +426,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     /** @type {import("./popover.js").MenuItem[]} */
     let items;
     if (found?.name) {
-      items = sectionMenuItems({ workspace, popovers, anchor: () => anchor, sectionId: found.id, navigate: options.navigate });
+      items = sectionMenuItems({ workspace, popovers, anchor: () => anchor, sectionId: found.id, navigate: options.navigate, guard: notice.guard });
     } else {
       const count = found ? referenceCount(workspace, found.id) : 0;
       items = [
@@ -593,6 +595,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
    */
   function referenceItems(object, anchor) {
     return referenceMenuItems({
+      guard: notice.guard,
       workspace: /** @type {any} */ (workspace),
       popovers,
       anchor,
@@ -2338,7 +2341,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
       document.removeEventListener("selectionchange", onSelectionChange);
       unsubscribe();
       resizeObserver?.disconnect();
-      clearNotice();
+      notice.clear();
       popovers.destroy();
     },
     // state

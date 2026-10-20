@@ -26,12 +26,30 @@ The page editor is the whole canvas (no max-width card): `.app` fills `#app`, an
 ## Shell (`shell.js`)
 
 `mountApp(root, workspace, options)` installs the domain on the workspace (idempotent) and builds sidebar, title strip, ribbon and canvas. It owns
-page selection, recreates the editor per page, maps sidebar actions to workspace commands
+page selection, builds one editor per page, maps sidebar actions to workspace commands
 (create seeds a starter paragraph). What must survive a remount lives in the session (below),
 not in shell globals; only the active slide show is shell state. `options.onImport` lets
 `main.js` remount with an imported workspace, and `options.session` supplies the session
 (`main.js` passes a `localStorage`-backed one). The returned handle includes `getSlideshow` and
 `startSlideshow`.
+
+Editors follow changes themselves (`applyChange`-style: each one re-renders only when the
+change touches its page, or a page it draws through embeds and expressions, and carries the
+selection across undo/redo). The shell remounts only on a page switch, when the open page is
+gone, or when its type changed; renaming the open page updates the title input and breadcrumb
+in place. Chrome is split: the undo/redo buttons, dirty dot and play button update on every
+change; the breadcrumb only on registry changes; the ribbon at most once per animation frame
+(a test that reads ribbon state after an editor event awaits a frame).
+
+`notice.js` is `createNotice(getContainer)` -> `{ show, clear, guard }`; the shell creates one
+per mount and hands it to its editors (`options.notice`), so two mounted apps do not share
+messages. A module-level `defaultNotice` serves code mounted without one. Popover hosts are
+already one per editor and ribbon.
+
+`gesture.js` is `createGestureScope(doc)`: the document-level `mousemove`/`mouseup` listeners
+of a drag (block drag, sheet fill/move/resize, slide move/resize/rotate/path) register through
+a scope that an editor aborts on `destroy`, so destroying an editor mid-gesture leaves no
+listeners and commits nothing.
 
 ### Session (`session.js`, `selection.js`)
 
@@ -61,12 +79,18 @@ taken on the slide being reopened, so a redo that brings a slide back reopens th
 - **File tab**: rename workspace, mark saved, export/import JSON.
 - **View tab**: canvas zoom as a `--zoom` CSS variable, show/hide sidebar. Both are shell UI
   state, not model.
-- **Global keys**: Cmd/Ctrl+K Quick Find, Cmd/Ctrl+S mark saved, undo/redo, Cmd/Ctrl+Enter slide
-  show. All are ignored while a slide show is up. Undo/redo is the model's only on editing
-  surfaces (`data-history="model"`: document editor, sheet grid, slide stage, slide strip, slide
-  text editor) and when nothing editable has focus; text fields (page title, quick find, rename,
-  link form, inspector, formula bar, in-cell input) and contenteditables outside a surface keep
-  the browser's text undo (`history-scope.js`).
+- **Global keys** (`keyboard.js`): one document `keydown` listener (`createKeyboard`) looks a
+  chord up in a table of shortcuts `{ keys, scope, when, run }`; `keys` is written
+  `mod+shift+z|mod+y` (`mod` is Cmd or Ctrl). A scope stack decides which rows apply: `global` is
+  always at the bottom, and a modal scope pushed above it hides everything beneath. The shell
+  defines Cmd/Ctrl+K Quick Find, Cmd/Ctrl+S mark saved, undo/redo and Cmd/Ctrl+Enter (Shift:
+  from the current slide) slide show, and pushes a modal `slideshow` scope while a show is up,
+  so none of them fire then. Undo/redo is the model's only on editing surfaces
+  (`data-history="model"`: document editor, sheet grid, slide stage, slide strip, slide text
+  editor) and when nothing editable has focus; text fields (page title, quick find, rename, link
+  form, inspector, formula bar, in-cell input) and contenteditables outside a surface keep the
+  browser's text undo (`history-scope.js`, used as the shortcuts' `when`). Editors keep their
+  own element-level handlers for typing and navigation.
 
 ## Ribbon
 
