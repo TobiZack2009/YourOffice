@@ -913,3 +913,15 @@ describe("context menu", () => {
   });
 
 });
+
+describe("selection capture and restore", () => {
+  it("round-trips a caret through the logical selection and clamps a shrunk text", () => {
+    const { editor, order } = setup([{ type: "paragraph", runs: [{ text: "Hello" }] }]);
+    const blockId = order()[0];
+    expect(editor.restoreSelection({ type: "text", anchor: { blockId, offset: 2 }, focus: { blockId, offset: 9 } })).toBe(true);
+    expect(editor.captureSelection()).toEqual({ type: "text", anchor: { blockId, offset: 2 }, focus: { blockId, offset: 5 } });
+    expect(editor.restoreSelection({ type: "text", anchor: { blockId: "gone", offset: 0 }, focus: { blockId: "gone", offset: 0 } })).toBe(false);
+    expect(editor.restoreSelection("junk")).toBe(false);
+    expect(editor.dependsOn()).toBeInstanceOf(Set);
+  });
+});

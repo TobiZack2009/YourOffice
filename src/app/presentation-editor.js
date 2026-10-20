@@ -51,6 +51,7 @@ import { markStateIn, setLinkIn, toggleMarkIn } from "./marks.js";
 import { buildLinkForm, linkPages, pageIdOfLink, pageLinkUrl } from "./link-form.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { createInspector } from "./inspector.js";
+import { clampPresentationSelection, readPresentationSelection } from "./selection.js";
 import { createSlideStrip } from "./slide-strip.js";
 import { findSection, findSectionByLocator, sectionKind, slideLocator } from "../references/sections.js";
 import { ensureSection } from "../references/catalog.js";
@@ -92,8 +93,10 @@ import {
  * @property {() => void} [onSelectionChange] Called when selection, tool, view or edit state changes.
  * @property {string | null} [initialSlideId] Slide to open on (falls back to the first).
  * @property {(slideId: string | null) => void} [onSlideChange]
- * @property {View} [view] Mutable view state owned by the caller, so it survives remounts.
- * @property {{ objects: SlideObject[], pastes: number }} [clipboard] Mutable object clipboard, same reason.
+ * @property {View} [view] Initial view state (the caller keeps it in the session so it survives remounts).
+ * @property {(view: View) => void} [onViewChange] Called with a copy of the view after it changed.
+ * @property {{ objects: SlideObject[], pastes: number }} [clipboard] Initial object clipboard, same reason.
+ * @property {(clipboard: { objects: SlideObject[], pastes: number }) => void} [onClipboardChange]
  */
 
 export const GRID_SIZE = 10;
@@ -232,8 +235,14 @@ function runsFromHost(host) {
  */
 export function createPresentationEditor(workspace, pageId, options = {}) {
   /** @type {View} */
-  const view = options.view ?? { inspector: true, snap: true, grid: false, timeline: false };
-  const clipboard = options.clipboard ?? { objects: [], pastes: 0 };
+  const view = { inspector: true, snap: true, grid: false, timeline: false, ...options.view };
+  let clipboard = structuredClone(options.clipboard ?? { objects: [], pastes: 0 });
+
+  /** @param {{ objects: SlideObject[], pastes: number }} next */
+  function setClipboard(next) {
+    clipboard = next;
+    options.onClipboardChange?.(structuredClone(next));
+  }
 
   const popovers = createPopoverHost(document.body);
 
@@ -1181,8 +1190,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   function copySelected() {
     const objects = getSelectedObjects();
     if (objects.length === 0) return false;
-    clipboard.objects = structuredClone(objects);
-    clipboard.pastes = 0;
+    setClipboard({ objects: structuredClone(objects), pastes: 0 });
     options.onSelectionChange?.();
     return true;
   }
@@ -1196,7 +1204,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   function pasteObjects() {
     if (!currentSlideId || !canPaste()) return;
     finishEdit(true);
-    clipboard.pastes += 1;
+    setClipboard({ objects: clipboard.objects, pastes: clipboard.pastes + 1 });
     const newIds = clipboard.objects.map(() => createId("obj"));
     selectedIds = [...newIds];
     run(() => send("pasteObjects", {
@@ -2284,6 +2292,7 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
   /** @param {Partial<View>} patch */
   function setView(patch) {
     Object.assign(view, patch);
+    options.onViewChange?.({ ...view });
     root.classList.toggle("hide-inspector", !view.inspector);
     root.classList.toggle("show-timeline", Boolean(view.timeline));
     stage?.classList.toggle("show-grid", view.grid);
@@ -2320,6 +2329,21 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
     getSlideId,
     getSize,
     getSelection: () => [...selectedIds],
+    captureSelection: () => ({ slideId: currentSlideId, objectIds: [...selectedIds] }),
+    /**
+     * Put a captured selection back: the slide, and the objects that still exist on it.
+     * @param {unknown} value
+     * @returns {boolean} Whether a selection was restored.
+     */
+    restoreSelection(value) {
+      const wanted = readPresentationSelection(value);
+      const clamped = wanted ? clampPresentationSelection(wanted, getContent()) : null;
+      if (!clamped?.slideId) return false;
+      selectSlide(clamped.slideId);
+      selectObjects(clamped.objectIds);
+      return true;
+    },
+    dependsOn: () => new Set([pageId]),
     getSelectedObjects,
     getSelectionBounds,
     selectObjects,

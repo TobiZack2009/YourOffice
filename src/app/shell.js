@@ -7,6 +7,7 @@
  */
 
 import { exportWorkspaceJSON, importWorkspaceJSON, installDomain } from "../domain/index.js";
+import { createSession } from "./session.js";
 import { createSidebar } from "./sidebar.js";
 import { createDocumentEditor } from "./block-editor.js";
 import { createSheetEditor } from "./sheet-editor.js";
@@ -21,6 +22,7 @@ import { clear, h } from "./dom.js";
 import {
   breadcrumb as breadcrumbOf,
   pageContent,
+  pageExists,
   pageInfo,
   pageTitle,
   pageType
@@ -60,19 +62,24 @@ function fileStem(title) {
  *   confirm?: (message: string) => boolean,
  *   download?: (filename: string, text: string) => void,
  *   onImport?: (workspace: Workspace) => void,
- *   onImportError?: (error: Error) => void
- * }} [options]
+ *   onImportError?: (error: Error) => void,
+ *   session?: import("./session.js").Session
+ * }} [options] `session`: what the user is doing (open page, zoom, folds, selections); a fresh
+ *   in-memory one by default, so a caller that wants it kept across loads passes a persisted one.
  */
 export function mountApp(root, workspace, options = {}) {
   installDomain(workspace);
 
-  /** @type {{ selectedPageId: string | null, editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, zoom: number, slideshow: import("./slideshow.js").SlideshowHandle | null }} */
-  const state = { selectedPageId: null, editor: null, sheetEditor: null, presentationEditor: null, zoom: 100, slideshow: null };
-  // Presentation UI state that must survive the editor being rebuilt on undo/redo.
-  const presentationView = { inspector: true, snap: true, grid: false, timeline: false };
-  const presentationClipboard = { objects: /** @type {any[]} */ ([]), pastes: 0 };
-  /** @type {Map<string, string>} */
-  const lastSlideByPage = new Map();
+  const session = options.session ?? createSession();
+  /** The open page is session state: `selectedPageId()` reads it, `openPage` writes it. */
+  const selectedPageId = () => session.get().selectedPageId;
+  /** @param {string | null} pageId */
+  const openPage = (pageId) => void session.set({ selectedPageId: pageId });
+
+  /** @type {{ editor: import("./block-editor.js").EditorHandle | null, sheetEditor: import("./sheet-editor.js").SheetEditorHandle | null, presentationEditor: import("./presentation-editor.js").PresentationEditorHandle | null, slideshow: import("./slideshow.js").SlideshowHandle | null }} */
+  const state = { editor: null, sheetEditor: null, presentationEditor: null, slideshow: null };
+  /** The page the current editor was built for (the session may already name another one). */
+  let renderedPageId = /** @type {string | null} */ (null);
 
   clear(root);
   const shell = h("div", { class: "app", "data-page-type": "none" });
@@ -123,11 +130,9 @@ export function mountApp(root, workspace, options = {}) {
   const shellApi = {
     undo() {
       workspace.undo();
-      renderMain();
     },
     redo() {
       workspace.redo();
-      renderMain();
     },
     save() {
       workspace.markSaved();
@@ -147,27 +152,38 @@ export function mountApp(root, workspace, options = {}) {
       workspace.dispatch("renameWorkspace", { title });
       updateChrome();
     },
-    getZoom: () => state.zoom,
+    getZoom: () => session.get().zoom,
     setZoom(percent) {
       if (!ZOOM_LEVELS.includes(percent)) return;
-      state.zoom = percent;
-      canvas.style.setProperty("--zoom", String(percent / 100));
-      canvas.setAttribute("data-zoom", String(percent));
+      session.set({ zoom: percent });
+      applyZoom();
       ribbon.update();
     },
-    isSidebarCollapsed: () => shell.classList.contains("sidebar-collapsed"),
+    isSidebarCollapsed: () => !session.get().sidebarVisible,
     toggleSidebar() {
-      shell.classList.toggle("sidebar-collapsed");
+      session.set({ sidebarVisible: !session.get().sidebarVisible });
+      applySidebarVisibility();
       ribbon.update();
     },
     startSlideshow,
     isSlideshowActive: () => state.slideshow !== null
   };
 
+  /** @param {boolean} [initial] On mount, the default zoom leaves the canvas unmarked. */
+  function applyZoom(initial = false) {
+    const percent = ZOOM_LEVELS.includes(session.get().zoom) ? session.get().zoom : 100;
+    canvas.style.setProperty("--zoom", String(percent / 100));
+    if (!initial || percent !== 100) canvas.setAttribute("data-zoom", String(percent));
+  }
+
+  function applySidebarVisibility() {
+    shell.classList.toggle("sidebar-collapsed", !session.get().sidebarVisible);
+  }
+
   function getContext() {
     return {
       workspace,
-      page: pageInfo(workspace, state.selectedPageId),
+      page: pageInfo(workspace, selectedPageId()),
       docEditor: state.editor,
       sheetEditor: state.sheetEditor,
       presentationEditor: state.presentationEditor,
@@ -177,9 +193,9 @@ export function mountApp(root, workspace, options = {}) {
 
   // The animation timeline shows only while the Animations tab is open.
   const ribbon = createRibbon(getContext, {
+    session,
     onTabChange: (tabId) => {
-      presentationView.timeline = tabId === "animations";
-      state.presentationEditor?.setView({ timeline: presentationView.timeline });
+      state.presentationEditor?.setView({ timeline: tabId === "animations" });
     }
   });
 
@@ -205,7 +221,7 @@ export function mountApp(root, workspace, options = {}) {
   });
 
   const { element: sidebarElement, refresh: refreshSidebar, select: selectSidebar, selection } =
-    createSidebar(workspace, sidebarActions());
+    createSidebar(workspace, sidebarActions(), { session });
 
   main.append(titleStrip, ribbon.element, canvas);
   shell.append(sidebarElement, main, fileInput);
@@ -221,9 +237,9 @@ export function mountApp(root, workspace, options = {}) {
   // -- main canvas --------------------------------------------------------------
 
   function documentFirstBlockId() {
-    if (!state.selectedPageId) return null;
+    if (!selectedPageId()) return null;
     const content = /** @type {import("../document/model.js").DocumentContent | undefined} */ (
-      pageContent(workspace, state.selectedPageId)
+      pageContent(workspace, selectedPageId() ?? "")
     );
     return content?.blockOrder?.[0] ?? null;
   }
@@ -236,7 +252,7 @@ export function mountApp(root, workspace, options = {}) {
    */
   function startSlideshow(from = "current") {
     const editor = state.presentationEditor;
-    const pageId = state.selectedPageId;
+    const pageId = selectedPageId();
     if (state.slideshow) return true;
     if (!editor || !pageId) return false;
     // Commit any text being edited, and keep Space/Enter off a focused ribbon button.
@@ -248,7 +264,7 @@ export function mountApp(root, workspace, options = {}) {
       navigate: (target) => selectSidebar(target),
       onExit: (slideId) => {
         state.slideshow = null;
-        lastSlideByPage.set(pageId, slideId);
+        if (slideId) session.set({ slideByPage: { ...session.get().slideByPage, [pageId]: slideId } });
         state.presentationEditor?.selectSlide(slideId);
         ribbon.update();
       }
@@ -261,7 +277,28 @@ export function mountApp(root, workspace, options = {}) {
     return true;
   }
 
+  /** The selection of the open editor, as model terms. */
+  function captureEditorSelection() {
+    const editor = state.editor ?? state.sheetEditor ?? state.presentationEditor;
+    return editor ? editor.captureSelection() : null;
+  }
+
+  /**
+   * Remember the open editor's selection in the session, so the next editor for that page can
+   * put it back (undo, import, coming back to the page).
+   */
+  function saveEditorSelection() {
+    if (!renderedPageId) return;
+    const captured = captureEditorSelection();
+    const selections = { ...session.get().selections };
+    if (captured) selections[renderedPageId] = captured;
+    else delete selections[renderedPageId];
+    session.set({ selections });
+  }
+
   function renderMain() {
+    const samePage = renderedPageId !== null && renderedPageId === selectedPageId();
+    saveEditorSelection();
     state.slideshow?.destroy();
     state.slideshow = null;
     state.editor?.destroy();
@@ -272,7 +309,8 @@ export function mountApp(root, workspace, options = {}) {
     state.presentationEditor = null;
     clear(canvas);
 
-    const pageId = state.selectedPageId;
+    const pageId = selectedPageId();
+    renderedPageId = pageId;
     const page = pageInfo(workspace, pageId);
     shell.setAttribute("data-page-type", page?.type ?? "none");
     ribbon.setPage(page?.type ?? null);
@@ -317,6 +355,8 @@ export function mountApp(root, workspace, options = {}) {
       });
       state.editor = editor;
       canvas.append(pageHeader, h("div", { class: "page-body" }, [editor.element]));
+      // A caret is only put back when the same page is rebuilt: a page switch must not take focus.
+      if (samePage) editor.restoreSelection(session.get().selections[page.id]);
     } else if (page.type === "sheet") {
       const sheetEditor = createSheetEditor(workspace, page.id, {
         navigate: (id) => selectSidebar(id),
@@ -325,19 +365,38 @@ export function mountApp(root, workspace, options = {}) {
       });
       state.sheetEditor = sheetEditor;
       canvas.append(pageHeader, sheetEditor.element);
+      sheetEditor.restoreSelection(session.get().selections[page.id]);
     } else {
-      presentationView.timeline = ribbon.getActiveTab() === "animations";
+      const timeline = ribbon.getActiveTab() === "animations";
+      if (session.get().presentationView.timeline !== timeline) {
+        session.set({ presentationView: { ...session.get().presentationView, timeline } });
+      }
+      // Falling back to the first slide while the editor is being built is not the user's choice:
+      // keep the remembered slide, so redo can return to it.
+      let built = false;
       const presentationEditor = createPresentationEditor(workspace, page.id, {
         navigate: (id) => selectSidebar(id),
         onChange: () => updateChrome(),
         onSelectionChange: () => ribbon.update(),
-        initialSlideId: lastSlideByPage.get(page.id),
-        onSlideChange: (slideId) => lastSlideByPage.set(page.id, slideId),
-        view: presentationView,
-        clipboard: presentationClipboard
+        initialSlideId: session.get().slideByPage[page.id],
+        onSlideChange: (slideId) => {
+          if (!built) return;
+          const slides = { ...session.get().slideByPage };
+          if (slideId) slides[page.id] = slideId;
+          else delete slides[page.id];
+          session.set({ slideByPage: slides });
+        },
+        view: session.get().presentationView,
+        onViewChange: (view) => session.set({ presentationView: view }),
+        clipboard: session.get().presentationClipboard,
+        onClipboardChange: (clipboard) => session.set({ presentationClipboard: clipboard })
       });
+      built = true;
       state.presentationEditor = presentationEditor;
       canvas.append(pageHeader, presentationEditor.element);
+      // The remembered slide wins over a selection that was taken on another one.
+      const saved = session.get().selections[page.id];
+      if (saved?.slideId === presentationEditor.getSlideId()) presentationEditor.restoreSelection(saved);
     }
 
     updateChrome();
@@ -347,7 +406,7 @@ export function mountApp(root, workspace, options = {}) {
     clear(breadcrumb);
     /** @type {string[]} */
     const trail = [workspace.title || "Workspace"];
-    const pageId = state.selectedPageId;
+    const pageId = selectedPageId();
     for (const page of breadcrumbOf(workspace, pageId)) trail.push(page.title || "Untitled");
     trail.forEach((label, index) => {
       if (index > 0) breadcrumb.append(h("span", { class: "breadcrumb-sep", text: "/", "aria-hidden": "true" }));
@@ -362,7 +421,7 @@ export function mountApp(root, workspace, options = {}) {
     undoButton.disabled = !workspace.canUndo;
     redoButton.disabled = !workspace.canRedo;
     dirtyDot.classList.toggle("is-dirty", workspace.dirty);
-    const onPresentation = pageType(workspace, state.selectedPageId) === "presentation";
+    const onPresentation = pageType(workspace, selectedPageId()) === "presentation";
     playButton.style.display = onPresentation ? "" : "none";
     playButton.disabled = !state.presentationEditor?.getSlideId();
     ribbon.update();
@@ -374,7 +433,7 @@ export function mountApp(root, workspace, options = {}) {
     return {
       /** @param {string} pageId */
       select(pageId) {
-        state.selectedPageId = pageId;
+        openPage(pageId);
         renderMain();
       },
       /**
@@ -405,7 +464,7 @@ export function mountApp(root, workspace, options = {}) {
           }
           return created;
         });
-        state.selectedPageId = created;
+        openPage(created);
         refreshSidebar();
         renderMain();
         selectSidebar(created);
@@ -428,11 +487,11 @@ export function mountApp(root, workspace, options = {}) {
             : `Delete “${title ?? "page"}”?`;
         if (!ask(message)) return;
         workspace.dispatch("deletePage", { pageId, cascade: children.length > 0 });
-        if (!workspace.getPage(state.selectedPageId ?? "")) {
-          state.selectedPageId = workspace.getChildren(null)[0] ?? null;
+        if (!pageExists(workspace, selectedPageId())) {
+          openPage(workspace.getChildren(null)[0] ?? null);
         }
         refreshSidebar();
-        if (state.selectedPageId) selectSidebar(state.selectedPageId ?? "");
+        if (selectedPageId()) selectSidebar(selectedPageId() ?? "");
         renderMain();
       },
       /**
@@ -484,8 +543,8 @@ export function mountApp(root, workspace, options = {}) {
     }
     if (
       payload.commands.includes("renamePage") &&
-      state.selectedPageId &&
-      payload.pages.includes(state.selectedPageId)
+      selectedPageId() &&
+      payload.pages.includes(selectedPageId() ?? "")
     ) {
       renderMain();
       refreshSidebar();
@@ -524,9 +583,11 @@ export function mountApp(root, workspace, options = {}) {
 
   document.addEventListener("keydown", onGlobalKeydown);
 
-  // Select the first page (or leave empty state) on mount.
-  const first = workspace.getChildren(null)[0] ?? null;
-  state.selectedPageId = first;
+  // Open the page the session names if it still exists, else the first (or leave the empty state).
+  const first = pageExists(workspace, selectedPageId()) ? selectedPageId() : (workspace.getChildren(null)[0] ?? null);
+  openPage(first);
+  applyZoom(true);
+  applySidebarVisibility();
   if (first) selectSidebar(first);
   renderMain();
 

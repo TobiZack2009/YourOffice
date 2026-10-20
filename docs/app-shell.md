@@ -27,10 +27,36 @@ The page editor is the whole canvas (no max-width card): `.app` fills `#app`, an
 
 `mountApp(root, workspace, options)` installs the domain on the workspace (idempotent) and builds sidebar, title strip, ribbon and canvas. It owns
 page selection, recreates the editor per page, maps sidebar actions to workspace commands
-(create seeds a starter paragraph) and holds the state that must survive a remount (current
-slide per page via `lastSlideByPage`, presentation view toggles, clipboard, active slide
-show). `options.onImport` lets `main.js` remount with an imported workspace. The returned
-handle includes `getSlideshow` and `startSlideshow`.
+(create seeds a starter paragraph). What must survive a remount lives in the session (below),
+not in shell globals; only the active slide show is shell state. `options.onImport` lets
+`main.js` remount with an imported workspace, and `options.session` supplies the session
+(`main.js` passes a `localStorage`-backed one). The returned handle includes `getSlideshow` and
+`startSlideshow`.
+
+### Session (`session.js`, `selection.js`)
+
+The session is what the user is doing, as opposed to what is true: `selectedPageId`, `zoom`,
+`sidebarVisible`, `sidebarCollapsed`, `ribbonTabByType`, `presentationView` (inspector, snap,
+grid, timeline), `presentationClipboard`, `slideByPage` and `selections` (one logical selection
+per page). `createSession(initial, { storage, key })` returns `{ get, set, subscribe, toJSON,
+restore }`: `get` is read-only, `set(patch)` is the single writer and returns the keys that
+changed (structural equality, so rewriting a value is not a change), and `restore` ignores
+anything malformed. With `storage` it loads on creation and saves on every change; the clipboard
+is volatile and never saved. The session is not part of the workspace: none of it is undoable or
+exported. Shell, ribbon, sidebar and the presentation editor read and write through it (the
+editor takes the view and clipboard as initial values and reports changes through
+`onViewChange` / `onClipboardChange`).
+
+`selection.js` defines the logical selections, all plain JSON: document `{ type: "text", anchor,
+focus }` (points are `{ blockId, itemId?, offset }`) or `{ type: "units", anchor, focus }` (whole
+blocks/items by unit key), sheet `{ tableId, anchor, focus, others }`, presentation `{ slideId,
+objectIds }`. `read*` checks the shape of a stored value and `clamp*` drops what no longer
+exists. Each editor handle has `captureSelection()` and `restoreSelection(value)` (document: a
+DOM range <-> logical points; sheet and presentation already hold logical state), `dependsOn()`
+(the pages it draws) and `focus()`. Before a remount the shell captures the open editor's
+selection into `selections[pageId]` and puts it back into the new editor; the document
+selection is restored only for the same page, and a presentation selection only when it was
+taken on the slide being reopened, so a redo that brings a slide back reopens that slide.
 
 - **File tab**: rename workspace, mark saved, export/import JSON.
 - **View tab**: canvas zoom as a `--zoom` CSS variable, show/hide sidebar. Both are shell UI

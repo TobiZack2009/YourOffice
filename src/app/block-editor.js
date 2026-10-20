@@ -35,6 +35,7 @@ import { openReferencePicker } from "./reference-picker.js";
 import { createReferenceViews } from "./reference-view.js";
 import { caretOffset, mergeRuns, modelLength, normalizeText, parseInlineRuns, runsEqual, runsToPlainText } from "./inline.js";
 import { pageExists, pageInfo } from "../workspace/selectors.js";
+import { clampDocumentSelection, readDocumentSelection } from "./selection.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../document/model.js").Block} Block */
@@ -2504,6 +2505,70 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     });
   }
 
+  // -- logical selection ---------------------------------------------------------
+
+  /**
+   * The selection as model terms (see `selection.js`), or null when this editor holds none.
+   * @returns {import("./selection.js").DocumentSelection | null}
+   */
+  function captureSelection() {
+    if (sel) return { type: "units", anchor: sel.anchor, focus: sel.focus };
+    const range = element.ownerDocument.getSelection?.()?.rangeCount
+      ? element.ownerDocument.getSelection()?.getRangeAt(0)
+      : null;
+    if (!range) return null;
+    const el = editableFrom(range.startContainer);
+    if (!el || !element.contains(el) || !owns(el)) return null;
+    const blockId = el.getAttribute("data-block-id");
+    if (!blockId) return null;
+    const itemId = el.getAttribute("data-item-id") ?? undefined;
+    const { start, end } = selectionOffsets(el);
+    const point = (/** @type {number} */ offset) => (itemId ? { blockId, itemId, offset } : { blockId, offset });
+    return { type: "text", anchor: point(start), focus: point(end) };
+  }
+
+  /**
+   * Put a captured selection back, dropping whatever no longer exists. Without `focus` it does
+   * nothing: moving the caret into the editor takes focus, which a page switch must not do.
+   * @param {unknown} value
+   * @param {{ focus?: boolean }} [opts]
+   * @returns {boolean} Whether anything was restored.
+   */
+  function restoreSelection(value, opts = {}) {
+    const wanted = readDocumentSelection(value);
+    if (!wanted || opts.focus === false) return false;
+    const clamped = clampDocumentSelection(wanted, {
+      lengthOf: (blockId, itemId) => {
+        const el = findEditable(blockId, itemId ?? null);
+        return el ? modelLength(el) : null;
+      },
+      hasUnit: (key) => unitKeys().includes(key)
+    });
+    if (!clamped) return false;
+    if (clamped.type === "units") {
+      setBlockSelection(clamped.anchor, clamped.focus);
+      return true;
+    }
+    const el = findEditable(clamped.anchor.blockId, clamped.anchor.itemId ?? null);
+    if (!el) return false;
+    placeCaret(el, clamped.anchor.offset);
+    setActive(el.getAttribute("data-block-id"), el.getAttribute("data-item-id"));
+    if (clamped.focus.offset !== clamped.anchor.offset) {
+      const from = pointAtOffset(el, clamped.anchor.offset);
+      const to = pointAtOffset(el, clamped.focus.offset);
+      const doc = element.ownerDocument;
+      if (from && to) {
+        const range = doc.createRange();
+        range.setStart(from.container, from.offset);
+        range.setEnd(to.container, to.offset);
+        const selection = doc.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    }
+    return true;
+  }
+
   // Store subscription: skip re-render for inline-only commits so the caret stays.
   const unsubscribe = workspace.events.on("change", (event) => {
     const payload = /** @type {import("../workspace/changes.js").Change} */ (event);
@@ -2552,6 +2617,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     insertExpression,
     makeSection: () => makeSection(sel ? selectedTopLevel() : activeBlockId && blockOf(activeBlockId) ? [topLevelOf(activeBlockId)] : []),
     refreshExpressions: () => views.refreshExpressions(),
+    captureSelection,
+    restoreSelection,
+    dependsOn: () => new Set([pageId]),
+    focus: () => {
+      const key = activeBlockId && blockOf(activeBlockId) ? keyOfBlock(activeBlockId) : unitKeys()[0];
+      if (key) focusKey(key);
+    },
     destroy: () => {
       unsubscribe();
       views.destroy();

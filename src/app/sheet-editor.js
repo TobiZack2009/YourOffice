@@ -14,6 +14,7 @@ import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
 import { columnWidthOf, rectsIntersect, renderSheet, rowHeightOf } from "../sheet/render.js";
 import { TableEngines } from "../sheet/table-engine.js";
 import { clear, h } from "./dom.js";
+import { readSheetSelection } from "./selection.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { findSectionByLocator } from "../references/sections.js";
@@ -1460,6 +1461,21 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     },
     getSelection: () =>
       selection ? { tableId: selection.tableId, col: selection.anchor.col, row: selection.anchor.row } : null,
+    captureSelection: () => (selection ? structuredClone(selection) : null),
+    /**
+     * Put a captured selection back (clamped to the table as it is now).
+     * @param {unknown} value
+     * @returns {boolean} Whether a selection was restored.
+     */
+    restoreSelection(value) {
+      const wanted = readSheetSelection(value);
+      if (!wanted || !tableOf(wanted.tableId)) return false;
+      selection = wanted;
+      refresh();
+      return selection !== null;
+    },
+    dependsOn: () => new Set([pageId]),
+    focus: () => canvasWrap.focus({ preventScroll: true }),
     getRange: currentRange,
     getRanges: allRanges,
     selectCell,

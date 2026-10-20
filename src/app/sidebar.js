@@ -15,6 +15,7 @@ import { h, clear } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { pageExists, pageInfo, pageTitle } from "../workspace/selectors.js";
+import { createSession } from "./session.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../workspace/schema.js").PageType} PageType */
@@ -99,36 +100,45 @@ const PAGE_TYPES = /** @type {PageType[]} */ (["document", "sheet", "presentatio
  * Create the sidebar component.
  * @param {Workspace} workspace
  * @param {SidebarActions} actions
+ * @param {{ session?: import("./session.js").Session }} [options] The open page and the folded
+ *   branches live in the session (a private one when none is given).
  * @returns {{ element: HTMLElement, refresh: () => void, select: (pageId: string) => void, selection: () => string | null }}
  */
-export function createSidebar(workspace, actions) {
+export function createSidebar(workspace, actions, options = {}) {
+  const session = options.session ?? createSession();
   const element = h("aside", { class: "sidebar" });
   // Re-rendered on every refresh; popovers live beside it so a refresh never orphans one.
   const content = h("div", { class: "sidebar-content" });
   element.append(content);
   const popovers = createPopoverHost(element);
 
-  /** @type {{ selectedPageId: string | null, editingPageId: string | null, editingTitle: boolean, draggingPageId: string | null, collapsed: Set<string> }} */
+  /** @type {{ editingPageId: string | null, editingTitle: boolean, draggingPageId: string | null }} */
   const state = {
-    selectedPageId: null,
     editingPageId: null,
     editingTitle: false,
-    draggingPageId: null,
-    collapsed: new Set()
+    draggingPageId: null
   };
+  const selectedPageId = () => session.get().selectedPageId;
+  const isCollapsed = (/** @type {string} */ pageId) => session.get().sidebarCollapsed.includes(pageId);
+  /** @param {string} pageId @param {boolean} collapsed */
+  function setCollapsed(pageId, collapsed) {
+    if (isCollapsed(pageId) === collapsed) return;
+    const rest = session.get().sidebarCollapsed.filter((id) => id !== pageId);
+    session.set({ sidebarCollapsed: collapsed ? [...rest, pageId] : rest });
+  }
 
   /** Expand every ancestor of a page so its row is visible. */
   function reveal(pageId) {
     let parent = workspace.getParent(pageId);
     while (parent) {
-      state.collapsed.delete(parent);
+      setCollapsed(parent, false);
       parent = workspace.getParent(parent);
     }
   }
 
   /** @param {string} pageId */
   function select(pageId) {
-    state.selectedPageId = pageId;
+    session.set({ selectedPageId: pageId });
     reveal(pageId);
     actions.select(pageId);
     refresh();
@@ -251,14 +261,14 @@ export function createSidebar(workspace, actions) {
     if (!page) return h("div");
 
     const row = h("div", {
-      class: `page-row${state.selectedPageId === pageId ? " is-selected" : ""}`,
+      class: `page-row${selectedPageId() === pageId ? " is-selected" : ""}`,
       "data-page-id": pageId,
       draggable: "true",
       style: `--depth:${depth}`
     });
 
     const childIds = workspace.getChildren(pageId);
-    const collapsed = state.collapsed.has(pageId);
+    const collapsed = isCollapsed(pageId);
     if (childIds.length > 0) {
       const caret = h("button", {
         class: `page-caret${collapsed ? "" : " is-open"}`,
@@ -270,8 +280,7 @@ export function createSidebar(workspace, actions) {
       caret.append(icon("chevron", { size: 13 }));
       caret.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (state.collapsed.has(pageId)) state.collapsed.delete(pageId);
-        else state.collapsed.add(pageId);
+        setCollapsed(pageId, !isCollapsed(pageId));
         refresh();
       });
       row.append(caret);
@@ -378,7 +387,7 @@ export function createSidebar(workspace, actions) {
   function selectFromRow(event, pageId) {
     const target = /** @type {Element} */ (event.target);
     if (target.closest(".page-caret, .page-actions, .rename-input")) return;
-    if (state.selectedPageId !== pageId) select(pageId);
+    if (selectedPageId() !== pageId) select(pageId);
   }
 
   /** @param {string} pageId */
@@ -386,7 +395,7 @@ export function createSidebar(workspace, actions) {
     const page = pageInfo(workspace, pageId);
     if (!page) return null;
     const row = h("div", {
-      class: `favorite-row${state.selectedPageId === pageId ? " is-selected" : ""}`,
+      class: `favorite-row${selectedPageId() === pageId ? " is-selected" : ""}`,
       "data-favorite-id": pageId
     });
     row.append(typeGlyph(page.type));
@@ -410,7 +419,7 @@ export function createSidebar(workspace, actions) {
     const plan = planDrop(workspace, dragId, target);
     state.draggingPageId = null;
     if (plan) {
-      if (plan.newParentId) state.collapsed.delete(plan.newParentId);
+      if (plan.newParentId) setCollapsed(plan.newParentId, false);
       actions.move(dragId, plan);
     }
   }
@@ -529,6 +538,6 @@ export function createSidebar(workspace, actions) {
     element,
     refresh,
     select,
-    selection: () => state.selectedPageId
+    selection: () => selectedPageId()
   };
 }

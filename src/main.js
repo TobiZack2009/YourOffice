@@ -6,6 +6,7 @@ import "./app/styles.css";
 import { createWorkspace } from "./domain/index.js";
 /** @typedef {import("./workspace/store.js").Workspace} Workspace */
 import { mountApp } from "./app/shell.js";
+import { createSession } from "./app/session.js";
 
 const workspace = createWorkspace({ title: "My Workspace" });
 
@@ -108,13 +109,23 @@ workspace.markSaved();
 const root = document.getElementById("app");
 if (!root) throw new Error("missing #app element");
 
+/** Zoom, sidebar and ribbon preferences survive a reload; ids in it are checked on use. */
+function openSession() {
+  try {
+    return createSession({}, { storage: window.localStorage, key: "yourOffice.session" });
+  } catch {
+    return createSession();
+  }
+}
+const session = openSession();
+
 /** @type {ReturnType<typeof mountApp> | null} */
 let app = null;
 
 /** @param {Workspace} current */
 function mount(current) {
   app?.destroy();
-  app = mountApp(/** @type {HTMLElement} */ (root), current, { onImport: mount });
+  app = mountApp(/** @type {HTMLElement} */ (root), current, { onImport: mount, session });
 }
 
 mount(workspace);

@@ -61,13 +61,13 @@ describe("rendering", () => {
     expect(editor.getSlideId()).toBe(slideId);
   });
 
-  it("keeps the inspector hidden through the shared view state", () => {
-    const view = { inspector: false, snap: true, grid: false };
-    const { editor } = setup({ view });
+  it("starts from the given view and reports changes", () => {
+    const views = [];
+    const { editor } = setup({ view: { inspector: false, snap: true, grid: false }, onViewChange: (v) => views.push(v) });
     expect(editor.element.classList.contains("hide-inspector")).toBe(true);
     editor.setView({ inspector: true });
     expect(editor.element.classList.contains("hide-inspector")).toBe(false);
-    expect(view.inspector).toBe(true);
+    expect(views.at(-1)?.inspector).toBe(true);
   });
 });
 
@@ -311,9 +311,9 @@ describe("clipboard and arrange", () => {
     expect(slide().objectOrder).toHaveLength(2);
   });
 
-  it("shares the clipboard through the shell-held object", () => {
-    const clipboard = { objects: [], pastes: 0 };
-    const first = setup({ clipboard });
+  it("hands the clipboard to the owner, who can seed another editor", () => {
+    let clipboard = { objects: [], pastes: 0 };
+    const first = setup({ clipboard, onClipboardChange: (next) => (clipboard = next) });
     first.editor.selectObjects([first.a]);
     first.editor.copy();
     expect(clipboard.objects).toHaveLength(1);
@@ -626,5 +626,18 @@ describe("link form", () => {
     editor.selectObjects([a]);
     editor.setLink(`#${notes}`);
     expect(object(a).link).toEqual({ kind: "page", pageId: notes });
+  });
+});
+
+describe("selection capture and restore", () => {
+  it("round-trips the slide and objects, dropping objects that are gone", () => {
+    const { editor, slideId, a } = setup();
+    editor.selectObjects([a]);
+    expect(editor.captureSelection()).toEqual({ slideId, objectIds: [a] });
+    editor.selectObjects([]);
+    expect(editor.restoreSelection({ slideId, objectIds: [a, "obj_gone"] })).toBe(true);
+    expect(editor.getSelection()).toEqual([a]);
+    expect(editor.restoreSelection({ slideId: "slide_gone", objectIds: [] })).toBe(false);
+    expect(editor.dependsOn().size).toBe(1);
   });
 });

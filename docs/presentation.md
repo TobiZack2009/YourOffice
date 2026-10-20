@@ -59,8 +59,9 @@ sections; slide background, transition and size when nothing is selected).
   committed with `setObjectRuns`; marks and links share `app/marks.js`.
 - Multi-selection supports move, delete, duplicate, arrange and X/Y; resize and rotate
   handles are for a single selected object.
-- The shell holds the state that must survive its remount-on-undo (current slide per page,
-  view toggles, clipboard).
+- The session holds the state that must survive a remount (current slide per page, view
+  toggles, clipboard). The editor takes `view`, `clipboard` and `initialSlideId` as starting
+  values and reports changes through `onViewChange`, `onClipboardChange` and `onSlideChange`.
 - **Links.** The editor uses the document link form (`createLinkForm(close)`, shared by the
   ribbon Link button and the context menu's Link...). While editing text it links the
   selection (a page is the anchor href `#<pageId>`); otherwise it links the selected objects,

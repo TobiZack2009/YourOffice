@@ -72,6 +72,9 @@ JSDoc typedefs document the shapes.
   `modifiedAt`, marks dirty and emits `change` (`{kind, transactionId, label, commands, pages, entities, registry, origin}`); it returns the handler's result (created ids). The UI reads through `workspace/selectors.js`, not cloned pages. See `workspace.md`.
   Nested `transact` joins the outer one; a throw rolls back to a snapshot. Failures are
   `CommandError(message, reason)` with a machine-readable `reason`.
+- **Session** (`app/session.js`): what the user is doing (open page, zoom, folds, ribbon tab,
+  presentation view, last slide per page, logical selection per page). One store, one writer
+  (`set`), serialisable, never part of the workspace. See `app-shell.md`.
 - **History** (`workspace/history.js`): per-transaction whole-state snapshots (one clone per
   commit, none for undo/redo), same-key coalescing, a 200-entry cap and a saved revision that
   drives `dirty`. Inverse patches stay a possible upgrade when data volumes demand it.

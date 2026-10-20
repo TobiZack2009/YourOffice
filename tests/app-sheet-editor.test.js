@@ -868,3 +868,17 @@ describe("resizing from the headers", () => {
     editor.destroy();
   });
 });
+
+describe("selection capture and restore", () => {
+  it("round-trips the selected cells and ignores malformed values", () => {
+    const { editor, tableId } = setup();
+    editor.selectCell(tableId, 1, 2);
+    const captured = editor.captureSelection();
+    expect(captured).toMatchObject({ tableId, anchor: { col: 1, row: 2 } });
+    editor.selectCell(tableId, 0, 0);
+    expect(editor.restoreSelection(captured)).toBe(true);
+    expect(editor.captureSelection()).toEqual(captured);
+    expect(editor.restoreSelection({ tableId: "gone", anchor: { col: 0, row: 0 }, focus: { col: 0, row: 0 }, others: [] })).toBe(false);
+    expect(editor.restoreSelection(null)).toBe(false);
+  });
+});

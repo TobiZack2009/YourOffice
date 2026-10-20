@@ -11,6 +11,7 @@ import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
 import { buildMenu, createPopoverHost } from "./popover.js";
 import { defaultTabId, getTabs } from "./ribbon-tabs.js";
+import { createSession } from "./session.js";
 
 /** @typedef {import("./ribbon-tabs.js").Control} Control */
 /** @typedef {import("./ribbon-tabs.js").RibbonContext} RibbonContext */
@@ -27,8 +28,9 @@ import { defaultTabId, getTabs } from "./ribbon-tabs.js";
 
 /**
  * @param {() => RibbonContext} getContext Fresh context on every call.
- * @param {{ onTabChange?: (tabId: string) => void }} [options] `onTabChange` fires when the
- *   user picks a tab (not when `setPage` swaps the tab set).
+ * @param {{ onTabChange?: (tabId: string) => void, session?: import("./session.js").Session }} [options]
+ *   `onTabChange` fires when the user picks a tab (not when `setPage` swaps the tab set). The
+ *   remembered tab per page type lives in `session` (a private one when none is given).
  * @returns {RibbonHandle}
  */
 export function createRibbon(getContext, options = {}) {
@@ -40,8 +42,7 @@ export function createRibbon(getContext, options = {}) {
 
   /** @type {string | null | undefined} */
   let pageType = null;
-  /** Last active tab per page type (and "none" when no page is open). */
-  const rememberedTab = new Map();
+  const session = options.session ?? createSession();
   /** @type {{ control: Control, element: HTMLElement, input?: HTMLInputElement }[]} */
   let records = [];
 
@@ -54,7 +55,7 @@ export function createRibbon(getContext, options = {}) {
 
   function activeTabId() {
     const tabs = getTabs(pageType);
-    const wanted = rememberedTab.get(typeKey()) ?? defaultTabId(pageType);
+    const wanted = session.get().ribbonTabByType[typeKey()] ?? defaultTabId(pageType);
     return tabs.some((tab) => tab.id === wanted) ? wanted : defaultTabId(pageType);
   }
 
@@ -230,7 +231,7 @@ export function createRibbon(getContext, options = {}) {
   /** @param {string} tabId */
   function selectTab(tabId) {
     popovers.close();
-    rememberedTab.set(typeKey(), tabId);
+    session.set({ ribbonTabByType: { ...session.get().ribbonTabByType, [typeKey()]: tabId } });
     renderTabs();
     renderPanel();
     update();
