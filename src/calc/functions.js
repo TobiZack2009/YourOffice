@@ -45,6 +45,8 @@ function collectNumbers(args) {
       values.push(arg);
     } else if (typeof arg === "boolean") {
       values.push(arg ? 1 : 0);
+    } else if (typeof arg !== "string") {
+      return { values, error: ERR.VALUE };
     } else {
       const text = arg.trim();
       if (text === "") return { values, error: ERR.VALUE };

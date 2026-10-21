@@ -22,8 +22,8 @@ Principles, module layout, key types and the decisions that depart from the spec
 - **Separate dependency graphs.** Data deps (formulas, references) vs rendering deps
   (views to rerender), spec §9.
 - **Light tooling.** No ESLint, no framework, no TypeScript source. `npm run typecheck` runs `tsc`
-  with `checkJs` over the JSDoc, non-strict. It is advisory until it is clean (see Deviations).
-  Tests, the Vite build and the architecture tests are the verification path.
+  with `checkJs` over the JSDoc, non-strict, and reports no errors; keep it that way. Tests, the
+  Vite build, the architecture tests and the typecheck are the verification path.
 
 ## Module layout
 
@@ -114,7 +114,8 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
 12. **Styles follow the areas.** One stylesheet is imported (`styles/index.css`, imports only); each
     file styles one area; rules are nested under their component class; a file stays under 400
     lines. Enforced. Style an element in the file of the area that owns it.
-13. **Definition of done.** Tests named after the module; `npm test` and `npm run build` green; the
+13. **Definition of done.** Tests named after the module; `npm test`, `npm run build` and
+    `npm run typecheck` green; the
     area doc and the `AGENTS.md` counts updated; for UI changes, `npm run build && npm run smoke`
     against real Chrome; any exception to these rules recorded under Deviations.
 
@@ -126,8 +127,6 @@ breach.
 - The reference views redraw their table, slide and expression bodies on every host pass; only nested editors are cached (rule 7). The inspector and the animation timeline are keyed.
 - Class names are global. Styles are split per area and nested, but not scoped, so two areas can
   still collide on a class name (rule 12).
-- `npm run typecheck` reports 127 errors (mostly JSDoc shapes for DOM helpers) and is not part of
-  the definition of done until it is clean.
 
 ## Key types
 

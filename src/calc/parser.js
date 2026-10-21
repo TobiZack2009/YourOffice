@@ -24,8 +24,21 @@ import { tokenize, FormulaSyntaxError } from "./tokenizer.js";
 import { parseA1 } from "./references.js";
 
 /** @typedef {import("./references.js").CellRef} CellRef */
-/** @typedef {{ type: string, [key: string]: unknown }} AstNode */
-/** @typedef {{ type: string, value: unknown, pos: number }} Token */
+/**
+ * @typedef {{ type: "number", value: number }
+ *   | { type: "string", value: string }
+ *   | { type: "boolean", value: boolean }
+ *   | { type: "error", code: string }
+ *   | { type: "empty" }
+ *   | { type: "ref", ref: CellRef }
+ *   | { type: "range", start: CellRef, end: CellRef }
+ *   | { type: "name", name: string, quoted?: boolean }
+ *   | { type: "path", segments: string[], address: AstNode | null }
+ *   | { type: "unary" | "postfix", op: string, operand: AstNode }
+ *   | { type: "binary", op: string, left: AstNode, right: AstNode, comparison: boolean }
+ *   | { type: "call", name: string, args: AstNode[] }} AstNode
+ */
+/** @typedef {import("./tokenizer.js").Token} Token */
 
 /** Binary operator precedence; higher binds tighter. */
 const BINARY_PRECEDENCE = {

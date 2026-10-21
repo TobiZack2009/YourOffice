@@ -241,7 +241,7 @@ export function validateBlock(block) {
           errors.push(`${prefix}: image.width must be a positive number or null`);
         }
       }
-      if (block.align !== undefined && !ALIGNMENTS.has(block.align)) {
+      if (block.align !== undefined && !ALIGNMENTS.has(/** @type {string} */ (block.align))) {
         errors.push(`${prefix}: image.align must be one of left, center, right`);
       }
       if (block.alt !== undefined && typeof block.alt !== "string") {

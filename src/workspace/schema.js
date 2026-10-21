@@ -104,7 +104,7 @@ function checkIdList(list, exists, what, errors) {
  * @typedef {object} ValidationOptions
  * @property {Partial<Record<PageType, (content: unknown) => string[]>>} [contentValidators]
  *   One content validator per page type, run on every page that has content.
- * @property {Array<(data: any) => string[]>} [integrityChecks]
+ * @property {ReadonlyArray<(data: any) => string[]>} [integrityChecks]
  *   Cross-page checks (sections, references), run once the rest of the document is sound.
  */
 
@@ -243,10 +243,11 @@ export function validateWorkspace(data, options = {}) {
     }
   }
 
-  if (data.settings !== undefined && !isPlainObject(data.settings)) {
+  const settings = /** @type {Record<string, unknown> | undefined} */ (data.settings);
+  if (settings !== undefined && !isPlainObject(settings)) {
     errors.push("settings must be an object when present");
-  } else if (data.settings?.favoritePageIds !== undefined) {
-    const ids = data.settings.favoritePageIds;
+  } else if (settings !== undefined && settings.favoritePageIds !== undefined) {
+    const ids = settings.favoritePageIds;
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
       errors.push("settings.favoritePageIds must be an array of page ids when present");
     }

@@ -134,7 +134,7 @@ export function createSlideStrip(options) {
   /**
    * @param {string} slideId
    * @param {MouseEvent} event
-   * @param {number} index
+   * @param {HTMLElement} wrap
    */
   function dropTarget(slideId, event, wrap) {
     const rect = wrap.getBoundingClientRect();

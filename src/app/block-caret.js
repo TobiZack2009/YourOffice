@@ -15,7 +15,7 @@ export function isEditable(element) {
  * @returns {HTMLElement | null}
  */
 export function editableFrom(node) {
-  let current = node instanceof Element ? node : node?.parentElement ?? null;
+  let current = /** @type {HTMLElement | null} */ (node instanceof Element ? node : node?.parentElement ?? null);
   while (current) {
     if (isEditable(current)) return current;
     current = current.parentElement;

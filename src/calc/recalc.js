@@ -23,7 +23,7 @@ import { makeRange } from "./values.js";
 /** @typedef {import("./errors.js").FormulaError} FormulaError */
 /** @typedef {import("./values.js").Value} Value */
 /** @typedef {import("./values.js").Scalar} Scalar */
-/** @typedef {{ type: string, [key: string]: unknown }} AstNode */
+/** @typedef {import("./parser.js").AstNode} AstNode */
 /** @typedef {{ col: number, row: number, scope?: string }} Position */
 /** @typedef {{ start: Position, end: Position, scope?: string }} Rect */
 /**
@@ -50,7 +50,7 @@ export class RecalcEngine {
     /** @type {((id: string) => Value | undefined) | undefined} */
     this.resolveId = options.resolveId;
     this._bulk = false;
-    /** @type {Map<string, { kind: "literal" | "formula", value?: Scalar, text?: string, ast: AstNode | null }>} */
+    /** @type {Map<string, { kind: "literal" | "formula", value?: Scalar, text?: string, ast?: AstNode | null }>} */
     this.cells = new Map();
     /** @type {Map<string, Value>} Computed values (cache). */
     this.values = new Map();
@@ -489,7 +489,7 @@ export function collectReferences(ast, options = {}) {
   const refs = [];
   /** @type {Rect[]} */
   const ranges = [];
-  const scoped = (/** @type {object} */ position) => (scope ? { ...position, scope } : position);
+  const scoped = (/** @type {any} */ position) => (scope ? { ...position, scope } : position);
 
   const visitName = (/** @type {string[]} */ segments, /** @type {AstNode | null} */ address) => {
     const cells = locate?.(scope, segments, address)?.cells;

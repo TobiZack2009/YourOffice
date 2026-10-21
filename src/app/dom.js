@@ -5,15 +5,16 @@
  */
 
 /**
- * Create an element.
- * @param {string} tag
+ * Create an element. A known tag name gives the matching element type (`input` -> HTMLInputElement).
+ * @template {string} T
+ * @param {T} tag
  * @param {Record<string, unknown>} [props] Attributes: `class`, `text`, `dataset`,
  *   `on*` handlers, plus any other attribute (true → empty attribute).
  * @param {Array<Node | string | null | undefined | false> | Node | string} [children]
- * @returns {HTMLElement}
+ * @returns {T extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[T] : HTMLElement}
  */
 export function h(tag, props = {}, children = []) {
-  const element = document.createElement(tag);
+  const element = /** @type {HTMLElement} */ (document.createElement(tag));
 
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined || value === null || value === false) continue;
@@ -35,7 +36,7 @@ export function h(tag, props = {}, children = []) {
     element.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
 
-  return element;
+  return /** @type {any} */ (element);
 }
 
 /**
@@ -66,7 +67,7 @@ export function fragment(children) {
  * @returns {HTMLElement | null}
  */
 export function closestWithData(node, attribute) {
-  let current = node instanceof Element ? node : node?.parentElement ?? null;
+  let current = /** @type {HTMLElement | null} */ (node instanceof Element ? node : node?.parentElement ?? null);
   while (current) {
     if (current.hasAttribute(attribute)) return current;
     current = current.parentElement;

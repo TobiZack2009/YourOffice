@@ -9,7 +9,6 @@ import { WorkspaceFormatError } from "../core/errors.js";
 import { Workspace } from "./store.js";
 import { migrateWorkspace, validateWorkspace } from "./schema.js";
 
-/** @typedef {import("./store.js").Workspace} Workspace */
 /** @typedef {import("./schema.js").WorkspaceDocument} WorkspaceDocument */
 
 /**

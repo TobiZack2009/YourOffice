@@ -223,7 +223,7 @@ export function createObject(type, fields = {}) {
 }
 
 /**
- * @param {Partial<Slide> & { objects?: SlideObject[] | Record<string, SlideObject> }} [fields]
+ * @param {Omit<Partial<Slide>, "objects"> & { objects?: SlideObject[] | Record<string, SlideObject> }} [fields]
  * @returns {Slide}
  */
 export function createSlide(fields = {}) {

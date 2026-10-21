@@ -18,7 +18,7 @@
 import { errorFromLiteral } from "./errors.js";
 
 /**
- * @typedef {{ type: string, [key: string]: unknown }} Token
+ * @typedef {{ type: string, value?: any, literal?: string, pos: number, end: number }} Token
  */
 
 /** Multi-character operators, longest first so `<=` beats `<`. */

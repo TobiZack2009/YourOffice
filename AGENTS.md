@@ -30,7 +30,7 @@ numbers when they change.
 - UI work: `npm run build && npm run smoke` drives the built file in real Chrome
   (`scripts/smoke.mjs`, playwright-core, `channel: "chrome"`); it is not part of `npm test`.
   Extend it when a UI change adds behaviour jsdom cannot check (focus, selection, IndexedDB).
-- `npm run typecheck` (`tsc` + `checkJs`) is advisory: it still reports 127 errors. Do not add new ones.
+- `npm run typecheck` (`tsc` + `checkJs`, non-strict) is clean; keep it at zero errors.
 - `tests/architecture.test.js` enforces the import layering, DOM-free model layers, the `getPage`
   allowlist, no `persistence` imports from `app`, and file size ceilings. If it fails, fix the code;
   change the test only with a matching entry under Deviations in `docs/architecture.md`.
@@ -83,7 +83,7 @@ intent into commands; views render those answers. Full rules, with what enforces
     controller, tests and a doc paragraph.
 12. Styles: one imported stylesheet (`src/styles/index.css`, imports only), one file per area,
     rules nested under their component class, files under 400 lines.
-13. Done means: module-named tests, `npm test` and `npm run build` green, area doc and the counts
+13. Done means: module-named tests, `npm test`, `npm run build` and `npm run typecheck` green, area doc and the counts
     above updated, a smoke run for UI work, and every exception recorded under Deviations.
 
 ## Docs

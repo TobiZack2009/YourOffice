@@ -134,6 +134,7 @@ export function showReferenceList(ctx) {
  * @param {() => HTMLElement} ctx.anchor Where follow-up popovers open.
  * @param {string} ctx.sectionId
  * @param {(pageId: string) => void} [ctx.navigate]
+ * @param {import("./notice.js").Notice["guard"]} [ctx.guard] Runs a command and shows a notice if it is refused.
  * @returns {import("./popover.js").MenuItem[]}
  */
 export function sectionMenuItems(ctx) {
@@ -177,6 +178,7 @@ export function sectionMenuItems(ctx) {
  * @param {string} ctx.hostId Container the reference sits in.
  * @param {any} ctx.record The reference block / object / inline ref.
  * @param {(pageId: string) => void} [ctx.navigate]
+ * @param {import("./notice.js").Notice["guard"]} [ctx.guard] Runs a command and shows a notice if it is refused.
  * @param {(record: any) => void} [ctx.editExpression]
  * @param {(record: any) => void} [ctx.replaceSource]
  * @returns {import("./popover.js").MenuItem[]}

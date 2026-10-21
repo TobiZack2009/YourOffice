@@ -2,6 +2,7 @@
  * Vite entry: find the page's root element and boot the app into it.
  */
 
+// @ts-ignore: a side-effect stylesheet import; Vite resolves it, tsc has no module for it.
 import "./styles/index.css";
 import { createSession } from "./app/session.js";
 import { boot } from "./boot.js";

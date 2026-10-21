@@ -152,7 +152,7 @@ function viewTab(pageType) {
         id: "zoom",
         label: "Zoom",
         controls: [
-          {
+          /** @type {import("./ribbon-shared.js").Control} */ ({
             id: "zoom",
             kind: "select",
             label: "Zoom",
@@ -162,7 +162,7 @@ function viewTab(pageType) {
             options: [75, 100, 125, 150].map((percent) => ({ value: String(percent), label: `${percent}%` })),
             value: (ctx) => String(ctx.shell.getZoom()),
             onSelect: (ctx, value) => ctx.shell.setZoom(Number(value))
-          }
+          })
         ]
       }]),
       {

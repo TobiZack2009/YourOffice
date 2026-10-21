@@ -10,7 +10,7 @@ import { NO_LINK, buildLinkForm, linkPages } from "./link-form.js";
 /**
  * @typedef {object} RibbonContext
  * @property {Workspace} workspace
- * @property {import("../workspace/schema.js").PageEnvelope | undefined} page
+ * @property {import("../workspace/selectors.js").PageInfo | undefined} page
  * @property {import("./block-editor.js").EditorHandle | null} docEditor
  * @property {import("./sheet-editor.js").SheetEditorHandle | null} sheetEditor
  * @property {import("./presentation-editor.js").PresentationEditorHandle | null} [presentationEditor]
@@ -316,7 +316,7 @@ export function headingMenu(item) {
       [1, 2, 3].map((level) => ({
         label: `Heading ${level}`,
         icon: `h${level}`,
-        attrs: { "data-action": "insert-item", "data-insert": "heading", "data-level": level },
+        attrs: { "data-action": "insert-item", "data-insert": "heading", "data-level": String(level) },
         action: () => ctx.docEditor?.insertAfterActive({ type: "heading", level })
       }))
   });

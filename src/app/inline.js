@@ -123,7 +123,7 @@ export function parseInlineRuns(root) {
       /** @type {InlineRun["marks"]} */
       const next = { ...marks };
       const mark = MARK_TAGS[/** @type {keyof typeof MARK_TAGS} */ (element.tagName)];
-      if (mark) next[/** @type {keyof typeof next} */ (mark)] = true;
+      if (mark) /** @type {Record<string, unknown>} */ (next)[mark] = true;
       if (element.tagName === "A") {
         const href = element.getAttribute("href");
         if (href && isSafeUrl(href)) next.link = href;

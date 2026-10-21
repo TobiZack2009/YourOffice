@@ -42,6 +42,10 @@ export { parseCellInput, rawCellText } from "./sheet-cell-input.js";
  * @property {HTMLElement} element
  * @property {() => void} refresh
  * @property {() => void} destroy
+ * @property {() => Set<string>} dependsOn Pages this editor draws.
+ * @property {() => void} focus
+ * @property {() => unknown} captureSelection A logical copy of the selection, for a remount.
+ * @property {(value: unknown) => boolean} restoreSelection Put a captured selection back; whether one was restored.
  * @property {() => { tableId: string, col: number, row: number } | null} getSelection The active (anchor) cell.
  * @property {() => SheetRange | null} getRange The active (most recent) normalised range; a single cell is a 1x1 range.
  * @property {() => SheetRange[]} getRanges Every selected range, the active one last.

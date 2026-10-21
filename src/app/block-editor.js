@@ -46,6 +46,17 @@ export { splitRunsAt };
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../document/model.js").Block} Block */
 /** @typedef {import("../document/model.js").InlineRun} InlineRun */
+/**
+ * @typedef {object} ActiveInfo
+ * @property {string | null} blockId
+ * @property {string | null} itemId
+ * @property {string | null} type
+ * @property {number | null} level
+ * @property {boolean | null} ordered
+ * @property {number} selectionSize Units covered by block selection (0 when none).
+ * @property {boolean} canIndent Whether Tab would nest the active unit.
+ * @property {boolean} canOutdent Whether Shift+Tab would lift the active unit.
+ *//** @typedef {ReturnType<typeof createDocumentEditor>} EditorHandle */
 
 const MARK_TAG = { bold: "strong", italic: "em", underline: "u", strike: "s", code: "code" };
 const EXEC_COMMAND = { bold: "bold", italic: "italic", underline: "underline", strike: "strikeThrough" };
@@ -65,7 +76,6 @@ const EXEC_COMMAND = { bold: "bold", italic: "italic", underline: "underline", s
  *   navigate?: (pageId: string) => void,
  *   notice?: import("./notice.js").Notice
  * }} [options]
- * @returns {EditorHandle}
  */
 export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   const notice = options.notice ?? defaultNotice;
@@ -82,9 +92,13 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     "data-history": "model"
   });
 
-  /** Dispatch as this editor, so its change events can be recognised as its own. */
-  const dispatch = (/** @type {string} */ type, /** @type {any} */ payload, /** @type {string | undefined} */ coalesce) =>
-    workspace.dispatch(type, payload, { origin, coalesce });
+  /**
+   * Dispatch as this editor, so its change events can be recognised as its own.
+   * @param {string} type
+   * @param {any} payload
+   * @param {string} [coalesce]
+   */
+  const dispatch = (type, payload, coalesce) => workspace.dispatch(type, payload, { origin, coalesce });
 
   /** Whether a node belongs to this editor rather than to an editor nested in it. */
   const owns = (/** @type {Node | null} */ node) => {
@@ -590,17 +604,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   // -- active block info -------------------------------------------------------
 
-  /**
-   * @typedef {object} ActiveInfo
-   * @property {string | null} blockId
-   * @property {string | null} itemId
-   * @property {string | null} type
-   * @property {number | null} level
-   * @property {boolean | null} ordered
-   * @property {number} selectionSize Units covered by block selection (0 when none).
-   * @property {boolean} canIndent Whether Tab would nest the active unit.
-   * @property {boolean} canOutdent Whether Shift+Tab would lift the active unit.
-   */
+
 
   /** @returns {boolean} */
   function canIndentActive() {

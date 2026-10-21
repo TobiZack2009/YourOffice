@@ -55,7 +55,9 @@ const isPlainObject = (value) => typeof value === "object" && value !== null && 
 
 /** @param {Record<string, unknown>} value @returns {Record<string, string>} */
 function stringMap(value) {
-  return Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === "string"));
+  return /** @type {Record<string, string>} */ (
+    Object.fromEntries(Object.entries(value).filter(([, v]) => typeof v === "string"))
+  );
 }
 
 /**

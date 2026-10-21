@@ -77,7 +77,7 @@ export function shiftFormulaReferences(text, shift, options = {}) {
       if (unit.kind !== "address" || !target(unit.segments)) continue;
       /** @type {import("../calc/refscan.js").Edit[]} */
       const unitEdits = [];
-      for (const [ref, index] of [[unit.first, unit.firstToken], [unit.second, unit.secondToken]]) {
+      for (const [ref, index] of /** @type {Array<[CellRef | null | undefined, number | undefined]>} */ ([[unit.first, unit.firstToken], [unit.second, unit.secondToken]])) {
         if (!ref) continue;
         const moved = shiftRef(shift, /** @type {CellRef} */ (ref));
         if (moved && moved.col === ref.col && moved.row === ref.row) continue;
@@ -119,9 +119,10 @@ export function shiftCells(cells, shift) {
 
 /**
  * Shift the overrides map (`{"3": {height}}`) for an index operation.
- * @param {Record<string, Record<string, number>>} overrides
+ * @template {Record<string, Record<string, number>>} T
+ * @param {T} overrides
  * @param {IndexShift} shift
- * @returns {Record<string, Record<string, number>>}
+ * @returns {T}
  */
 export function shiftOverrides(overrides, shift) {
   /** @type {Record<string, Record<string, number>>} */
@@ -133,7 +134,7 @@ export function shiftOverrides(overrides, shift) {
     if (moved === null) continue;
     next[String(moved)] = { ...override };
   }
-  return next;
+  return /** @type {T} */ (next);
 }
 
 /**

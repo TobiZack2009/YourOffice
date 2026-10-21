@@ -19,11 +19,11 @@ import { PAGE_TYPES } from "./schema.js";
 /** @typedef {import("./schema.js").PageType} PageType */
 
 /**
- * @param {Workspace} store
  * @param {unknown} value
  * @param {string} field
  * @param {string} reason
- * @param {new (...args: unknown[]) => Error} ErrorType
+ * @param {new (message: string, reason: string) => Error} ErrorType
+ * @returns {asserts value is string}
  */
 function isNonEmptyString(value, field, reason, ErrorType) {
   if (typeof value !== "string" || value.length === 0) {
@@ -51,7 +51,9 @@ export function touchPage(tx, page, ...entityIds) {
  * @param {string} id
  */
 export function touchContainer(store, tx, id) {
-  const container = store._data.pages[id] ?? store._data.detached?.[id];
+  const container = /** @type {import("./schema.js").PageEnvelope | undefined} */ (
+    store._data.pages[id] ?? store._data.detached?.[id]
+  );
   if (container) touchPage(tx, container);
 }
 
@@ -109,7 +111,7 @@ export const commands = {
       title: typeof p.title === "string" ? p.title : "",
       createdAt: timestamp,
       modifiedAt: timestamp,
-      ...(p.content !== undefined ? { content: p.content } : {})
+      ...(p.content !== undefined ? { content: /** @type {Record<string, unknown>} */ (p.content) } : {})
     };
 
     const siblings =
@@ -126,7 +128,7 @@ export const commands = {
         );
       }
     }
-    const index = p.index === undefined ? siblings.length : p.index;
+    const index = p.index === undefined ? siblings.length : /** @type {number} */ (p.index);
 
     store._data.pages[page.id] = page;
     siblings.splice(index, 0, page.id);
@@ -333,7 +335,7 @@ export const commands = {
     if (problems.length > 0) {
       throw new CommandError(`invalid ${page.type} content: ${problems.join("; ")}`, "invalidContent");
     }
-    page.content = structuredClone(p.content);
+    page.content = structuredClone(/** @type {Record<string, unknown>} */ (p.content));
     touchPage(tx, page);
   }
 };

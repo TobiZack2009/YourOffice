@@ -35,7 +35,7 @@ export function offsetFormulaReferences(text, deltaCol, deltaRow, options = {}) 
     const edits = [];
     for (const unit of units) {
       if (unit.kind !== "address" || !target(unit.segments)) continue;
-      for (const [ref, index] of [[unit.first, unit.firstToken], [unit.second, unit.secondToken]]) {
+      for (const [ref, index] of /** @type {Array<[import("../calc/references.js").CellRef | null | undefined, number | undefined]>} */ ([[unit.first, unit.firstToken], [unit.second, unit.secondToken]])) {
         if (!ref) continue;
         const col = ref.absCol ? ref.col : ref.col + deltaCol;
         const row = ref.absRow ? ref.row : ref.row + deltaRow;

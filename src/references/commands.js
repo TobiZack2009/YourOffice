@@ -175,7 +175,7 @@ export const referenceCommands = {
    * @param {{ pageId: string, locator: Record<string, any>, name?: string, sectionId?: string, implicit?: boolean }} payload
    */
   createSection(store, tx, payload) {
-    const p = payload ?? {};
+    const p = /** @type {typeof payload} */ (payload ?? {});
     const { id: containerId, container } = requireContainer(store, p.pageId);
     const problem = locatorProblem(container, p.locator);
     if (problem) throw new CommandError(problem, "invalidLocator");
@@ -296,14 +296,14 @@ export const referenceCommands = {
         ...(p.parent !== undefined ? { parent: p.parent } : {})
       });
     } else if (container.type === "presentation") {
-      const object = createObject("reference", {
+      const object = createObject("reference", /** @type {Partial<import("../presentation/model.js").SlideObject>} */ ({
         id: instanceId,
         ...fields,
         x: p.x ?? 80,
         y: p.y ?? 80,
         width: p.width ?? 480,
         height: p.height ?? 270
-      });
+      }));
       presentationCommands.insertObject(store, tx, { pageId: containerId, slideId: p.slideId, object });
     } else {
       throw new CommandError("References cannot be placed inside a sheet yet; use a formula there.", "invalidReference");
@@ -404,7 +404,7 @@ export const referenceCommands = {
    */
   restoreDetached(store, tx, payload) {
     const detachedId = requireId(payload?.detachedId, "detachedId");
-    const entry = store._data.detached?.[detachedId];
+    const entry = /** @type {{ type?: string } | undefined} */ (store._data.detached?.[detachedId]);
     if (!entry) throw new CommandError("That content is no longer kept.", "unknownDetached");
     const pageId = requireId(payload?.pageId, "pageId");
     const page = store._data.pages[pageId];

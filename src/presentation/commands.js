@@ -77,7 +77,9 @@ function requireInsertIndex(value, field) {
  */
 function requirePresentationPage(store, pageId) {
   const id = requireString(pageId, "pageId", "invalidPage");
-  const page = store._data.pages[id] ?? store._data.detached?.[id];
+  const page = /** @type {import("../workspace/schema.js").PageEnvelope | undefined} */ (
+    store._data.pages[id] ?? store._data.detached?.[id]
+  );
   if (!page) throw new CommandError(`page does not exist: ${id}`, "unknownPage");
   if (page.type !== "presentation") {
     throw new CommandError(`page ${id} is not a presentation page`, "wrongPageType");

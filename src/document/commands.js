@@ -81,7 +81,9 @@ function requireString(value, field, reason) {
  */
 function requireDocumentPage(store, pageId) {
   const id = requireString(pageId, "pageId", "invalidPage");
-  const page = store._data.pages[id] ?? store._data.detached?.[id];
+  const page = /** @type {import("../workspace/schema.js").PageEnvelope | undefined} */ (
+    store._data.pages[id] ?? store._data.detached?.[id]
+  );
   if (!page) throw new CommandError(`page does not exist: ${id}`, "unknownPage");
   if (page.type !== "document") {
     throw new CommandError(`page ${id} is not a document page`, "wrongPageType");
@@ -171,7 +173,7 @@ export const documentCommands = {
    * Insert a block, optionally positioned.
    * @param {Workspace} store
    * @param {Transaction} tx
-   * @param {{ pageId: string, block: Record<string, unknown>, index?: number, afterBlockId?: string, beforeBlockId?: string }} payload
+   * @param {{ pageId: string, block: Record<string, unknown>, newBlockId?: string, index?: number, afterBlockId?: string, beforeBlockId?: string }} payload
    * @example store.dispatch("insertBlock", { pageId, block: { type: "paragraph", runs: [{ text: "Hi" }] } })
    */
   insertBlock(store, tx, payload) {
@@ -217,7 +219,7 @@ export const documentCommands = {
       ids = at.ids;
       index = at.index;
     } else if (p.index !== undefined) {
-      if (!Number.isInteger(p.index) || p.index < 0 || p.index > ids.length) {
+      if (typeof p.index !== "number" || !Number.isInteger(p.index) || p.index < 0 || p.index > ids.length) {
         throw new CommandError("index is out of range", "invalidIndex");
       }
       index = /** @type {number} */ (p.index);
@@ -277,6 +279,7 @@ export const documentCommands = {
 
     if (type === existing.type) {
       // Same type: only flavour fields (heading level, list ordering) may change.
+      /** @type {Record<string, unknown>} */
       const patch = {};
       if (type === "heading" && fields.level !== undefined) patch.level = fields.level;
       if (type === "list" && fields.ordered !== undefined) patch.ordered = fields.ordered;
@@ -286,7 +289,7 @@ export const documentCommands = {
       if (errors.length > 0) {
         throw new CommandError(`invalid block update: ${errors.join("; ")}`, "invalidBlock");
       }
-      content.blocks[existing.id] = candidate;
+      content.blocks[existing.id] = /** @type {Block} */ (candidate);
       touchPage(tx, page, existing.id);
       return;
     }
@@ -369,7 +372,7 @@ export const documentCommands = {
     const { page, content } = requireDocumentPage(store, p.pageId);
     const block = requireBlock(content, p.blockId);
     const at = requireContainer(content, block.id);
-    if (!Number.isInteger(p.index) || p.index < 0 || p.index >= at.ids.length) {
+    if (typeof p.index !== "number" || !Number.isInteger(p.index) || p.index < 0 || p.index >= at.ids.length) {
       throw new CommandError("index is out of range", "invalidIndex");
     }
     if (at.index === p.index) return;
@@ -459,7 +462,7 @@ export const documentCommands = {
       throw new CommandError(`invalid runs: ${errors.join("; ")}`, "invalidRuns");
     }
     const item = { id: createId("item"), runs: structuredClone(/** @type {InlineRun[]} */ (runs)) };
-    const index = p.index === undefined ? block.items.length : p.index;
+    const index = p.index === undefined ? block.items.length : /** @type {number} */ (p.index);
     if (!Number.isInteger(index) || index < 0 || index > block.items.length) {
       throw new CommandError("index is out of range", "invalidIndex");
     }
@@ -601,11 +604,11 @@ export const documentCommands = {
 
     if (!at.parent) {
       documentCommands.extractListItem(store, tx, {
-        pageId: p.pageId,
+        pageId: /** @type {string} */ (p.pageId),
         blockId: list.id,
         itemId: items[itemIndex].id,
         type: "paragraph",
-        newBlockId: p.newBlockId
+        newBlockId: /** @type {string | undefined} */ (p.newBlockId)
       });
       return;
     }
