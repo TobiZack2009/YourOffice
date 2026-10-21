@@ -44,6 +44,16 @@ s/strike/del, code, a[href]). Ref runs are atomic.
 
 `createDocumentEditor(workspace, pageId, options)`.
 
+The editor is a kernel (`ed`: state accessors plus shared operations) built in `block-editor.js`,
+which also owns the `change` subscription and the returned handle. The behaviour lives in modules
+that each take the kernel: `block-view.js` (keyed drawing), `block-input.js` (DOM events),
+`block-structure.js` (Enter/Backspace/Tab), `block-selection-ops.js` (actions on selected units),
+`block-selection-io.js` (capture/restore in model terms), `block-toolbar.js` (ribbon commands),
+`block-links.js` (link form and card), `block-references.js` (gutter handle, block drag, sections,
+embeds, expressions), `block-context-menu.js`. Pure helpers: `block-caret.js` (DOM caret),
+`block-marks.js` (wrapping marks), `block-runs.js` (splitting runs), `nested-store.js` (store view
+for editors embedded in list items and sections).
+
 - Each run-capable block or list item is its own `contenteditable`. Structure changes (Enter
   split, Backspace merge/delete, list item split/exit, arrow navigation) dispatch commands and
   re-render; the browser never restructures the DOM.

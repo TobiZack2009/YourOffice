@@ -105,8 +105,8 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
     `app/` never imports `persistence/`; only `boot.js` wires them. Enforced.
 11. **Size.** A file over about 800 lines is split before a feature is added to it. A feature is a
     model change, commands, a renderer, a controller, tests and a doc paragraph, each in its own
-    module where it fits. Enforced: line ceilings per file (the oversized editors are pinned at their
-    current size and may only shrink).
+    module where it fits. Enforced: line ceilings per file (the remaining oversized editors are pinned at
+    their current size and may only shrink).
 12. **Definition of done.** Tests named after the module; `npm test` and `npm run build` green; the
     area doc and the `AGENTS.md` counts updated; for UI changes, `npm run build && npm run smoke`
     against real Chrome; any exception to these rules recorded under Deviations.
@@ -117,7 +117,7 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
-- `block-editor.js`, `presentation-editor.js`, `sheet-editor.js` and `ribbon-tabs.js` exceed the size
+- `presentation-editor.js`, `sheet-editor.js` and `ribbon-tabs.js` exceed the size
   guideline (rule 11). The clipboard, gesture and menu code should move into per-editor modules as
   each editor is next touched.
 - `block-editor.js` keeps a hand list, `INLINE_COMMITS` (rule 6), to recognise typing commits.
@@ -125,7 +125,7 @@ breach.
   `getPage` (rule 5); the allowlist in the architecture test holds the counts.
 - The reference views, inspector and timeline rebuild on every change that touches them (rule 7).
 - `styles.css` is one unscoped file; styles are not split per area.
-- `npm run typecheck` reports 165 errors (mostly JSDoc shapes for DOM helpers) and is not part of
+- `npm run typecheck` reports 129 errors (mostly JSDoc shapes for DOM helpers) and is not part of
   the definition of done until it is clean.
 
 ## Key types

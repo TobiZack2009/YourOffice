@@ -116,6 +116,7 @@ describe("architecture", () => {
     // editors still take a snapshot because `ensure*Content` repairs the copy in place.
     const allowed = new Map([
       ["app/block-editor.js", 2],
+      ["app/nested-store.js", 1], // defines the store-shaped `getPage`; reads host.data, takes no snapshot
       ["app/sheet-editor.js", 1],
       ["app/presentation-editor.js", 1],
       ["app/slideshow.js", 1],
@@ -142,7 +143,7 @@ describe("architecture", () => {
   it("files stay under 800 lines; the oversized editors may not grow while they wait to be split", () => {
     // Ceilings, not targets: lower them as the files are split, never raise them.
     const ceilings = new Map([
-      ["app/block-editor.js", 2800],
+      ["app/block-editor.js", 820],
       ["app/presentation-editor.js", 2550],
       ["app/sheet-editor.js", 1550],
       ["app/ribbon-tabs.js", 1550],
