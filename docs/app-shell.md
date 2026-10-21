@@ -111,7 +111,10 @@ taken on the slide being reopened, so a redo that brings a slide back reopens th
 
 - `ribbon-tabs.js` is pure data: `getTabs(pageType)` -> tabs -> groups -> controls
   (`button | toggle | select | menu | field | color`, each with `enabled(ctx)`, `active(ctx)`,
-  `disabledReason`). Adding a tab or control is a data change.
+  `disabledReason`). Adding a tab or control is a data change. `getTabs` assembles File, the
+  page type's own tabs and View; the own tabs live in `ribbon-tabs-document.js`,
+  `ribbon-tabs-sheet.js` and `ribbon-tabs-presentation.js` (with `ribbon-animation.js`), over
+  `ribbon-shared.js` (context and control types, enable predicates, popover bodies, factories).
 - `ctx` is `{ workspace, page, docEditor, sheetEditor, presentationEditor, shell }`; `shell`
   is the narrow `ShellApi` (undo/redo/save/export/import/zoom/sidebar, `startSlideshow`,
   `isSlideshowActive`).

@@ -140,11 +140,10 @@ describe("architecture", () => {
     }
   });
 
-  it("files stay under 800 lines; the oversized editors may not grow while they wait to be split", () => {
+  it("files stay under 800 lines; the few oversized files may not grow while they wait to be split", () => {
     // Ceilings, not targets: lower them as the files are split, never raise them.
     const ceilings = new Map([
       ["app/block-editor.js", 820],
-      ["app/ribbon-tabs.js", 1550],
       ["sheet/commands.js", 820]
     ]);
     const over = [];

@@ -117,8 +117,6 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
-- `ribbon-tabs.js` exceeds the size guideline (rule 11); its tab definitions should move into
-  per-area modules.
 - `block-editor.js` keeps a hand list, `INLINE_COMMITS` (rule 6), to recognise typing commits.
 - `block-editor`, `sheet-editor`, `presentation-editor`, `slideshow` and `demo-seed` still call
   `getPage` (rule 5); the allowlist in the architecture test holds the counts.
