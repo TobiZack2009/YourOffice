@@ -9,8 +9,8 @@
  */
 
 import { reconcileChildren } from "../core/reconcile.js";
-import { displayValue } from "./evaluator.js";
-import { explain, isFormulaError } from "./errors.js";
+import { displayValue } from "../calc/evaluator.js";
+import { explain, isFormulaError } from "../calc/errors.js";
 import {
   HEADER_HEIGHT,
   HEADER_WIDTH,
@@ -21,14 +21,14 @@ import {
   mergeBounds,
   rowHeightOf,
   tableExtent
-} from "./model.js";
+} from "../calc/model.js";
 
 // The sizing helpers live in the model (commands place tables with them too).
 export { HEADER_HEIGHT, HEADER_WIDTH, columnWidthOf, rowHeightOf, tableExtent };
 
-/** @typedef {import("./model.js").SheetContent} SheetContent */
-/** @typedef {import("./model.js").Table} Table */
-/** @typedef {import("./table-engine.js").TableEngines} TableEngines */
+/** @typedef {import("../calc/model.js").SheetContent} SheetContent */
+/** @typedef {import("../calc/model.js").Table} Table */
+/** @typedef {import("../references/table-engine.js").TableEngines} TableEngines */
 
 /**
  * @typedef {object} SheetRenderOptions

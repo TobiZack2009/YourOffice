@@ -13,10 +13,10 @@
  * the base does not matter here.
  */
 
-import { MAX_COLUMN, MAX_ROW, formatA1, parseA1 } from "./references.js";
-import { rewriteFormula } from "./refscan.js";
+import { MAX_COLUMN, MAX_ROW, formatA1, parseA1 } from "../calc/references.js";
+import { rewriteFormula } from "../calc/refscan.js";
 
-/** @typedef {import("./model.js").Cell} Cell */
+/** @typedef {import("../calc/model.js").Cell} Cell */
 /** @typedef {{ col: number, row: number }} Position */
 /** @typedef {{ start: Position, end: Position }} CellRect */
 
@@ -31,7 +31,7 @@ export function offsetFormulaReferences(text, deltaCol, deltaRow, options = {}) 
   if (deltaCol === 0 && deltaRow === 0) return text;
   const target = options.target ?? (() => true);
   return rewriteFormula(text, ({ units }) => {
-    /** @type {import("./refscan.js").Edit[]} */
+    /** @type {import("../calc/refscan.js").Edit[]} */
     const edits = [];
     for (const unit of units) {
       if (unit.kind !== "address" || !target(unit.segments)) continue;

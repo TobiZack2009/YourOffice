@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseFormula } from "../src/sheet/parser.js";
-import { evaluate, displayValue } from "../src/sheet/evaluator.js";
-import { ERR } from "../src/sheet/errors.js";
+import { parseFormula } from "../src/calc/parser.js";
+import { evaluate, displayValue } from "../src/calc/evaluator.js";
+import { ERR } from "../src/calc/errors.js";
 
 /**
  * Evaluate formula text against a sparse cell map keyed "col,row".
  * @param {string} text
- * @param {Record<string, import("../src/sheet/values.js").Value>} [cells]
+ * @param {Record<string, import("../src/calc/values.js").Value>} [cells]
  */
 function run(text, cells = {}) {
   const context = {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWorkspace, workspaceFromJSON, validateDomain } from "../src/domain/index.js";
 import { findSection } from "../src/references/sections.js";
 import { findReferenceHost } from "../src/references/hosts.js";
-import { TableEngines } from "../src/sheet/table-engine.js";
+import { TableEngines } from "../src/references/table-engine.js";
 
 /**
  * Notes (document)   paragraphs one, two, three

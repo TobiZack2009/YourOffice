@@ -7,27 +7,23 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
 /**
  * Which areas of `src/` each area may import from. The model says what is true (`core` <-
- * `workspace` <- feature models), `domain` composes them, `app` renders them.
- *
- * Known exception: `sheet` and `references` depend on each other (formula retargeting and
- * reference lookup are shared); `SHEET_REFERENCE_IMPORTS` pins exactly which sheet files may reach
- * into `references`, so the cycle cannot spread.
+ * `workspace` <- feature models), `domain` composes them, `app` renders them. `calc` is the
+ * formula language and the table value model: it knows nothing about pages or references.
  */
 const ALLOWED = {
   core: [],
+  calc: ["core"],
   workspace: ["core"],
   document: ["core", "workspace"],
   presentation: ["core", "workspace", "document"],
-  sheet: ["core", "workspace", "references"],
-  references: ["core", "workspace", "document", "presentation", "sheet"],
-  domain: ["core", "workspace", "document", "presentation", "sheet", "references"],
-  app: ["core", "workspace", "document", "presentation", "sheet", "references", "domain"],
+  sheet: ["core", "workspace", "calc", "references"],
+  references: ["core", "workspace", "calc", "document", "presentation"],
+  domain: ["core", "workspace", "calc", "document", "presentation", "sheet", "references"],
+  app: ["core", "workspace", "calc", "document", "presentation", "sheet", "references", "domain"],
   persistence: ["core", "workspace", "domain"],
   styles: [],
   main: ["core", "workspace", "domain", "app", "persistence", "styles"]
 };
-
-const SHEET_REFERENCE_IMPORTS = new Set(["sheet/cell-shift.js", "sheet/commands.js", "sheet/table-engine.js"]);
 
 function walk(dir) {
   return readdirSync(dir).flatMap((name) => {
@@ -75,16 +71,6 @@ describe("architecture", () => {
     expect(violations).toEqual([]);
   });
 
-  it("only the pinned sheet files import references", () => {
-    const users = new Set();
-    for (const file of files.filter((f) => areaOf(f) === "sheet")) {
-      if (localImports(file).some((s) => areaOf(normalize(join(dirname(file), s))) === "references")) {
-        users.add(relative(SRC, file));
-      }
-    }
-    expect([...users].filter((f) => !SHEET_REFERENCE_IMPORTS.has(f))).toEqual([]);
-  });
-
   it("workspace and core import nothing from the features", () => {
     for (const file of files.filter((f) => ["workspace", "core"].includes(areaOf(f)))) {
       for (const specifier of localImports(file)) {
@@ -104,7 +90,7 @@ describe("architecture", () => {
       /\bHTML\w*Element\b(?!.*@)/
     ];
     const offenders = [];
-    const modelAreas = ["core", "workspace", "sheet", "document", "presentation", "references", "domain"];
+    const modelAreas = ["core", "calc", "workspace", "sheet", "document", "presentation", "references", "domain"];
     for (const file of files.filter((f) => modelAreas.includes(areaOf(f)) && !/render[\w-]*\.js$/.test(f))) {
       const code = stripComments(readFileSync(file, "utf8"));
       for (const pattern of forbidden) if (pattern.test(code)) offenders.push(`${relative(SRC, file)} matches ${pattern}`);

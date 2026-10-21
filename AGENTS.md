@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1264 tests green across 72 files; the single-file build is ~451 kB.** Update these two
+**1263 tests green across 72 files; the single-file build is ~451 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -41,7 +41,8 @@ numbers when they change.
 src/
   core/          ids, events, error types
   workspace/     schema, store, built-in commands, import/export
-  sheet/         formula engine, table model/commands/render
+  calc/          formula language and engine, table value model
+  sheet/         sheet commands, shifting, fill, render
   document/      block model, commands, renderer
   presentation/  slide model, commands, geometry, animation/slideshow logic, renderer
   references/    scope, sections, reference commands, detached store, fit rule
@@ -61,8 +62,8 @@ The model says what is true; the session says what the user is doing; controller
 intent into commands; views render those answers. Full rules, with what enforces each, are in
 `docs/architecture.md`. The short form:
 
-1. Dependencies point down: `core <- workspace <- sheet|document|presentation <- references <-
-   domain <- app`; `persistence` sits beside `app` and only `boot.js` wires it in.
+1. Dependencies point down: `core <- workspace <- calc|document|presentation <- references <-
+   sheet <- domain <- app`; `persistence` sits beside `app` and only `boot.js` wires it in.
 2. Durable state lives in the workspace and changes only through commands. Commands validate, return
    the ids they create, and record the entities they touch. Model code never touches the DOM.
 3. User state (selection, open page, zoom, folds, clipboard) lives in `app/session.js`, not in the

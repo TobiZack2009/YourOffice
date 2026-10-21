@@ -10,7 +10,7 @@ import {
   scopeChain,
   uniqueName
 } from "../src/references/scope.js";
-import { parseFormula } from "../src/sheet/parser.js";
+import { parseFormula } from "../src/calc/parser.js";
 
 /**
  * Plan (sheet: Costs, Rates)

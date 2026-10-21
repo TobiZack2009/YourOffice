@@ -2,7 +2,7 @@
  * Cell text <-> cell payload: what the formula bar shows and what a cell stores.
  */
 
-/** @typedef {import("../sheet/model.js").Cell} Cell */
+/** @typedef {import("../calc/model.js").Cell} Cell */
 
 /**
  * Turn formula-bar text into a cell payload (or null to clear).

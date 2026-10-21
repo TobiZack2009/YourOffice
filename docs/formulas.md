@@ -1,6 +1,6 @@
 # Formula engine and expression language
 
-`src/sheet/` (pure, dependency-free). One language serves sheet cells and cross-editor
+`src/calc/` (pure, dependency-free). One language serves sheet cells and cross-editor
 expression references.
 
 ## Pipeline
@@ -59,7 +59,7 @@ attached. Unresolved/ambiguous name is `#NAME?`; misused handle `#VALUE!`; vanis
   relative refs move, `$` pins an axis, off-sheet becomes `#REF!`).
 - Name resolution, scope rules and cross-table rewriting are in `references.md`.
 
-## Workspace-wide graph (`sheet/table-engine.js`)
+## Workspace-wide graph (`references/table-engine.js`)
 
 `TableEngines` keeps one cell-keyed dependency graph for the whole workspace (a table-level
 order is insufficient: `T1!A1 -> T2!A1` with `T2!B1 -> T1!B1` is cell-acyclic). The per-table
@@ -69,4 +69,4 @@ engine is rebuilt from the sparse store on every change.
 ## Tests
 
 `tokenizer`, `parser`, `evaluator`, `recalc`, `references`, `formula-errors`,
-`formula-functions`, `sheet-refscan`, `cross-table`.
+`formula-functions`, `calc-refscan`, `cross-table`.

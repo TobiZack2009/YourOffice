@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { RecalcEngine, collectReferences } from "../src/sheet/recalc.js";
-import { parseA1 } from "../src/sheet/references.js";
-import { parseFormula } from "../src/sheet/parser.js";
-import { ERR } from "../src/sheet/errors.js";
+import { RecalcEngine, collectReferences } from "../src/calc/recalc.js";
+import { parseA1 } from "../src/calc/references.js";
+import { parseFormula } from "../src/calc/parser.js";
+import { ERR } from "../src/calc/errors.js";
 
 /** @param {string} a1 */
-const at = (a1) => /** @type {import("../src/sheet/references.js").CellRef} */ (parseA1(a1));
+const at = (a1) => /** @type {import("../src/calc/references.js").CellRef} */ (parseA1(a1));
 
 describe("RecalcEngine — basics", () => {
   it("evaluates literals and formulas", () => {

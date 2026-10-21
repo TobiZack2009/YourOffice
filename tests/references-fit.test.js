@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fitOf, shapeOfSection, shapeOfValue, INLINE_WIDTH_SHARE } from "../src/references/fit.js";
-import { ERR } from "../src/sheet/errors.js";
-import { makeRange } from "../src/sheet/values.js";
+import { ERR } from "../src/calc/errors.js";
+import { makeRange } from "../src/calc/values.js";
 
 describe("fitOf", () => {
   it("flows scalars, empty results and errors", () => {

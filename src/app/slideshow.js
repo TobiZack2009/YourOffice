@@ -16,7 +16,7 @@ import { hasTransition, lastStep, nextPosition, previousPosition, settledAt, ste
 import { fitScale } from "../presentation/geometry.js";
 import { readPresentationContent } from "../presentation/model.js";
 import { renderSlide } from "../presentation/render.js";
-import { buildBook } from "../sheet/table-engine.js";
+import { buildBook } from "../references/table-engine.js";
 import { playAnimation } from "./animation-preview.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";

@@ -14,7 +14,7 @@ import { exportWorkspaceJSON as exportJSON, importWorkspaceJSON as importJSON } 
 import { registerDocumentCommands } from "../document/commands.js";
 import { validateDocumentContent } from "../document/model.js";
 import { registerSheetCommands } from "../sheet/commands.js";
-import { validateSheetContent } from "../sheet/model.js";
+import { validateSheetContent } from "../calc/model.js";
 import { registerPresentationCommands } from "../presentation/commands.js";
 import { validatePresentationContent } from "../presentation/model.js";
 import { registerReferenceCommands } from "../references/commands.js";

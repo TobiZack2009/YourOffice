@@ -9,11 +9,11 @@
 
 import { renderBlock } from "../document/render.js";
 import { renderSlide } from "../presentation/render.js";
-import { displayValue } from "../sheet/evaluator.js";
-import { explain, isFormulaError } from "../sheet/errors.js";
-import { isHandle, isRange, rangeDims } from "../sheet/values.js";
+import { displayValue } from "../calc/evaluator.js";
+import { explain, isFormulaError } from "../calc/errors.js";
+import { isHandle, isRange, rangeDims } from "../calc/values.js";
 import { renderTable } from "../sheet/render.js";
-import { TableEngines } from "../sheet/table-engine.js";
+import { TableEngines } from "../references/table-engine.js";
 import { evaluateExpression } from "../references/expression.js";
 import { findSection, locatorSlideIds, sectionKind, sectionRunIds, sectionSlideIds } from "../references/sections.js";
 import { h } from "./dom.js";
@@ -24,8 +24,8 @@ export const DEFAULT_SLIDE_WIDTH = 480;
 /**
  * @typedef {object} StaticContext
  * @property {any} data Workspace data.
- * @property {import("../sheet/table-engine.js").TableEngines} [engines] Shared across a render pass.
- * @property {import("../sheet/recalc.js").RecalcEngine} [book] Shared across a render pass.
+ * @property {import("../references/table-engine.js").TableEngines} [engines] Shared across a render pass.
+ * @property {import("../calc/recalc.js").RecalcEngine} [book] Shared across a render pass.
  * @property {(pageId: string) => string | undefined} [resolvePageTitle]
  * @property {number} [depth]
  */

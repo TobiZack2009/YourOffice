@@ -14,7 +14,7 @@ import {
   setCell,
   validateSheetContent,
   validateTable
-} from "../src/sheet/model.js";
+} from "../src/calc/model.js";
 import { CommandError } from "../src/core/errors.js";
 
 describe("sheet content", () => {

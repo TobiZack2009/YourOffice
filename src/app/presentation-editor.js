@@ -15,7 +15,7 @@
  * The handle returned here is the ribbon's whole interface, and the inspector's.
  */
 
-import { buildBook } from "../sheet/table-engine.js";
+import { buildBook } from "../references/table-engine.js";
 import { clampPresentationSelection, readPresentationSelection } from "./selection.js";
 import { createAnimationTimeline } from "./animation-timeline.js";
 import { createGestureScope } from "./gesture.js";

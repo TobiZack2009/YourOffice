@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeFormula, rewriteFormula } from "../src/sheet/refscan.js";
+import { analyzeFormula, rewriteFormula } from "../src/calc/refscan.js";
 import { shiftFormulaReferences } from "../src/sheet/shift.js";
 import { offsetFormulaReferences } from "../src/sheet/fill.js";
 import { shiftRegionReferences, retargetMovedReferences } from "../src/sheet/cell-shift.js";

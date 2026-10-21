@@ -9,7 +9,7 @@ import {
   normaliseRange,
   rangeContains,
   sameCell
-} from "../src/sheet/references.js";
+} from "../src/calc/references.js";
 
 describe("column exercise", () => {
   it("converts letters to 1-based indices", () => {

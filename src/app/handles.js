@@ -12,7 +12,7 @@ import { containerOf } from "../references/containers.js";
 import { findReferenceHost } from "../references/hosts.js";
 import { countReferences, referencesTo } from "../references/index.js";
 import { findSection } from "../references/sections.js";
-import { formatA1 } from "../sheet/references.js";
+import { formatA1 } from "../calc/references.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { guard as defaultGuard } from "./notice.js";

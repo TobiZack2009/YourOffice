@@ -15,12 +15,12 @@
  * Positions here are 0-based (matching the engine's keys); A1 text is 1-based.
  */
 
-import { formatA1, parseA1 } from "./references.js";
-import { parseCellKey } from "./model.js";
-import { rewriteFormula, isLocalReference } from "./refscan.js";
+import { formatA1, parseA1 } from "../calc/references.js";
+import { parseCellKey } from "../calc/model.js";
+import { rewriteFormula, isLocalReference } from "../calc/refscan.js";
 
-/** @typedef {import("./references.js").CellRef} CellRef */
-/** @typedef {import("./model.js").Merge} Merge */
+/** @typedef {import("../calc/references.js").CellRef} CellRef */
+/** @typedef {import("../calc/model.js").Merge} Merge */
 
 /**
  * @typedef {object} IndexShift
@@ -71,11 +71,11 @@ export function shiftRef(shift, ref) {
 export function shiftFormulaReferences(text, shift, options = {}) {
   const target = options.target ?? isLocalReference;
   return rewriteFormula(text, ({ units }) => {
-    /** @type {import("./refscan.js").Edit[]} */
+    /** @type {import("../calc/refscan.js").Edit[]} */
     const edits = [];
     for (const unit of units) {
       if (unit.kind !== "address" || !target(unit.segments)) continue;
-      /** @type {import("./refscan.js").Edit[]} */
+      /** @type {import("../calc/refscan.js").Edit[]} */
       const unitEdits = [];
       for (const [ref, index] of [[unit.first, unit.firstToken], [unit.second, unit.secondToken]]) {
         if (!ref) continue;
@@ -100,12 +100,12 @@ export function shiftFormulaReferences(text, shift, options = {}) {
 
 /**
  * Shift the sparse cell store for an index operation.
- * @param {Record<string, import("./model.js").Cell>} cells
+ * @param {Record<string, import("../calc/model.js").Cell>} cells
  * @param {IndexShift} shift
- * @returns {Record<string, import("./model.js").Cell>} A new sparse store.
+ * @returns {Record<string, import("../calc/model.js").Cell>} A new sparse store.
  */
 export function shiftCells(cells, shift) {
-  /** @type {Record<string, import("./model.js").Cell>} */
+  /** @type {Record<string, import("../calc/model.js").Cell>} */
   const next = {};
   for (const [key, cell] of Object.entries(cells)) {
     const position = parseCellKey(key);
@@ -237,9 +237,9 @@ function shiftIndexValue(index, shift) {
 
 /**
  * Formula text inside a shifted cell follows its new position.
- * @param {import("./model.js").Cell} cell
+ * @param {import("../calc/model.js").Cell} cell
  * @param {IndexShift} shift
- * @returns {import("./model.js").Cell}
+ * @returns {import("../calc/model.js").Cell}
  */
 function shiftCellFormula(cell, shift) {
   if (typeof cell.formula !== "string") return { ...cell };

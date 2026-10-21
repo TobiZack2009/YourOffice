@@ -9,17 +9,17 @@
  * reverse index and for cycle checks).
  */
 
-import { parseFormula } from "../sheet/parser.js";
-import { FormulaSyntaxError } from "../sheet/tokenizer.js";
-import { syntaxErrorValue } from "../sheet/recalc.js";
-import { buildBook } from "../sheet/table-engine.js";
-import { isFormulaError, ERR, withDetail } from "../sheet/errors.js";
-import { isHandle, isRange } from "../sheet/values.js";
+import { parseFormula } from "../calc/parser.js";
+import { FormulaSyntaxError } from "../calc/tokenizer.js";
+import { syntaxErrorValue } from "../calc/recalc.js";
+import { buildBook } from "./table-engine.js";
+import { isFormulaError, ERR, withDetail } from "../calc/errors.js";
+import { isHandle, isRange } from "../calc/values.js";
 import { scopePageOf } from "./containers.js";
 import { collectNames, resolveTarget } from "./scope.js";
 import { findSection } from "./sections.js";
 
-/** @typedef {import("../sheet/values.js").Value} Value */
+/** @typedef {import("../calc/values.js").Value} Value */
 
 /**
  * @typedef {object} ExpressionResult
@@ -46,7 +46,7 @@ const parseCache = new Map();
 /**
  * Parse expression text.
  * @param {string} text
- * @returns {{ ast: any } | { error: import("../sheet/errors.js").FormulaError }}
+ * @returns {{ ast: any } | { error: import("../calc/errors.js").FormulaError }}
  */
 export function parseExpression(text) {
   if (typeof text !== "string" || text.trim() === "" || text.trim() === "=") {
@@ -70,7 +70,7 @@ export function parseExpression(text) {
  * @param {import("./containers.js").ContainerData} data
  * @param {string} containerId Page (or detached) id the expression lives in.
  * @param {string} text
- * @param {{ book?: import("../sheet/recalc.js").RecalcEngine }} [options] A built engine to reuse.
+ * @param {{ book?: import("../calc/recalc.js").RecalcEngine }} [options] A built engine to reuse.
  * @returns {ExpressionResult}
  */
 export function evaluateExpression(data, containerId, text, options = {}) {

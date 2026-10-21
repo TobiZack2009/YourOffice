@@ -12,7 +12,7 @@
 
 import { CommandError } from "../core/errors.js";
 import { touchPage, touchContainer } from "../workspace/commands.js";
-import { MAX_COLUMN, MAX_ROW } from "./references.js";
+import { MAX_COLUMN, MAX_ROW } from "../calc/references.js";
 import {
   SHEET_DEFAULTS,
   cellKey,
@@ -24,7 +24,7 @@ import {
   setCell as writeCell,
   tableExtent,
   validateCell
-} from "./model.js";
+} from "../calc/model.js";
 import {
   mergeBlocksShift,
   retargetMovedReferences,
@@ -32,7 +32,7 @@ import {
   shiftRegionReferences
 } from "./cell-shift.js";
 import { offsetCell, tileSourceFor } from "./fill.js";
-import { nameProblem } from "./names.js";
+import { nameProblem } from "../calc/names.js";
 import { retargetReferences, snapshotReferences } from "../references/rewrite.js";
 import { rewriteTableReferences } from "../references/cross-table.js";
 import { qualifyToKeepTarget, uniqueName } from "../references/scope.js";
@@ -45,9 +45,9 @@ import {
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 /** @typedef {import("../workspace/store.js").Transaction} Transaction */
-/** @typedef {import("./model.js").Cell} Cell */
-/** @typedef {import("./model.js").SheetContent} SheetContent */
-/** @typedef {import("./model.js").Table} Table */
+/** @typedef {import("../calc/model.js").Cell} Cell */
+/** @typedef {import("../calc/model.js").SheetContent} SheetContent */
+/** @typedef {import("../calc/model.js").Table} Table */
 
 /**
  * @param {unknown} value
@@ -780,8 +780,8 @@ function setLineOverride(store, tx, payload, axis) {
 }
 
 /**
- * @param {import("./model.js").Merge} a
- * @param {import("./model.js").Merge} b
+ * @param {import("../calc/model.js").Merge} a
+ * @param {import("../calc/model.js").Merge} b
  * @returns {boolean}
  */
 function overlaps(a, b) {

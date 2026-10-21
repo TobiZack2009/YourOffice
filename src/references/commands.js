@@ -16,7 +16,7 @@
 
 import { createId } from "../core/ids.js";
 import { CommandError } from "../core/errors.js";
-import { nameProblem } from "../sheet/names.js";
+import { nameProblem } from "../calc/names.js";
 import { touchContainer } from "../workspace/commands.js";
 import { documentCommands } from "../document/commands.js";
 import { presentationCommands } from "../presentation/commands.js";

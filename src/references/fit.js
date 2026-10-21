@@ -13,8 +13,8 @@
  *     container, so it can sit beside text; several slides stack and always break.
  */
 
-import { isHandle, isRange } from "../sheet/values.js";
-import { isFormulaError } from "../sheet/errors.js";
+import { isHandle, isRange } from "../calc/values.js";
+import { isFormulaError } from "../calc/errors.js";
 import { findSection, sectionKind, sectionRunIds, sectionSlideIds } from "./sections.js";
 
 /** A table or slide may flow inline up to this share of the container's width. */

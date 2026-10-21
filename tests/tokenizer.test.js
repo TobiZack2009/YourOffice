@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tokenize, FormulaSyntaxError } from "../src/sheet/tokenizer.js";
+import { tokenize, FormulaSyntaxError } from "../src/calc/tokenizer.js";
 
 /** Strip positions/eof for concise assertions. */
 const shape = (input) =>

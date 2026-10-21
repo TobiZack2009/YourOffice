@@ -15,8 +15,8 @@
  * present; a section without a name is implicit and not addressable by name.
  */
 
-import { ERR, withDetail } from "../sheet/errors.js";
-import { formatName, nameKey } from "../sheet/names.js";
+import { ERR, withDetail } from "../calc/errors.js";
+import { formatName, nameKey } from "../calc/names.js";
 import { containerOf, scopePageOf } from "./containers.js";
 
 /**
@@ -220,7 +220,7 @@ function titleOf(data, pageId) {
 /**
  * @typedef {object} Resolution
  * @property {Target} [target]
- * @property {import("../sheet/errors.js").FormulaError} [error]
+ * @property {import("../calc/errors.js").FormulaError} [error]
  * @property {boolean} [ambiguous] A page segment matched several pages.
  */
 

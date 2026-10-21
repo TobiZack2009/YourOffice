@@ -19,7 +19,7 @@
  * expressions register themselves with `siteSources`.
  */
 
-import { rewriteFormula } from "../sheet/refscan.js";
+import { rewriteFormula } from "../calc/refscan.js";
 import { formatPath, qualifyToKeepTarget, resolveTarget, targetKey } from "./scope.js";
 import { allContainers } from "./containers.js";
 import { walkReferenceHosts } from "./hosts.js";
@@ -141,7 +141,7 @@ export function retargetReferences(data, snapshot, touch) {
     if (typeof text !== "string") continue;
     const next = rewriteFormula(text, ({ units }) => {
       if (units.length !== targets.length) return [];
-      /** @type {import("../sheet/refscan.js").Edit[]} */
+      /** @type {import("../calc/refscan.js").Edit[]} */
       const edits = [];
       units.forEach((unit, index) => {
         const before = targets[index];

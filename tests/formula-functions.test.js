@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseFormula } from "../src/sheet/parser.js";
-import { evaluate, displayValue } from "../src/sheet/evaluator.js";
-import { ERR, isFormulaError } from "../src/sheet/errors.js";
-import { FUNCTION_NAMES, formatWithPattern } from "../src/sheet/functions.js";
-import { makeRange, rangeDims } from "../src/sheet/values.js";
-import { formatName, isPlainName, nameProblem } from "../src/sheet/names.js";
+import { parseFormula } from "../src/calc/parser.js";
+import { evaluate, displayValue } from "../src/calc/evaluator.js";
+import { ERR, isFormulaError } from "../src/calc/errors.js";
+import { FUNCTION_NAMES, formatWithPattern } from "../src/calc/functions.js";
+import { makeRange, rangeDims } from "../src/calc/values.js";
+import { formatName, isPlainName, nameProblem } from "../src/calc/names.js";
 
 function run(text, cells = {}, extra = {}) {
   const context = {

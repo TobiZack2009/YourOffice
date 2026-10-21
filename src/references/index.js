@@ -15,7 +15,7 @@ import { allContainers, containerOf } from "./containers.js";
 import { walkReferenceHosts } from "./hosts.js";
 import { findSection, sectionsCovering } from "./sections.js";
 import { collectTargets, evaluateExpression, parseExpression, targetsOfAst } from "./expression.js";
-import { explain, isFormulaError } from "../sheet/errors.js";
+import { explain, isFormulaError } from "../calc/errors.js";
 
 /**
  * @typedef {object} ReferenceSite

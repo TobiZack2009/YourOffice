@@ -11,7 +11,7 @@
 import { createId } from "../core/ids.js";
 import { findSectionByLocator } from "./sections.js";
 import { membersOf, scopeChain } from "./scope.js";
-import { formatName, isPlainName } from "../sheet/names.js";
+import { formatName, isPlainName } from "../calc/names.js";
 
 /**
  * @param {any[] | undefined} runs

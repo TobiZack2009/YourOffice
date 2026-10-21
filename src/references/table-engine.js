@@ -15,13 +15,13 @@
  * trivially correct; an incremental update path is the planned optimisation.
  */
 
-import { RecalcEngine } from "./recalc.js";
-import { displayValue } from "./evaluator.js";
-import { parseCellKey } from "./model.js";
-import { locateReference, locateById } from "../references/locate.js";
-import { allContainers, scopePageOf } from "../references/containers.js";
-import { sectionPlainText } from "../references/sections.js";
-import { makeRange } from "./values.js";
+import { RecalcEngine } from "../calc/recalc.js";
+import { displayValue } from "../calc/evaluator.js";
+import { parseCellKey } from "../calc/model.js";
+import { locateReference, locateById } from "./locate.js";
+import { allContainers, scopePageOf } from "./containers.js";
+import { sectionPlainText } from "./sections.js";
+import { makeRange } from "../calc/values.js";
 
 /**
  * The engine speaks 1-based A1 positions (A1 is col 1, row 1) scoped by table id;
@@ -35,8 +35,8 @@ function toEnginePosition(position, scope) {
   return { col: position.col + 1, row: position.row + 1, scope };
 }
 
-/** @typedef {import("./model.js").Table} Table */
-/** @typedef {import("./values.js").Value} Value */
+/** @typedef {import("../calc/model.js").Table} Table */
+/** @typedef {import("../calc/values.js").Value} Value */
 /** @typedef {{ pages: Record<string, any>, pageOrder: Record<string, string[]>, detached?: Record<string, any> }} WorkspaceData */
 
 export class TableEngines {

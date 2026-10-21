@@ -1,10 +1,10 @@
 # Sheet editor
 
-`src/sheet/` (model, commands, render) and `src/app/sheet-editor.js`. Core done (Phase 4).
+`src/calc/model.js` (model), `src/sheet/` (commands, render) and `src/app/sheet-editor.js`. Core done (Phase 4).
 The formula language is in `formulas.md`; cross-table and reference features in
 `references.md`. Spec §6.
 
-## Model (`sheet/model.js`)
+## Model (`calc/model.js`)
 
 - `{ tables: { [id]: Table }, tableOrder, sections }`. A table has a stable id, name, canvas
   `position`, `rowCount`/`columnCount`, default `rowHeight`/`columnWidth`, sparse `cells`
@@ -115,5 +115,5 @@ grids elsewhere).
 
 ## Tests
 
-`sheet-model`, `sheet-shift`, `sheet-commands`, `sheet-fill`, `sheet-cell-shift`,
-`sheet-table-engine`, `sheet-render`, `app-sheet-editor`, `app-sheet-references`.
+`calc-model`, `sheet-shift`, `sheet-commands`, `sheet-fill`, `sheet-cell-shift`,
+`references-table-engine`, `sheet-render`, `app-sheet-editor`, `app-sheet-references`.

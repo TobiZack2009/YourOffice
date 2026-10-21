@@ -6,7 +6,7 @@
  * build dependencies and to read values; later layers add sections.
  */
 
-import { ERR, withDetail } from "../sheet/errors.js";
+import { ERR, withDetail } from "../calc/errors.js";
 import { resolveTarget } from "./scope.js";
 import { containerOf, allContainers } from "./containers.js";
 import { findSection } from "./sections.js";
@@ -14,9 +14,9 @@ import { findSection } from "./sections.js";
 /** @typedef {{ col: number, row: number }} Position */
 /**
  * @typedef {object} Located
- * @property {import("../sheet/errors.js").FormulaError} [error]
+ * @property {import("../calc/errors.js").FormulaError} [error]
  * @property {{ tableId: string, start: Position, end: Position, scalar: boolean }} [cells]
- * @property {import("../sheet/values.js").Value} [value] A ready value (a handle to blocks or a slide).
+ * @property {import("../calc/values.js").Value} [value] A ready value (a handle to blocks or a slide).
  */
 
 /**

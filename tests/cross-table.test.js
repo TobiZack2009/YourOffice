@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspace } from "../src/domain/index.js";
-import { TableEngines } from "../src/sheet/table-engine.js";
+import { TableEngines } from "../src/references/table-engine.js";
 
 /**
  * Plan (sheet)       tables Costs, Rates

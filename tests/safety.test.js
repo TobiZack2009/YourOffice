@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspace, exportWorkspaceJSON, importWorkspaceJSON } from "../src/domain/index.js";
 import { ensureDocumentContent, validateBlock } from "../src/document/model.js";
-import { ensureSheetContent } from "../src/sheet/model.js";
+import { ensureSheetContent } from "../src/calc/model.js";
 import { ensurePresentationContent, validateObject } from "../src/presentation/model.js";
 import { renderRuns } from "../src/document/render.js";
 import { parseInlineRuns } from "../src/app/inline.js";

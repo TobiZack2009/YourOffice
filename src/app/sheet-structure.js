@@ -2,7 +2,7 @@
  * Sheet structure commands: rows, columns, cells, merges, sizes, moving and filling ranges.
  */
 
-import { getCell } from "../sheet/model.js";
+import { getCell } from "../calc/model.js";
 import { columnWidthOf, rectsIntersect, rowHeightOf } from "../sheet/render.js";
 /** @typedef {import("./sheet-editor.js").Position} Position */
 /** @typedef {import("./sheet-editor.js").Rect} Rect */

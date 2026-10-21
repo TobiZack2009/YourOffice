@@ -13,13 +13,13 @@
  * 0-based; A1 text is 1-based.
  */
 
-import { MAX_COLUMN, MAX_ROW, formatA1, parseA1 } from "./references.js";
-import { parseCellKey } from "./model.js";
-import { rewriteFormula, isLocalReference } from "./refscan.js";
+import { MAX_COLUMN, MAX_ROW, formatA1, parseA1 } from "../calc/references.js";
+import { parseCellKey } from "../calc/model.js";
+import { rewriteFormula, isLocalReference } from "../calc/refscan.js";
 import { formatPath } from "../references/scope.js";
 
-/** @typedef {import("./model.js").Cell} Cell */
-/** @typedef {import("./model.js").Merge} Merge */
+/** @typedef {import("../calc/model.js").Cell} Cell */
+/** @typedef {import("../calc/model.js").Merge} Merge */
 
 /**
  * @typedef {object} CellRegionShift
@@ -105,7 +105,7 @@ export function shiftRegionReferences(text, shift, options = {}) {
     ref.col >= 1 && ref.col <= MAX_COLUMN && ref.row >= 1 && ref.row <= MAX_ROW;
 
   return rewriteFormula(text, ({ units }) => {
-    /** @type {import("./refscan.js").Edit[]} */
+    /** @type {import("../calc/refscan.js").Edit[]} */
     const edits = [];
     for (const unit of units) {
       if (unit.kind !== "address" || !target(unit.segments)) continue;
@@ -187,7 +187,7 @@ export function retargetMovedReferences(text, block, deltaCol, deltaRow, options
   const qualifier = relocate && relocate.length > 0 ? `${formatPath(relocate)}!` : "";
 
   return rewriteFormula(text, ({ units }) => {
-    /** @type {import("./refscan.js").Edit[]} */
+    /** @type {import("../calc/refscan.js").Edit[]} */
     const edits = [];
     for (const unit of units) {
       if (unit.kind !== "address" || !target(unit.segments)) continue;

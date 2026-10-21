@@ -11,7 +11,7 @@
 import { collectNames } from "../references/scope.js";
 import { evaluateExpression } from "../references/expression.js";
 import { suggestNames } from "../references/catalog.js";
-import { explain, isFormulaError } from "../sheet/errors.js";
+import { explain, isFormulaError } from "../calc/errors.js";
 import { clear, h } from "./dom.js";
 import { enginesFor, renderValue } from "./reference-render.js";
 

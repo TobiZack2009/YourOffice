@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspace } from "../src/domain/index.js";
-import { cellKey, getCell } from "../src/sheet/model.js";
+import { cellKey, getCell } from "../src/calc/model.js";
 import { CommandError } from "../src/core/errors.js";
 
 function setup() {

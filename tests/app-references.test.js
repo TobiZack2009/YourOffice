@@ -17,7 +17,7 @@ import { openReferencePicker, renderPreview } from "../src/app/reference-picker.
 import { checkExpression, openExpressionEditor, wordBeforeCaret } from "../src/app/expression-editor.js";
 import { findSection } from "../src/references/sections.js";
 import { buildCatalog } from "../src/references/catalog.js";
-import { ERR } from "../src/sheet/errors.js";
+import { ERR } from "../src/calc/errors.js";
 
 /**
  * Notes (document)  paragraphs one, two, three; section Intro = b1..b2

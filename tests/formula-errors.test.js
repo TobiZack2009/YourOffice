@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ERR, FormulaError, errorFromLiteral, isFormulaError, explain, withDetail, withOrigin } from "../src/sheet/errors.js";
+import { ERR, FormulaError, errorFromLiteral, isFormulaError, explain, withDetail, withOrigin } from "../src/calc/errors.js";
 
 describe("FormulaError", () => {
   it("stringifies to its code", () => {

@@ -12,7 +12,7 @@ export function createSheetSelection(ed) {
 
   /**
    * @param {Position} position
-   * @param {import("../sheet/model.js").Table} table
+   * @param {import("../calc/model.js").Table} table
    * @returns {Position}
    */
   function clampPosition(position, table) {

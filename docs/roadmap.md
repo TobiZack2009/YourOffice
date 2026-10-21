@@ -24,7 +24,7 @@ Reordered from spec §16 to land testable foundations first. Phases 1-6 are done
 ## Still open
 
 - Whether `#CIRC!` stays, or a standard code is adopted once Excel/Sheets behaviour is pinned
-  down (currently centralised in `sheet/errors.js`).
+  down (currently centralised in `calc/errors.js`).
 - Section identity rules when source blocks split, merge or move (current behaviour is the
   locator healing in `references/commands.js`).
 - Variable/parameter resolution order and missing-value behaviour (spec §17); parameters are

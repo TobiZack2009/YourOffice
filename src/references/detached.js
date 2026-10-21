@@ -18,7 +18,7 @@
 
 import { createId } from "../core/ids.js";
 import { collectDescendants } from "../document/model.js";
-import { createTable } from "../sheet/model.js";
+import { createTable } from "../calc/model.js";
 import { collectReferenceSites } from "./index.js";
 import { sectionSlideIds, slideLocator } from "./sections.js";
 

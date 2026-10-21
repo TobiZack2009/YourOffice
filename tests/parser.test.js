@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseFormula } from "../src/sheet/parser.js";
-import { FormulaSyntaxError } from "../src/sheet/tokenizer.js";
+import { parseFormula } from "../src/calc/parser.js";
+import { FormulaSyntaxError } from "../src/calc/tokenizer.js";
 
 describe("parseFormula — literals and references", () => {
   it("parses scalars", () => {

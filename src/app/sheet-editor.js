@@ -11,10 +11,10 @@
 
 import { defaultNotice } from "./notice.js";
 import { pageContent, pageExists } from "../workspace/selectors.js";
-import { explain, isFormulaError } from "../sheet/errors.js";
-import { getCell, positionToA1, readSheetContent } from "../sheet/model.js";
+import { explain, isFormulaError } from "../calc/errors.js";
+import { getCell, positionToA1, readSheetContent } from "../calc/model.js";
 import { renderSheet, updateSheet } from "../sheet/render.js";
-import { TableEngines, changeAffectsBook } from "../sheet/table-engine.js";
+import { TableEngines, changeAffectsBook } from "../references/table-engine.js";
 import { h } from "./dom.js";
 import { readSheetSelection } from "./selection.js";
 import { createPopoverHost } from "./popover.js";
@@ -128,7 +128,7 @@ export function createSheetEditor(workspace, pageId, options = {}) {
     justDragged: false
   };
 
-  /** @returns {import("../sheet/model.js").SheetContent} */
+  /** @returns {import("../calc/model.js").SheetContent} */
   function content() {
     return pageExists(workspace, pageId)
       ? readSheetContent(pageContent(workspace, pageId), pageId)

@@ -31,7 +31,8 @@ Principles, module layout, key types and the decisions that depart from the spec
 src/
   core/          stable IDs, event emitter, error types (WorkspaceFormatError, CommandError), `reconcile.js` (keyed child sync)
   workspace/     schema, validation, migrations, store, history, selectors, change sets, built-in commands, import/export
-  sheet/         formula engine and the table model/commands/render
+  calc/          formula language and engine, table value model (knows nothing of pages)
+  sheet/         sheet commands, cell/row/column shifting, fill, render
   document/      block model, block commands, DOM renderer
   presentation/  slide model, layouts, commands, geometry, animation/slideshow logic, renderer
   references/    scope, sections, reference commands, detached store, fit rule, cross-table rewrites
@@ -44,8 +45,8 @@ index.html      dev/build shell; vite-plugin-singlefile bundles it into one HTML
 tests/           vitest suites, named after the module they cover
 ```
 
-Layering: `core` <- `workspace` <- `sheet | document | presentation` <- `references` <- `domain`
-<- `app` <- `main`; `persistence` sits beside `app` (it needs only `core`, `workspace`, `domain`) and
+Layering: `core` <- `workspace` <- `calc | document | presentation` <- `references` <- `sheet`
+<- `domain` <- `app` <- `main`; `persistence` sits beside `app` (it needs only `core`, `workspace`, `domain`) and
 is wired to it by `main`. `workspace` and `core` import nothing from the features. A bare `Workspace`
 registers only the workspace commands and checks only the envelope; `domain/index.js` is the one
 place that wires the rest: `installDomain(workspace)` (idempotent) registers the document, sheet,
@@ -54,9 +55,10 @@ check; `createWorkspace`, `workspaceFromJSON` and `importWorkspaceJSON` return i
 workspaces. The app and tests build workspaces through `domain`. Pure logic (geometry, scope,
 fit, slideshow steps) is kept apart from DOM code so it is unit-tested without events.
 
-`tests/architecture.test.js` scans import specifiers and enforces the table above. One known
-exception: `sheet` and `references` depend on each other (formula retargeting and reference
-lookup are shared); the test pins exactly which sheet files may import `references`.
+`tests/architecture.test.js` scans import specifiers and enforces the table above. `calc` is what
+`sheet` and `references` share (tokenizer, parser, evaluator, recalculation graph, `refscan`, the
+table model); the workspace-wide engine (`references/table-engine.js`) lives with `references`,
+and `sheet` sits above it because its commands rewrite formulas across tables.
 
 Cross-cutting behaviour hangs off command registration, not hand lists:
 `registerCommand(type, handler, { hot, selfManaged, registry, inline })` records whether a command is `hot`
@@ -71,8 +73,8 @@ The governing sentence: **the model says what is true; the session says what the
 controllers translate intent into commands; views render those answers.** The rules below follow
 from it. "Enforced" names what fails when a rule is broken; unenforced rules are review items.
 
-1. **Dependency direction.** `core` <- `workspace` <- `sheet | document | presentation` <-
-   `references` <- `domain` <- `app`, with `persistence` beside `app`. Lower layers never import
+1. **Dependency direction.** `core` <- `workspace` <- `calc | document | presentation` <-
+   `references` <- `sheet` <- `domain` <- `app`, with `persistence` beside `app`. Lower layers never import
    upward. Enforced: `tests/architecture.test.js`.
 2. **The model says what is true.** State that must survive a reload or an undo lives in the
    workspace and changes only through commands. A command validates its payload, returns the ids it
@@ -121,7 +123,6 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
 Known departures from the rules. Remove an entry when it is fixed; add one rather than hiding a
 breach.
 
-- `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
 - The reference views redraw their table, slide and expression bodies on every host pass; only nested editors are cached (rule 7). The inspector and the animation timeline are keyed.
 - Class names are global. Styles are split per area and nested, but not scoped, so two areas can
   still collide on a class name (rule 12).
@@ -146,7 +147,7 @@ JSDoc typedefs document the shapes.
 - **History** (`workspace/history.js`): per-transaction whole-state snapshots (one clone per
   commit, none for undo/redo), same-key coalescing, a 200-entry cap and a saved revision that
   drives `dirty`. Inverse patches stay a possible upgrade when data volumes demand it.
-- **Formula engine** (`sheet/`): `tokenize` -> `parseFormula` (AST) -> `evaluate` in a
+- **Formula engine** (`calc/`): `tokenize` -> `parseFormula` (AST) -> `evaluate` in a
   context; `RecalcEngine` owns the dependency graph. See `formulas.md`.
 - **Document content**: `{ blockOrder, blocks, sections }`; rich text is a list of inline
   runs. **Sheet content**: sparse tables. **Presentation content**: `{ size, slideOrder, slides }`.
@@ -159,8 +160,8 @@ JSDoc typedefs document the shapes.
   the engine. References are interpreted as written (`A1` in any cell means row 1,
   column 1); `$` markers are preserved for fill/copy.
 - Circular references use `#CIRC!`, a documented extension since Excel and Sheets
-  disagree. Centralised in `sheet/errors.js`.
+  disagree. Centralised in `calc/errors.js`.
 - Range dependencies are tracked as rectangles and resolved by containment during dirty
   propagation (O(formulas) per change). An interval index is the planned optimisation.
 - The sheet model is 0-based; `RecalcEngine` positions are 1-based (`A1` = `"1,1"`). The
-  conversion lives only in `sheet/table-engine.js`.
+  conversion lives only in `references/table-engine.js`.
