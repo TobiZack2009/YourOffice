@@ -120,7 +120,7 @@ stacked (`.reference-slides`) and never flows inline.
 - Cycle errors carry no path detail; cell-formula to section cycles rely on the evaluator depth
   guard.
 - The shared engine rebuilds the whole workspace per refresh.
-- A host that draws references re-examines all of them on every change to any page: bodies are rebuilt and compared, not skipped, because a reference can depend on other pages through formulas and nested embeds and no dependency set is tracked.
+- Everything that draws references (document frames, slide reference objects, strip thumbnails) re-examines all of them on every change to any page: drawings are rebuilt and compared, not skipped, because a reference can depend on other pages through formulas, nested embeds and name shadowing and no dependency set is tracked. Nodes keep their identity when nothing changed.
 - Arrow navigation in a document host skips embed blocks.
 - An inline embed's inline/break choice reads `clientWidth` at render time (0 when unmounted,
   so tables and slides break until re-rendered).

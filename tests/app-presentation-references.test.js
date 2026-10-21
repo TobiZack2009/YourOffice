@@ -153,6 +153,38 @@ describe("inline references in slide text", () => {
   });
 });
 
+describe("drawing references keeps nodes", () => {
+  it("keeps the reference object's element and the thumbnail when only another page changed", () => {
+    const { ws, notes, editor, slide } = setup();
+    editor.insertEmbed(document.body);
+    pick("sec_one");
+    const [object] = Object.values(slide().objects);
+    const objectEl = () => editor.element.querySelector(`.stage .slide-object[data-object-id="${object.id}"]`);
+    const thumbEl = () => editor.element.querySelector(".slide-thumb");
+    const drawn = objectEl();
+    const thumb = thumbEl();
+    ws.dispatch("insertBlock", { pageId: notes, newBlockId: "b9", block: { type: "paragraph", runs: [{ text: "Below the section" }] } });
+    expect(objectEl()).toBe(drawn);
+    expect(thumbEl()).toBe(thumb);
+  });
+
+  it("redraws the object and the thumbnail when the source text changes", () => {
+    const { ws, notes, editor, slide } = setup();
+    editor.insertEmbed(document.body);
+    pick("sec_one");
+    const [object] = Object.values(slide().objects);
+    const objectEl = () => editor.element.querySelector(`.stage .slide-object[data-object-id="${object.id}"]`);
+    const thumbEl = () => editor.element.querySelector(".slide-thumb");
+    const drawn = objectEl();
+    const thumb = thumbEl();
+    ws.dispatch("setBlockRuns", { pageId: notes, blockId: "b1", runs: [{ text: "Changed" }] });
+    expect(objectEl()).not.toBe(drawn);
+    expect(objectEl().textContent).toContain("Changed");
+    expect(thumbEl()).not.toBe(thumb);
+    expect(thumbEl().textContent).toContain("Changed");
+  });
+});
+
 describe("ribbon", () => {
   it("offers Embed and Expression in the presentation Insert tab", () => {
     const insert = getTabs("presentation").find((tab) => tab.id === "insert");

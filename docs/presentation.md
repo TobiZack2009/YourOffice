@@ -67,8 +67,10 @@ forwarded through the kernel, so a module takes what it needs at creation.
 - Rendering is keyed. The strip caches a thumbnail per slide id and the stage keeps its `.stage`
   and slide element while the slide, scale and size are unchanged; objects are keyed by
   `data-object-id` with a signature of their data, so only a changed object gets a new element.
-  Reference objects and objects with inline references are redrawn on every pass, and an object
-  whose element was swapped for a gesture preview or the text editor is drawn again.
+  Reference objects, objects with inline references and thumbnails that draw them read other
+  pages, so they are drawn each pass but keep their element (or the thumbnail's picture) when the
+  new drawing is `isEqualNode` to it. An object whose element was swapped for a gesture preview
+  or the text editor is drawn again.
 - Text edits in place (double-click, F2/Enter, or typing) through a `contenteditable`
   committed with `setObjectRuns`; marks and links share `app/marks.js`.
 - Multi-selection supports move, delete, duplicate, arrange and X/Y; resize and rotate

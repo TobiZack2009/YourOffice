@@ -51,7 +51,7 @@ out of place. The sidebar caches a row per page id (rebuilt when its title, type
 collapsed or editing state changes; selection and depth are patched), the ribbon builds its
 controls once per page type and tab and then only `update()`s state, and the slide strip caches a
 thumbnail per slide id (patching number, `data-index`, current/selected). A thumbnail that draws
-references is redrawn on every pass because it reads other pages. The inspector already syncs
+references is drawn each pass because it reads other pages, and its picture is kept when equal. The inspector already syncs
 values into existing inputs, and the animation timeline keeps its own focus handling.
 
 `options.persistence` (an autosave handle, injected by `boot.js`) changes what the dirty dot

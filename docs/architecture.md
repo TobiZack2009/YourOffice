@@ -96,7 +96,8 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
    -> each editor patches itself. Nothing re-renders directly after a dispatch. Cross-cutting
    behaviour (`hot`, `selfManaged`, `registry`, `inline`) is registration metadata, not a hand list.
 7. **Keyed rendering.** View caches are keyed by id and carry a signature. A view that reads other
-   pages (references, expressions) has a null signature and is redrawn every pass. An element the
+   pages (references, expressions) is drawn every pass and swapped in only when the new drawing
+   differs (`isEqualNode`), so unchanged nodes keep their identity. An element the
    user owns (focused and equal to the model, or composing) is never replaced. An inline commit
    marks its blocks stale so undo redraws them. Every new keyed view ships a node-identity test.
 8. **Lifecycle.** Document listeners and timers go through a gesture scope or a `destroy`. UI
@@ -125,7 +126,6 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
 Known departures from the rules. Remove an entry when it is fixed; add one rather than hiding a
 breach.
 
-- Reference frames are keyed and patched in place, but a host that draws references still rebuilds and compares every body on any page change (no dependency set per reference), and reference objects on slides and slide-strip thumbnails that draw references are still redrawn each pass (rule 7).
 - Class names are global and unprefixed. The architecture test makes every class belong to one
   stylesheet, so a second area cannot silently redefine it, but a descendant selector in one area can
   still match a same-named element from another (rule 12).

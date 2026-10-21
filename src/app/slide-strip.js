@@ -146,24 +146,45 @@ export function createSlideStrip(options) {
    * One cached thumbnail per slide: the wrap, the add gap after it, and what they were drawn
    * from. A slide whose data did not change keeps its nodes; only position-dependent text and
    * the current/selected marks are patched.
-   * @type {Map<string, { signature: string | null, wrap: HTMLElement, gap: HTMLElement, number: HTMLElement, add: HTMLElement, index: number }>}
+   * @type {Map<string, { signature: string | null, thumb: HTMLElement, wrap: HTMLElement, gap: HTMLElement, number: HTMLElement, add: HTMLElement, index: number }>}
    */
   const views = new Map();
 
   /**
-   * What a thumbnail's content depends on, or null when it draws references (it reads other
-   * pages, so it is redrawn on every pass).
+   * What a thumbnail's chrome and content depend on in the slide itself.
    * @param {import("../presentation/model.js").Slide} slide
    * @param {{ width: number, height: number }} size
    * @param {number} count Places that read the slide.
    */
   function signatureOf(slide, size, count) {
-    for (const id of slide.objectOrder) {
-      const object = slide.objects[id];
-      if (!object) continue;
-      if (object.type === "reference" || (object.text?.runs ?? []).some((run) => run.ref)) return null;
-    }
     return JSON.stringify([slide, size, count, Boolean(options.onHandle)]);
+  }
+
+  /**
+   * Whether the thumbnail draws references: it then also reads other pages, so the slide's own
+   * data does not say whether the picture changed.
+   * @param {import("../presentation/model.js").Slide} slide
+   */
+  function drawsReferences(slide) {
+    return slide.objectOrder.some((id) => {
+      const object = slide.objects[id];
+      return Boolean(object) && (object.type === "reference" || (object.text?.runs ?? []).some((run) => run.ref));
+    });
+  }
+
+  /**
+   * The picture of a slide.
+   * @param {import("../presentation/model.js").Slide} slide
+   * @param {import("../presentation/model.js").PresentationContent} content
+   * @returns {HTMLElement}
+   */
+  function buildThumb(slide, content) {
+    const scale = THUMB_WIDTH / content.size.width;
+    const thumb = h("div", { class: "slide-thumb" });
+    thumb.style.width = `${THUMB_WIDTH}px`;
+    thumb.style.height = `${Math.round(content.size.height * scale)}px`;
+    thumb.append(renderSlide(slide, { size: content.size, scale, ...options.slideHooks?.() }));
+    return thumb;
   }
 
   /**
@@ -173,11 +194,7 @@ export function createSlideStrip(options) {
    */
   function buildView(slide, content, count) {
     const slideId = slide.id;
-    const scale = THUMB_WIDTH / content.size.width;
-    const thumb = h("div", { class: "slide-thumb" });
-    thumb.style.width = `${THUMB_WIDTH}px`;
-    thumb.style.height = `${Math.round(content.size.height * scale)}px`;
-    thumb.append(renderSlide(slide, { size: content.size, scale, ...options.slideHooks?.() }));
+    const thumb = buildThumb(slide, content);
 
     const number = h("span", { class: "slide-number" });
     const wrap = h("div", { class: "slide-thumb-wrap", draggable: "true", "data-slide-id": slideId, role: "button" }, [number, thumb]);
@@ -257,7 +274,7 @@ export function createSlideStrip(options) {
     });
 
     const add = h("button", { class: "slide-add", type: "button", "data-action": "add-slide-after", title: "New slide here" }, [icon("plus", { size: 12 })]);
-    const view = { signature: null, wrap, gap: h("div", { class: "slide-add-gap" }, [add]), number, add, index: 0 };
+    const view = { signature: null, thumb, wrap, gap: h("div", { class: "slide-add-gap" }, [add]), number, add, index: 0 };
     add.addEventListener("click", () => options.onCreate({ index: view.index + 1 }));
     return view;
   }
@@ -277,11 +294,17 @@ export function createSlideStrip(options) {
       const count = options.onHandle ? options.referenceCount?.(slideId) ?? 0 : 0;
       const signature = signatureOf(slide, content.size, count);
       let view = views.get(slideId);
-      if (!view || signature === null || view.signature !== signature) {
+      if (!view || view.signature !== signature) {
         const fresh = buildView(slide, content, count);
         fresh.signature = signature;
         views.set(slideId, fresh);
         view = fresh;
+      } else if (drawsReferences(slide)) {
+        const thumb = buildThumb(slide, content);
+        if (!view.thumb.isEqualNode(thumb)) {
+          view.thumb.replaceWith(thumb);
+          view.thumb = thumb;
+        }
       }
       seen.add(slideId);
       view.index = index;

@@ -49,21 +49,20 @@ export function createPresentationStage(ed) {
   }
 
   /**
-   * What an object's drawn element depends on, or null when it also reads other pages (a
-   * reference, an inline reference) and so must be redrawn on every pass.
+   * Whether an object's drawn element also reads other pages (a reference, an inline
+   * reference), so its own data does not say whether it changed.
    * @param {SlideObject} object
-   * @returns {string | null}
+   * @returns {boolean}
    */
-  function objectSignature(object) {
-    if (object.type === "reference") return null;
-    if ((object.text?.runs ?? []).some((run) => run.ref)) return null;
-    return JSON.stringify(object);
+  function readsOtherPages(object) {
+    return object.type === "reference" || (object.text?.runs ?? []).some((run) => run.ref);
   }
 
   /**
    * Make the slide element hold the slide's objects in order. An object whose data is unchanged
    * keeps its element (the same node across a change); one that changed, or whose element was
-   * swapped for a preview or the text editor, is drawn again.
+   * swapped for a preview or the text editor, is drawn again. One that reads other pages is drawn
+   * each pass but keeps its element when the new drawing is equal to it.
    * @param {Slide} slide
    * @param {HTMLElement} target
    */
@@ -75,10 +74,16 @@ export function createPresentationStage(ed) {
     for (const id of slide.objectOrder) {
       const object = slide.objects[id];
       if (!object) continue;
-      const signature = objectSignature(object);
+      const signature = JSON.stringify(object);
       const view = objectViews.get(id);
-      const kept = view && signature !== null && view.signature === signature && objectEls.get(id) === view.el;
-      const el = kept ? view.el : renderObject(object, { interactive: true, ...hooks });
+      const kept = view && view.signature === signature && objectEls.get(id) === view.el;
+      let el;
+      if (kept && !readsOtherPages(object)) {
+        el = view.el;
+      } else {
+        const fresh = renderObject(object, { interactive: true, ...hooks });
+        el = kept && view.el.isEqualNode(fresh) ? view.el : fresh;
+      }
       objectViews.set(id, { signature, el });
       objectEls.set(id, el);
       nodes.push(el);
@@ -334,5 +339,5 @@ export function createPresentationStage(ed) {
     objectEls.set(id, fresh);
   }
 
-  return { computeScale, objectSignature, syncObjects, renderStage, measureAutoHeights, selectionBox, renderAnimationOverlay, renderOverlay, clearPreview, previewObject };
+  return { computeScale, syncObjects, renderStage, measureAutoHeights, selectionBox, renderAnimationOverlay, renderOverlay, clearPreview, previewObject };
 }
