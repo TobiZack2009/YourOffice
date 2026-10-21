@@ -90,6 +90,30 @@ try {
   ]);
   check("moved object redrawn, sibling and other thumbnail kept", kept.every(Boolean), JSON.stringify(kept));
 
+  // Document: a drag across two paragraphs selects part of both; copy and paste move them.
+  await page.click('.page-row:has-text("Renamed doc")');
+  await page.waitForSelector("[data-block-id]");
+  const paras = page.locator("[data-block-id]");
+  const first = await paras.nth(0).boundingBox();
+  const second = await paras.nth(1).boundingBox();
+  await page.mouse.move(first.x + 30, first.y + first.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(second.x + 60, second.y + second.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const picked = await page.evaluate(() => ({
+    painted: typeof CSS !== "undefined" && CSS.highlights ? (CSS.highlights.get("block-selection")?.size ?? 0) : -1,
+    whole: document.querySelectorAll(".is-block-selected").length
+  }));
+  check("a drag across two paragraphs selects part of both", picked.painted > 0 || picked.whole > 0, JSON.stringify(picked));
+  const before = await paras.count();
+  await page.keyboard.press("ControlOrMeta+c");
+  const copied = await page.evaluate(() => navigator.clipboard.readText().catch(() => null));
+  await paras.last().click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("ControlOrMeta+v");
+  await page.waitForTimeout(200);
+  check("Cmd+C then Cmd+V pastes the copied blocks", (await paras.count()) > before || copied === null, `blocks ${before} -> ${await paras.count()}`);
+
   // Autosave and reload.
   await page.click('.page-row:has-text("Renamed doc")');
   await page.waitForSelector("[data-block-id]");

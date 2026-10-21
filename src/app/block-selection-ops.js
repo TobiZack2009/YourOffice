@@ -4,6 +4,7 @@
  */
 
 import { createId } from "../core/ids.js";
+import { splitRunsAt } from "./block-runs.js";
 import { mergeRuns } from "./inline.js";
 
 const RUN_TYPES = new Set(["paragraph", "heading", "quote"]);
@@ -16,21 +17,85 @@ export function createBlockSelectionOps(ed) {
   const { workspace, nested, pageId, dispatch, render, order, blockOf, locateItem, parseKey, unitKey, unitKeys, unitElement } = ed;
   const { editableOfUnit, focusKey, keyOfBlock, selectedKeys, setBlockSelection, notifyActiveChange } = ed;
 
-  /** Delete every selected unit as one undoable step. */
+  /** @param {string} key @returns {InlineRun[]} The text of a unit as runs (code text is one plain run). */
+  function runsOfKey(key) {
+    const { blockId, itemId } = parseKey(key);
+    if (itemId) return locateItem(itemId)?.item.runs ?? [];
+    const block = blockOf(blockId);
+    if (block?.type === "code") return block.text ? [{ text: block.text }] : [];
+    return block?.runs ?? [];
+  }
+
+  /**
+   * Replace the text of one unit.
+   * @param {string} key
+   * @param {InlineRun[]} runs
+   */
+  function setRunsOfKey(key, runs) {
+    const { blockId, itemId } = parseKey(key);
+    if (itemId) {
+      const hit = locateItem(itemId);
+      if (!hit) return;
+      const items = (hit.block.items ?? []).map((item) => (item.id === itemId ? { ...item, runs } : item));
+      dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
+    } else if (blockOf(blockId)?.type === "code") {
+      dispatch("updateBlock", { pageId, blockId, patch: { text: runs.map((run) => run.text).join("") } });
+    } else {
+      dispatch("setBlockRuns", { pageId, blockId, runs });
+    }
+  }
+
+  /**
+   * Delete what the selection covers as one undoable step: whole units go, and the two end
+   * units are trimmed (and joined when both are partial text).
+   * @returns {{ key: string, offset: number } | null} Where the caret belongs afterwards, if text remains there.
+   */
   function deleteSelection() {
-    const keys = selectedKeys();
-    if (keys.length === 0) return;
+    const covered = ed.unitSelection.spans();
+    if (covered.length === 0) return null;
+    const first = covered[0];
+    const last = covered[covered.length - 1];
     const all = unitKeys();
-    const before = all.slice(0, all.indexOf(keys[0])).reverse();
-    const after = all.slice(all.indexOf(keys[keys.length - 1]) + 1);
+    const before = all.slice(0, all.indexOf(first.key)).reverse();
+    const after = all.slice(all.indexOf(last.key) + 1);
     const fallbackId = createId("block");
+    const single = covered.length === 1;
+    const join = !single && !first.whole && !last.whole && ![first, last].some((span) => blockOf(parseKey(span.key).blockId)?.type === "code");
+    const doomed = covered.filter((span) => span.whole).map((span) => span.key);
+    if (join) doomed.push(last.key);
+    /** @type {{ key: string, offset: number } | null} */
+    let caret = null;
 
     workspace.transact("delete selection", () => {
+      if (single && !first.whole) {
+        const runs = runsOfKey(first.key);
+        const left = splitRunsAt(runs, first.start).left;
+        const right = splitRunsAt(runs, first.end).right;
+        setRunsOfKey(first.key, mergeRuns([...left, ...right]));
+        caret = { key: first.key, offset: first.start };
+        return;
+      }
+      if (join) {
+        const left = splitRunsAt(runsOfKey(first.key), first.start).left;
+        const right = splitRunsAt(runsOfKey(last.key), last.end).right;
+        setRunsOfKey(first.key, mergeRuns([...left, ...right]));
+        caret = { key: first.key, offset: first.start };
+      } else {
+        if (!first.whole) {
+          setRunsOfKey(first.key, splitRunsAt(runsOfKey(first.key), first.start).left);
+          caret = { key: first.key, offset: first.start };
+        }
+        if (!last.whole) {
+          setRunsOfKey(last.key, splitRunsAt(runsOfKey(last.key), last.end).right);
+          caret ??= { key: last.key, offset: 0 };
+        }
+      }
+      const keys = doomed;
       if (nested) {
         // An embed must keep a block to type in: add one after the run before it empties.
-        const doomed = new Set(keys.filter((key) => !parseKey(key).itemId).map((key) => parseKey(key).blockId));
+        const gone = new Set(keys.filter((key) => !parseKey(key).itemId).map((key) => parseKey(key).blockId));
         const run = order();
-        if (run.length > 0 && run.every((id) => doomed.has(id))) {
+        if (run.length > 0 && run.every((id) => gone.has(id))) {
           dispatch("insertBlock", {
             pageId,
             block: { type: "paragraph" },
@@ -63,11 +128,13 @@ export function createBlockSelectionOps(ed) {
 
     ed.dropSelection();
     render();
+    if (caret && focusKey(caret.key, caret.offset)) return caret;
     const target = [...before, ...after].find((key) => editableOfUnit(unitElement(key)));
     if (!(target && focusKey(target, before.includes(target) ? "end" : "start"))) {
       const first = unitKeys().find((key) => editableOfUnit(unitElement(key)));
       if (first) focusKey(first, "start");
     }
+    return null;
   }
 
   /**
@@ -131,21 +198,33 @@ export function createBlockSelectionOps(ed) {
    * @returns {boolean}
    */
   function transformSelectedRuns(label, plan) {
-    const targets = selectedKeys()
-      .map((key) => {
-        const { blockId, itemId } = parseKey(key);
+    const targets = ed.unitSelection
+      .spans()
+      .map((span) => {
+        const { blockId, itemId } = parseKey(span.key);
         const block = blockOf(blockId);
         if (!block) return null;
         if (itemId) {
           const hit = locateItem(itemId);
-          return hit ? { blockId: hit.block.id, itemId, runs: hit.item.runs ?? [] } : null;
+          return hit ? { blockId: hit.block.id, itemId, runs: hit.item.runs ?? [], span } : null;
         }
-        return RUN_TYPES.has(block.type) ? { blockId, itemId: null, runs: block.runs ?? [] } : null;
+        return RUN_TYPES.has(block.type) ? { blockId, itemId: null, runs: block.runs ?? [], span } : null;
       })
       .filter((target) => target !== null);
-    const allRuns = targets.flatMap((target) => target.runs);
+    /** The part of a unit's runs the selection covers, split from what it leaves. */
+    const parts = (/** @type {InlineRun[]} */ runs, /** @type {{ start: number, end: number, whole: boolean }} */ span) => {
+      if (span.whole) return { head: [], body: runs, tail: [] };
+      const { left: head, right } = splitRunsAt(runs, span.start);
+      const { left: body, right: tail } = splitRunsAt(right, span.end - span.start);
+      return { head, body, tail };
+    };
+    const allRuns = targets.flatMap((target) => parts(target.runs, target.span).body);
     if (allRuns.length === 0) return false;
     const restyle = plan(allRuns);
+    const rewrite = (/** @type {InlineRun[]} */ runs, /** @type {typeof targets[number]["span"]} */ span) => {
+      const { head, body, tail } = parts(runs, span);
+      return mergeRuns([...head, ...restyle(body), ...tail]);
+    };
 
     workspace.transact(label, () => {
       for (const target of targets) {
@@ -153,7 +232,7 @@ export function createBlockSelectionOps(ed) {
           const hit = locateItem(target.itemId);
           if (!hit) continue;
           const items = (hit.block.items ?? []).map((item) =>
-            item.id === target.itemId ? { ...item, runs: restyle(item.runs ?? []) } : item
+            item.id === target.itemId ? { ...item, runs: rewrite(item.runs ?? [], target.span) } : item
           );
           dispatch("updateBlock", { pageId, blockId: hit.block.id, patch: { items } });
         } else {
@@ -162,7 +241,7 @@ export function createBlockSelectionOps(ed) {
             dispatch("setBlockRuns", {
               pageId,
               blockId: target.blockId,
-              runs: restyle(block.runs ?? [])
+              runs: rewrite(block.runs ?? [], target.span)
             });
           }
         }

@@ -5,7 +5,7 @@
  * State shared with the editor arrives through the `ed` kernel.
  */
 
-import { editableFrom, selectionOffsets } from "./block-caret.js";
+import { editableFrom, offsetAtPoint, placeCaret, pointAtOffset, selectionOffsets } from "./block-caret.js";
 import { modelLength } from "./inline.js";
 import { normalizeLinkUrl, pageIdOfLink } from "./link-form.js";
 import { pageExists } from "../workspace/selectors.js";
@@ -23,6 +23,19 @@ export function attachBlockEvents(ed, parts) {
 
   /** @type {string | null} Unit where the current mouse drag began. */
   let dragAnchor = null;
+  /** @type {number | null} Text offset in that unit where the press landed (null when unknown). */
+  let dragOffset = null;
+
+  /**
+   * Where a screen point falls in a unit's text.
+   * @param {string} key
+   * @param {MouseEvent} pointer
+   * @returns {number | undefined} undefined for a unit without text or when the browser cannot tell.
+   */
+  function offsetIn(key, pointer) {
+    const el = ed.editableOfUnit(unitElement(key));
+    return (el && offsetAtPoint(el, pointer.clientX, pointer.clientY)) ?? undefined;
+  }
 
   element.addEventListener("focusin", (event) => {
     if (owns(/** @type {Node} */ (event.target))) setActiveFromNode(/** @type {Node} */ (event.target));
@@ -48,11 +61,16 @@ export function attachBlockEvents(ed, parts) {
     const activeKey = ed.activeBlockId() ? unitKey(ed.activeBlockId(), ed.activeItemId()) : null;
     if (pointer.shiftKey && key && activeKey && key !== activeKey && unitElement(activeKey)) {
       pointer.preventDefault();
-      setBlockSelection(activeKey, key);
+      const activeEl = ed.editableOfUnit(unitElement(activeKey));
+      setBlockSelection(activeKey, key, {
+        anchorOffset: activeEl ? selectionOffsets(activeEl).start : undefined,
+        focusOffset: offsetIn(key, pointer)
+      });
       return;
     }
 
     dragAnchor = key;
+    dragOffset = key ? (offsetIn(key, pointer) ?? null) : null;
     setActiveFromNode(/** @type {Node} */ (pointer.target));
   });
 
@@ -94,12 +112,29 @@ export function attachBlockEvents(ed, parts) {
     if (!dragAnchor || !(pointer.buttons & 1) || !owns(/** @type {Node} */ (pointer.target))) return;
     const key = unitKeyFrom(/** @type {Node} */ (pointer.target));
     if (!key) return;
-    if (!ed.sel() && key === dragAnchor) return;
-    setBlockSelection(dragAnchor, key);
+    const current = ed.sel();
+    if (!current && key === dragAnchor) return;
+    const anchorOffset = dragOffset ?? undefined;
+    if (key === dragAnchor) {
+      // Back in the unit where the drag began: it is one text selection again.
+      const el = ed.editableOfUnit(unitElement(key));
+      const to = offsetIn(key, pointer);
+      if (!el || to === undefined || anchorOffset === undefined) return;
+      clearBlockSelection();
+      placeCaret(el, anchorOffset);
+      const from = pointAtOffset(el, anchorOffset);
+      const end = pointAtOffset(el, to);
+      if (from && end) el.ownerDocument.getSelection()?.setBaseAndExtent(from.container, from.offset, end.container, end.offset);
+      return;
+    }
+    const focusOffset = offsetIn(key, pointer);
+    if (current && current.focus === key && current.anchor === dragAnchor && current.focusOffset === focusOffset) return;
+    setBlockSelection(dragAnchor, key, { anchorOffset, focusOffset });
   });
 
   const onMouseUp = () => {
     dragAnchor = null;
+    dragOffset = null;
   };
   gestures.listen("mouseup", onMouseUp);
 
@@ -150,6 +185,10 @@ export function attachBlockEvents(ed, parts) {
         const to = next ?? ed.sel().focus;
         setBlockSelection(to, to);
       }
+    } else if (key.length === 1 && !mod && !keyboard.altKey && ed.unitSelection.spans().some((/** @type {{ whole: boolean }} */ span) => !span.whole)) {
+      // Typing over a selection that cuts into text replaces the selected range.
+      keyboard.preventDefault();
+      if (deleteSelection()) element.ownerDocument.execCommand?.("insertText", false, key);
     } else if (mod && !keyboard.altKey) {
       const lower = key.toLowerCase();
       if (lower === "a") {

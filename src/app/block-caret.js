@@ -24,33 +24,68 @@ export function editableFrom(node) {
 }
 
 /**
+ * A DOM position as a character offset in an element, counting an inline reference as one.
+ * @param {Element} element
+ * @param {Node} container
+ * @param {number} offset
+ * @returns {number}
+ */
+export function offsetInElement(element, container, offset) {
+  const length = modelLength(element);
+  if (!element.contains(container)) return length;
+  const probe = element.ownerDocument.createRange();
+  probe.selectNodeContents(element);
+  try {
+    probe.setEnd(container, offset);
+  } catch {
+    return length;
+  }
+  return modelLength(probe.cloneContents());
+}
+
+/**
  * Start and end of the current selection as character offsets in an element.
  * @param {Element} element
  * @returns {{ start: number, end: number }}
  */
 export function selectionOffsets(element) {
-  const doc = element.ownerDocument;
   const length = modelLength(element);
-  const selection = doc.getSelection?.();
+  const selection = element.ownerDocument.getSelection?.();
   if (!selection || selection.rangeCount === 0) return { start: length, end: length };
   const range = selection.getRangeAt(0);
   if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) {
     return { start: length, end: length };
   }
-  const measure = (container, offset) => {
-    const probe = doc.createRange();
-    probe.selectNodeContents(element);
-    try {
-      probe.setEnd(container, offset);
-    } catch {
-      return length;
-    }
-    return modelLength(probe.cloneContents());
-  };
   return {
-    start: measure(range.startContainer, range.startOffset),
-    end: measure(range.endContainer, range.endOffset)
+    start: offsetInElement(element, range.startContainer, range.startOffset),
+    end: offsetInElement(element, range.endContainer, range.endOffset)
   };
+}
+
+/**
+ * The text offset in an editable that a screen point lands on, or null when the browser cannot
+ * say (no caret-from-point support). A point outside the text snaps to the nearer end by height.
+ * @param {HTMLElement} editable
+ * @param {number} x
+ * @param {number} y
+ * @returns {number | null}
+ */
+export function offsetAtPoint(editable, x, y) {
+  const doc = editable.ownerDocument;
+  /** @type {{ node: Node, offset: number } | null} */
+  let caret = null;
+  if (typeof doc.caretPositionFromPoint === "function") {
+    const position = doc.caretPositionFromPoint(x, y);
+    if (position) caret = { node: position.offsetNode, offset: position.offset };
+  } else if (typeof doc.caretRangeFromPoint === "function") {
+    const range = doc.caretRangeFromPoint(x, y);
+    if (range) caret = { node: range.startContainer, offset: range.startOffset };
+  } else {
+    return null;
+  }
+  if (caret && editable.contains(caret.node)) return offsetInElement(editable, caret.node, caret.offset);
+  const rect = editable.getBoundingClientRect();
+  return y < rect.top + rect.height / 2 ? 0 : modelLength(editable);
 }
 
 /**

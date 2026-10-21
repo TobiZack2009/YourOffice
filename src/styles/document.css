@@ -86,6 +86,11 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
   }
 
+  /* Part of a text unit inside a block selection (CSS Custom Highlight API). */
+  & ::highlight(block-selection) {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+
   &.is-block-selecting {
     user-select: none;
     -webkit-user-select: none;

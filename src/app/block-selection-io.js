@@ -17,7 +17,14 @@ export function createBlockSelectionIo(ed) {
    * @returns {import("./selection.js").DocumentSelection | null}
    */
   function captureSelection() {
-    if (ed.sel()) return { type: "units", anchor: ed.sel().anchor, focus: ed.sel().focus };
+    if (ed.sel()) {
+      const { anchor, focus, anchorOffset, focusOffset } = ed.sel();
+      /** @type {import("./selection.js").DocumentSelection} */
+      const units = { type: "units", anchor, focus };
+      if (anchorOffset !== undefined) units.anchorOffset = anchorOffset;
+      if (focusOffset !== undefined) units.focusOffset = focusOffset;
+      return units;
+    }
     const range = element.ownerDocument.getSelection?.()?.rangeCount
       ? element.ownerDocument.getSelection()?.getRangeAt(0)
       : null;
@@ -51,7 +58,7 @@ export function createBlockSelectionIo(ed) {
     });
     if (!clamped) return false;
     if (clamped.type === "units") {
-      setBlockSelection(clamped.anchor, clamped.focus);
+      setBlockSelection(clamped.anchor, clamped.focus, { anchorOffset: clamped.anchorOffset, focusOffset: clamped.focusOffset });
       return true;
     }
     const el = findEditable(clamped.anchor.blockId, clamped.anchor.itemId ?? null);

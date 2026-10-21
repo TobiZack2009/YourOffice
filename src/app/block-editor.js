@@ -31,6 +31,8 @@ import { editableFrom, isEditable, placeCaret, selectionOffsets } from "./block-
 import { splitRunsAt } from "./block-runs.js";
 import { createNestedStore } from "./nested-store.js";
 import { createBlockSelectionOps } from "./block-selection-ops.js";
+import { createBlockClipboard } from "./block-clipboard.js";
+import { createUnitSelection } from "./block-unit-selection.js";
 import { attachBlockEvents } from "./block-input.js";
 import { createBlockToolbar } from "./block-toolbar.js";
 import { createBlockSelectionIo } from "./block-selection-io.js";
@@ -349,8 +351,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   function focusKey(key, where = "end") {
     const el = editableOfUnit(unitElement(key));
     if (!el) return false;
-    if (sel) {
-      sel = null;
+    if (sel()) {
+      unitSelection.drop();
       applySelection();
     }
     placeCaret(el, where);
@@ -368,65 +370,27 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   }
 
   // -- block (multi-unit) selection -------------------------------------------
+  // The state lives in block-unit-selection.js.
 
-  /** @type {{ anchor: string, focus: string } | null} */
-  let sel = null;
   /** Document-level listeners of this editor's drags; aborted on destroy. */
   const gestures = createGestureScope(element.ownerDocument);
-
-  /** @returns {string[]} Selected unit keys, in reading order. */
-  function selectedKeys() {
-    if (!sel) return [];
-    const keys = unitKeys();
-    const a = keys.indexOf(sel.anchor);
-    const f = keys.indexOf(sel.focus);
-    if (a === -1 || f === -1) return [];
-    return keys.slice(Math.min(a, f), Math.max(a, f) + 1);
-  }
-
-  function applySelection() {
-    for (const el of element.querySelectorAll(".is-block-selected")) {
-      el.classList.remove("is-block-selected");
-    }
-    const keys = selectedKeys();
-    if (keys.length === 0) sel = null;
-    element.classList.toggle("is-block-selecting", sel !== null);
-    for (const key of keys) unitElement(key)?.classList.add("is-block-selected");
-  }
-
-  /**
-   * Enter block-selection mode over the units between two keys.
-   * @param {string} anchor
-   * @param {string} focus
-   */
-  function setBlockSelection(anchor, focus) {
-    sel = { anchor, focus };
-    const doc = element.ownerDocument;
-    doc.getSelection?.()?.removeAllRanges();
-    const current = doc.activeElement;
-    if (current && current !== element && element.contains(current)) /** @type {HTMLElement} */ (current).blur();
-    element.focus({ preventScroll: true });
-    applySelection();
-    const { blockId, itemId } = parseKey(focus);
-    setActive(blockId, itemId);
-  }
-
-  function clearBlockSelection() {
-    if (!sel) return;
-    sel = null;
-    applySelection();
-    notifyActiveChange();
-  }
-
-  function selectAllUnits() {
-    const keys = unitKeys();
-    if (keys.length > 0) setBlockSelection(keys[0], keys[keys.length - 1]);
-  }
+  const unitSelection = createUnitSelection({
+    element,
+    unitKeys,
+    unitElement,
+    editableOfUnit,
+    parseKey,
+    setActive,
+    notifyActiveChange
+  });
+  const { selectedKeys, setBlockSelection, clearBlockSelection, selectAllUnits } = unitSelection;
+  const applySelection = unitSelection.apply;
+  const sel = () => unitSelection.get();
 
   // The operations live in block-selection-ops.js; these keep the names the rest of the editor uses.
-  /** Delete every selected unit as one undoable step. */
+  /** Delete what the selection covers as one undoable step; returns the caret left behind, if any. */
   function deleteSelection() {
-    selectionOps.deleteSelection();
+    return selectionOps.deleteSelection();
   }
   /** @param {{ type: string, level?: number, ordered?: boolean }} spec */
   function applyTypeToSelection(spec) {
@@ -495,7 +459,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   function toggleMark(mark) {
     const child = activeChild();
     if (child) return child.toggleMark(mark);
-    if (sel) return toggleMarkOnSelection(mark);
+    if (sel()) return toggleMarkOnSelection(mark);
     const el = activeEditable();
     if (!el) return false;
     const selection = el.ownerDocument.getSelection?.();
@@ -531,7 +495,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     hostWorkspace,
     options,
     popovers,
-    sel: () => sel,
+    sel,
+    unitSelection,
     findEditable,
     focusBlock,
     applyTypeToSelection,
@@ -549,9 +514,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     insertAtEnd,
     resetHandle: () => references.resetHandle(),
     blockHandle: () => blockHandle,
-    dropSelection: () => {
-      sel = null;
-    },
+    dropSelection: unitSelection.drop,
     workspace,
     dispatch,
     render,
@@ -599,6 +562,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   const view = createBlockView(ed);
   const toolbar = createBlockToolbar(ed);
   const selectionOps = createBlockSelectionOps(ed);
+  const clipboard = createBlockClipboard(ed, { selectionOps });
   const structure = createBlockStructure(ed);
   const links = createBlockLinks(ed);
 
@@ -671,6 +635,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
   // -- events ------------------------------------------------------------------
 
   attachBlockEvents(ed, { links });
+  clipboard.attach();
 
   // -- toolbar / external API --------------------------------------------------
 
@@ -731,7 +696,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   const references = createBlockReferences(ed);
   const blockHandle = references.blockHandle;
-  const contextMenu = createBlockContextMenu(ed, { links, references });
+  const contextMenu = createBlockContextMenu(ed, { links, references, clipboard });
 
   // -- logical selection (block-selection-io.js) ------------------------------
 
@@ -792,7 +757,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     openContextMenu: (point) => contextMenu.openContextMenu(point),
     insertEmbed: (anchor) => references.insertEmbed(anchor),
     insertExpression: (anchor) => references.insertExpression(anchor),
-    makeSection: () => references.makeSection(sel ? references.selectedTopLevel() : activeBlockId && blockOf(activeBlockId) ? [references.topLevelOf(activeBlockId)] : []),
+    makeSection: () => references.makeSection(sel() ? references.selectedTopLevel() : activeBlockId && blockOf(activeBlockId) ? [references.topLevelOf(activeBlockId)] : []),
     refreshExpressions: () => views.refreshExpressions(),
     captureSelection,
     restoreSelection,
@@ -806,6 +771,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       views.destroy();
       popovers.destroy();
       gestures.abort();
+      unitSelection.destroy();
     }
   };
 }

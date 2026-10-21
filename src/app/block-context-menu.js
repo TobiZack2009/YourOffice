@@ -9,10 +9,10 @@ import { buildMenu } from "./popover.js";
 
 /**
  * @param {any} ed Editor kernel (see `createDocumentEditor`).
- * @param {{ links: ReturnType<typeof import("./block-links.js").createBlockLinks>, references: ReturnType<typeof import("./block-references.js").createBlockReferences> }} parts
+ * @param {{ links: ReturnType<typeof import("./block-links.js").createBlockLinks>, references: ReturnType<typeof import("./block-references.js").createBlockReferences>, clipboard: ReturnType<typeof import("./block-clipboard.js").createBlockClipboard> }} parts
  */
 export function createBlockContextMenu(ed, parts) {
-  const { links, references } = parts;
+  const { links, references, clipboard } = parts;
   const { element, popovers, nested, owns, blockOf, unitKey, unitElement, unitKeyFrom, parseKey, selectedKeys } = ed;
   const { setBlockSelection, clearBlockSelection, deleteSelection, setActive, activeEditable, activeInfo } = ed;
   const { insertTextInCode, setActiveType, toggleMark, indent, outdent, insertAfterActive } = ed;
@@ -34,20 +34,17 @@ export function createBlockContextMenu(ed, parts) {
     return Boolean(selection && selection.rangeCount > 0 && !selection.getRangeAt(0).collapsed);
   }
 
-  /** @param {"copy" | "cut"} command */
-  function clipboardCommand(command) {
-    const doc = element.ownerDocument;
-    if (typeof doc.execCommand === "function") doc.execCommand(command);
-  }
-
-  /** Paste plain text from the system clipboard at the caret. */
+  /** Paste plain text from the system clipboard at the caret or over the selection. */
   async function pasteFromClipboard() {
     const text = await element.ownerDocument.defaultView?.navigator?.clipboard?.readText?.();
+    if (!text) return;
     const el = activeEditable();
-    if (!text || !el) return;
-    el.focus();
-    if (el.matches("code[data-block-id]")) insertTextInCode(el, text.replace(/\r\n?/g, "\n"));
-    else element.ownerDocument.execCommand?.("insertText", false, text.replace(/\s*\r?\n\s*/g, " "));
+    if (el?.matches("code[data-block-id]") && !ed.sel()) {
+      el.focus();
+      insertTextInCode(el, text.replace(/\r\n?/g, "\n"));
+      return;
+    }
+    clipboard.pasteText(text);
   }
 
   /** @param {{ x: number, y: number }} point */
@@ -74,9 +71,9 @@ export function createBlockContextMenu(ed, parts) {
 
     /** @type {import("./popover.js").MenuItem[]} */
     const items = [
-      item("Cut", "cut", "ctx-cut", () => clipboardCommand("cut"), { disabled: !hasTextSelection() }),
-      item("Copy", "copy", "ctx-copy", () => clipboardCommand("copy"), { disabled: !hasTextSelection() }),
-      item("Paste", "paste", "ctx-paste", () => void pasteFromClipboard(), { disabled: !info.blockId || Boolean(ed.sel()) }),
+      item("Cut", "cut", "ctx-cut", () => clipboard.cutSelection(), { disabled: !hasTextSelection() }),
+      item("Copy", "copy", "ctx-copy", () => clipboard.copySelection(), { disabled: !hasTextSelection() }),
+      item("Paste", "paste", "ctx-paste", () => void pasteFromClipboard(), { disabled: !info.blockId && !ed.sel() }),
       { separator: true },
       markItem("Bold", "bold"),
       markItem("Italic", "italic"),

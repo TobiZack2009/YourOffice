@@ -7,7 +7,8 @@
  * drops whatever no longer exists.
  *
  *   document      { type: "text", anchor: DocPoint, focus: DocPoint }   caret or range in one block/item
- *                 { type: "units", anchor: string, focus: string }      whole blocks/items, by unit key
+ *                 { type: "units", anchor: string, focus: string,       whole blocks/items, by unit key; the optional
+ *                   anchorOffset?, focusOffset? }                       offsets make the two end units partial
  *   sheet         { tableId, anchor: Position, focus: Position, others: Rect[] }
  *   presentation  { slideId, objectIds: string[] }
  *
@@ -16,7 +17,7 @@
  */
 
 /** @typedef {{ blockId: string, itemId?: string, offset: number }} DocPoint */
-/** @typedef {{ type: "text", anchor: DocPoint, focus: DocPoint } | { type: "units", anchor: string, focus: string }} DocumentSelection */
+/** @typedef {{ type: "text", anchor: DocPoint, focus: DocPoint } | { type: "units", anchor: string, focus: string, anchorOffset?: number, focusOffset?: number }} DocumentSelection */
 /** @typedef {{ col: number, row: number }} Position */
 /** @typedef {{ start: Position, end: Position }} Rect */
 /** @typedef {{ tableId: string, anchor: Position, focus: Position, others: Rect[] }} SheetSelection */
@@ -44,6 +45,12 @@ function isDocPoint(value) {
   );
 }
 
+/** @param {string} key @returns {{ blockId: string, itemId: string | null }} */
+function splitKey(key) {
+  const at = key.indexOf(":");
+  return at === -1 ? { blockId: key, itemId: null } : { blockId: key.slice(0, at), itemId: key.slice(at + 1) };
+}
+
 /**
  * @param {unknown} value
  * @returns {DocumentSelection | null}
@@ -54,7 +61,11 @@ export function readDocumentSelection(value) {
     return { type: "text", anchor: { ...value.anchor }, focus: { ...value.focus } };
   }
   if (value.type === "units" && isString(value.anchor) && isString(value.focus)) {
-    return { type: "units", anchor: value.anchor, focus: value.focus };
+    /** @type {DocumentSelection} */
+    const units = { type: "units", anchor: value.anchor, focus: value.focus };
+    if (isIndex(value.anchorOffset)) units.anchorOffset = value.anchorOffset;
+    if (isIndex(value.focusOffset)) units.focusOffset = value.focusOffset;
+    return units;
   }
   return null;
 }
@@ -107,7 +118,17 @@ export function clampPresentationSelection(selection, content) {
  */
 export function clampDocumentSelection(selection, probe) {
   if (selection.type === "units") {
-    return probe.hasUnit(selection.anchor) && probe.hasUnit(selection.focus) ? selection : null;
+    if (!probe.hasUnit(selection.anchor) || !probe.hasUnit(selection.focus)) return null;
+    /** @type {DocumentSelection} */
+    const units = { type: "units", anchor: selection.anchor, focus: selection.focus };
+    // An offset is kept only where its unit still has the text it points into.
+    for (const [side, key] of /** @type {const} */ ([["anchorOffset", selection.anchor], ["focusOffset", selection.focus]])) {
+      const offset = selection[side];
+      const { blockId, itemId } = splitKey(key);
+      const length = offset === undefined ? null : probe.lengthOf(blockId, itemId ?? undefined);
+      if (offset !== undefined && length !== null) units[side] = Math.min(offset, length);
+    }
+    return units;
   }
   /** @param {DocPoint} point @returns {DocPoint | null} */
   const clampPoint = (point) => {
