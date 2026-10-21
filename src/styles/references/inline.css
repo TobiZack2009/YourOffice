@@ -1,0 +1,47 @@
+/* Inline references: a run of the paragraph. */
+
+.inline-ref {
+  /* Inline references: a run of the paragraph. `data-fit="inline"` flows with the text;
+     `data-fit="break"` stacks as text / embed / text while the paragraph stays one block. */
+  &.reference {
+    display: inline;
+    margin: 0;
+    padding: 0 2px;
+    border-radius: 6px;
+    user-select: none;
+  }
+
+  .reference-handle {
+    display: none;
+    width: 18px;
+    height: 18px;
+    vertical-align: middle;
+  }
+
+  &:hover .reference-handle,
+  &:focus-within .reference-handle {
+    display: inline-flex;
+  }
+
+  .reference-body {
+    display: inline;
+  }
+
+  .reference-chip {
+    padding: 0 6px;
+  }
+
+  &[data-fit="break"].reference {
+    display: block;
+    margin: 6px 0;
+    padding: 4px 6px;
+  }
+
+  &[data-fit="break"] .reference-body {
+    display: block;
+  }
+
+  .reference-blocks > .block {
+    margin-bottom: 6px;
+  }
+}

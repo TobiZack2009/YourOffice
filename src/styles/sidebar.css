@@ -1,0 +1,251 @@
+/* The page tree: workspace title, search, rows, drag and drop. */
+
+.sidebar {
+  position: relative;
+  width: 260px;
+  flex: 0 0 260px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.app.sidebar-collapsed .sidebar {
+  display: none;
+}
+
+.sidebar-content {
+  min-height: 100%;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.workspace-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.workspace-title-text {
+  cursor: text;
+}
+
+.workspace-title-input,
+.rename-input,
+.page-title-input {
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #fff;
+  outline: none;
+}
+
+.new-page-trigger,
+.row-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.07);
+  }
+}
+
+.sidebar-search-text {
+  flex: 1;
+}
+
+.sidebar-section-label {
+  margin: 6px 8px 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.page-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.page-row,
+.favorite-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 2px 4px 2px calc(4px + var(--depth, 0) * 14px);
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+  }
+
+  &.is-selected {
+    background: var(--accent-soft);
+  }
+}
+
+.favorite-row {
+  padding-left: 8px;
+}
+
+.page-row {
+  &.is-dragging {
+    opacity: 0.5;
+  }
+
+  &.drop-onto {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  &.drop-before {
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
+}
+
+.page-caret,
+.page-caret-spacer {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.page-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+  }
+
+  & svg {
+    transition: transform 0.1s ease;
+  }
+
+  &.is-open svg {
+    transform: rotate(90deg);
+  }
+}
+
+.type-glyph {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  color: var(--text-muted);
+}
+
+.page-title,
+.favorite-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+}
+
+.page-row:hover .page-actions,
+.favorite-row:hover .page-actions,
+.page-row:focus-within .page-actions {
+  opacity: 1;
+}
+
+.row-unfavorite {
+  color: #e0a800;
+}
+
+.empty-hint {
+  margin: 4px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.root-drop-zone {
+  margin-top: auto;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+
+  &.is-active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+}

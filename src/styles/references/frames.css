@@ -1,0 +1,120 @@
+/* A reference frame and what it draws: blocks, tables, slides, ranges, chips. */
+
+/* A reference frame: the handle sits outside the content, the body is the content. */
+.reference {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 4px 6px 4px 4px;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+
+  &:hover,
+  &:focus-within {
+    border-color: var(--border);
+  }
+
+  &.is-removed {
+    border-color: var(--text-muted);
+  }
+
+  &.is-missing {
+    border-color: var(--danger);
+  }
+
+  &.is-expression .reference-body {
+    cursor: default;
+  }
+}
+
+.reference-handle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+  }
+}
+
+.reference-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.reference-blocks > .block:last-child,
+.reference-body .document-editor > .block:last-child {
+  margin-bottom: 0;
+}
+
+.reference-table {
+  overflow: auto;
+
+  .sheet-table.is-embedded {
+    position: static;
+  }
+
+  .sheet-table-name {
+    display: none;
+  }
+}
+
+.reference-slides {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reference-slide {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.reference-range {
+  border-collapse: collapse;
+
+  & td {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+  }
+}
+
+.reference-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-size: 0.95em;
+
+  &.is-error {
+    background: #fdecec;
+    color: var(--danger);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.85em;
+  }
+}
+
+.reference-missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.reference-empty {
+  display: inline-block;
+  min-width: 12px;
+  min-height: 1em;
+}

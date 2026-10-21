@@ -2,7 +2,9 @@
 
 `src/app/`: `shell.js`, `session.js`, `selection.js`, `keyboard.js`, `gesture.js`, `notice.js`,
 `history-scope.js`, `demo-seed.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
-`icons.js`, `quick-find.js`, `dom.js`, `styles.css`.
+`icons.js`, `quick-find.js`, `dom.js`.
+
+Styles are in `src/styles/` (see Styles below).
 
 ## Layout
 
@@ -22,7 +24,7 @@ header, editor).
 
 The page editor is the whole canvas (no max-width card): `.app` fills `#app`, and
 `.page-body` / `.sheet-editor` flex to fill it. `data-page-type` on `.app` drives the accent
-(document blue, sheet green, presentation orange). `styles.css` is built on CSS variables.
+(document blue, sheet green, presentation orange). The styles are built on CSS variables (`styles/base.css`).
 
 ## Shell (`shell.js`)
 
@@ -167,3 +169,25 @@ Cmd/Ctrl+K overlay; `findPages` is the pure filter.
 ## Tests
 
 `app-shell`, `app-ribbon`, `app-sidebar`, `app-popover`, `app-quick-find`.
+
+## Styles (`src/styles/`)
+
+`main.js` imports one stylesheet, `styles/index.css`, which only holds `@import`s; Vite inlines
+them into the single-file build. The import order is the cascade order. Each file covers one area
+and starts with a comment saying which:
+
+- `base.css` tokens (CSS variables), reset, page frame. `sidebar.css`, `titlebar.css`,
+  `ribbon.css`, `popovers.css` (menus, link form, dialogs, notice), `quick-find.css`.
+- `canvas.css` page header and zoom; `document.css`; `sheet.css`; `handles.css` (block, section,
+  sheet and slide drag handles).
+- `presentation/`: `layout.css`, `slide-strip.css`, `animations.css` (timeline and the overlay on
+  the stage), `stage.css`, `inspector.css`.
+- `references/`: `frames.css`, `inline.css`, `prompts.css`, `expression.css`, `picker.css`.
+- `slideshow.css`.
+
+Rules are nested (native CSS nesting) under their component class: states and modifiers as
+`&:hover` / `&.is-selected`, descendants as `.child` or `& tag`. Class names stay global and
+unprefixed, so a rule keeps its specificity wherever it is nested; nesting groups rules, it does not
+scope them. New styles go into the file of the area that owns the element; a new area gets a new
+file and an `@import` line. The architecture test checks that `index.css` is the only import,
+that every file is imported once, and that no file passes 400 lines.

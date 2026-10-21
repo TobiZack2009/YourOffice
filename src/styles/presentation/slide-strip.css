@@ -1,0 +1,124 @@
+/* The slide strip: thumbnails, drag markers, badges, the add-slide gap. */
+
+/* slide strip */
+.slide-strip {
+  overflow-y: auto;
+  padding: 10px 14px 24px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  outline: none;
+}
+
+.slide-thumb-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+
+  &.is-current {
+    box-shadow: 0px 0px 0px 1px var(--accent);
+  }
+
+  &.is-selected {
+    box-shadow: 0px 0px 0px 1px var(--accent);
+
+    .slide-number {
+      color: var(--accent);
+    }
+  }
+
+  &.is-dragging {
+    opacity: 0.4;
+  }
+
+  &.drop-before::before,
+  &.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  &.drop-before::before {
+    top: -4px;
+  }
+
+  &.drop-after::after {
+    bottom: -4px;
+  }
+}
+
+.slide-number {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.slide-thumb {
+  position: relative;
+  flex: none;
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+}
+
+.transition-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--accent);
+}
+
+.animation-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--accent);
+
+  &.has-transition {
+    right: 30px;
+  }
+}
+
+.slide-add-gap {
+  display: flex;
+  justify-content: center;
+  height: 14px;
+  align-items: center;
+}
+
+.slide-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.slide-add-gap:hover .slide-add,
+.slide-add:focus-visible {
+  opacity: 1;
+}

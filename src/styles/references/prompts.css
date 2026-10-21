@@ -1,0 +1,96 @@
+/* Name prompt and reference list popovers. */
+
+/* Name prompt and reference list popovers */
+.name-prompt,
+.reference-list-popover,
+.expression-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 240px;
+}
+
+.name-prompt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.name-prompt-input,
+.expression-input,
+.picker-search {
+  font: inherit;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent);
+  }
+}
+
+.expression-input {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.name-prompt-input.is-invalid {
+  border-color: var(--danger);
+}
+
+.name-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+
+  .button.is-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.name-prompt .button,
+.name-prompt-actions .button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.reference-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.reference-list-row {
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+  }
+}
+
+.reference-list-empty {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}

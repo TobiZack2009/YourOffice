@@ -1,0 +1,312 @@
+/* Popovers, menus, the link form, dialogs and the notice. `.popover-button` also styles the empty-stage add button. */
+
+.popover,
+.menu {
+  z-index: 30;
+  min-width: 190px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.popover {
+  position: fixed;
+  padding: 10px;
+
+  > .menu {
+    border: none;
+    box-shadow: none;
+    padding: 0;
+  }
+}
+
+.menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  &.is-current {
+    font-weight: 600;
+  }
+
+  &.is-danger {
+    color: var(--danger);
+  }
+
+  &.is-danger:hover:not(:disabled) {
+    background: #fdecee;
+    color: var(--danger);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.menu-submenu {
+  position: relative;
+
+  &.is-open {
+    > .menu-submenu-trigger {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    > .menu-flyout {
+      display: block;
+    }
+  }
+
+  &.opens-left > .menu-flyout {
+    left: auto;
+    right: 100%;
+    margin-left: 0;
+    margin-right: -2px;
+  }
+}
+
+.menu-submenu-trigger .menu-item-label {
+  flex: 1;
+}
+
+.menu-submenu-chevron {
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.menu-flyout {
+  display: none;
+  position: absolute;
+  top: -7px;
+  left: 100%;
+  margin-left: -2px;
+  min-width: 200px;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.menu-section {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.menu-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 2px 8px;
+}
+
+.popover-input {
+  font: inherit;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+}
+
+.popover-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.popover-apply,
+.popover-remove {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.popover-apply {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.link-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 260px;
+
+  .popover-row {
+    margin-top: 2px;
+  }
+}
+
+.popover-hint {
+  font-size: 11px;
+  color: #c0392b;
+
+  &:empty {
+    display: none;
+  }
+}
+
+.link-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 380px;
+}
+
+.link-card-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.link-pages {
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 2px;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.link-page-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &.is-selected {
+    background: var(--accent-soft, rgba(0, 0, 0, 0.06));
+  }
+}
+
+.link-page-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-card-page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-card-missing {
+  color: var(--text-muted);
+}
+
+.link-card .popover-button {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 1000;
+  max-width: min(520px, 90vw);
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #1d1d1f;
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.stage-empty-add,
+.popover-button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.stage-empty-add,
+.popover-button.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.popover-dialog {
+  min-width: 260px;
+}
+
+.size-popover-text {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.size-popover-buttons,
+.popover-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}

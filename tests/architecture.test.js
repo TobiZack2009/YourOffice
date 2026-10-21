@@ -23,7 +23,8 @@ const ALLOWED = {
   domain: ["core", "workspace", "document", "presentation", "sheet", "references"],
   app: ["core", "workspace", "document", "presentation", "sheet", "references", "domain"],
   persistence: ["core", "workspace", "domain"],
-  main: ["core", "workspace", "domain", "app", "persistence"]
+  styles: [],
+  main: ["core", "workspace", "domain", "app", "persistence", "styles"]
 };
 
 const SHEET_REFERENCE_IMPORTS = new Set(["sheet/cell-shift.js", "sheet/commands.js", "sheet/table-engine.js"]);
@@ -146,5 +147,40 @@ describe("architecture", () => {
       if (lines > (ceilings.get(name) ?? 800)) over.push(`${name} has ${lines} lines`);
     }
     expect(over).toEqual([]);
+  });
+
+  describe("styles", () => {
+    const STYLES = join(SRC, "styles");
+    const cssFiles = (dir) =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        return statSync(path).isDirectory() ? cssFiles(path) : path.endsWith(".css") ? [path] : [];
+      });
+    const all = cssFiles(STYLES);
+    const importsOf = (file) =>
+      [...readFileSync(file, "utf8").matchAll(/@import\s+"([^"]+)"/g)].map((m) => normalize(join(dirname(file), m[1])));
+
+    it("the app imports exactly one stylesheet, src/styles/index.css", () => {
+      const sheets = [];
+      for (const file of [...files, join(SRC, "..", "index.html")]) {
+        const text = readFileSync(file, "utf8");
+        for (const m of text.matchAll(/import\s+["']([^"']+\.css)["']/g)) sheets.push(`${relative(SRC, file)} -> ${m[1]}`);
+      }
+      expect(sheets).toEqual(["main.js -> ./styles/index.css"]);
+    });
+
+    it("index.css only imports, and every stylesheet is reached from it exactly once", () => {
+      const index = join(STYLES, "index.css");
+      expect(readFileSync(index, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/@import\s+"[^"]+";/g, "").trim()).toBe("");
+      const imported = importsOf(index);
+      expect(new Set(imported).size, "a stylesheet is imported twice").toBe(imported.length);
+      expect(imported.sort()).toEqual(all.filter((f) => f !== index).sort());
+      for (const file of all.filter((f) => f !== index)) expect(importsOf(file), `${relative(SRC, file)} imports`).toEqual([]);
+    });
+
+    it("stylesheets stay under 400 lines", () => {
+      const over = all.filter((f) => readFileSync(f, "utf8").split("\n").length > 400).map((f) => relative(SRC, f));
+      expect(over).toEqual([]);
+    });
   });
 });

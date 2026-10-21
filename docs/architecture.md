@@ -109,7 +109,10 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
     model change, commands, a renderer, a controller, tests and a doc paragraph, each in its own
     module where it fits. Enforced: line ceilings per file (the remaining oversized files are pinned at
     their current size and may only shrink).
-12. **Definition of done.** Tests named after the module; `npm test` and `npm run build` green; the
+12. **Styles follow the areas.** One stylesheet is imported (`styles/index.css`, imports only); each
+    file styles one area; rules are nested under their component class; a file stays under 400
+    lines. Enforced. Style an element in the file of the area that owns it.
+13. **Definition of done.** Tests named after the module; `npm test` and `npm run build` green; the
     area doc and the `AGENTS.md` counts updated; for UI changes, `npm run build && npm run smoke`
     against real Chrome; any exception to these rules recorded under Deviations.
 
@@ -120,7 +123,8 @@ breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
 - The reference views, inspector and timeline rebuild on every change that touches them (rule 7).
-- `styles.css` is one unscoped file; styles are not split per area.
+- Class names are global. Styles are split per area and nested, but not scoped, so two areas can
+  still collide on a class name (rule 12).
 - `npm run typecheck` reports 127 errors (mostly JSDoc shapes for DOM helpers) and is not part of
   the definition of done until it is clean.
 

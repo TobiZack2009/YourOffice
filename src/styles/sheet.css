@@ -1,0 +1,244 @@
+/* The sheet editor: formula bar, grid, cells, selection, fill handle, cell editor. */
+
+.sheet-editor {
+  flex: 1;
+  padding: 8px 16px 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sheet-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.cell-address {
+  min-width: 52px;
+  padding: 4px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--sidebar-bg);
+  border-radius: 6px;
+}
+
+.formula-input {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent);
+  }
+}
+
+.sheet-canvas-wrap {
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  min-height: 420px;
+  outline: none; /* keyboard focus rests here; the active cell is the indicator */
+}
+
+.sheet-canvas {
+  position: relative;
+  padding: 8px;
+}
+
+.sheet-table {
+  position: absolute;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.sheet-table-name {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.sheet-grid {
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: var(--font);
+  table-layout: fixed;
+
+  & th,
+  & td {
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.sheet-col-header,
+.sheet-row-header,
+.sheet-corner {
+  background: var(--sidebar-bg);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.sheet-col-header,
+.sheet-row-header {
+  position: relative;
+}
+
+.sheet-resize-handle {
+  position: absolute;
+  z-index: 2;
+
+  &.is-col-resize {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+  }
+
+  &.is-row-resize {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 6px;
+    cursor: row-resize;
+  }
+
+  &:hover,
+  &.is-dragging {
+    background: var(--accent);
+    opacity: 0.55;
+  }
+}
+
+.sheet-cell {
+  position: relative;
+  background: #fff;
+  vertical-align: middle;
+
+  &.is-fill-preview {
+    background: var(--accent-soft);
+    outline: 1px dashed var(--accent);
+    outline-offset: -1px;
+  }
+
+  &.is-drop-preview {
+    background: var(--accent-soft);
+    outline: 2px dashed var(--accent);
+    outline-offset: -2px;
+  }
+
+  &.is-interactive.is-in-range,
+  &.is-interactive.is-selected {
+    cursor: grab;
+  }
+
+  &.is-interactive {
+    cursor: cell;
+  }
+
+  &.is-editing {
+    cursor: text;
+
+    .sheet-fill-handle {
+      display: none;
+    }
+  }
+
+  &.is-selected {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    background: var(--accent-soft);
+  }
+
+  &.is-merged-anchor {
+    text-align: center;
+    font-weight: 600;
+  }
+
+  &.is-in-range {
+    background: var(--accent-soft);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  &.is-selected.is-in-range {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  &.is-error {
+    color: var(--danger);
+  }
+}
+
+/* The little square at the selection's bottom-right corner: drag to fill. */
+.sheet-fill-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  z-index: 2;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border: 1px solid #fff;
+  box-sizing: border-box;
+  cursor: crosshair;
+}
+
+.popover.context-menu {
+  padding: 6px;
+  min-width: 220px;
+}
+
+/* The in-cell editor sits on top of the cell being edited. */
+.sheet-cell-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 2px 6px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  outline: none;
+}
+
+/* The explanation line under the formula bar. */
+.formula-message {
+  display: none;
+  padding: 2px 10px;
+  color: var(--danger);
+  font-size: 12px;
+
+  &.is-visible {
+    display: block;
+  }
+}

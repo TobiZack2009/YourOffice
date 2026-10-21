@@ -1,0 +1,58 @@
+/* The presentation editor grid and the slide strip / stage / inspector / timeline areas. */
+
+.canvas {
+  &:has(.presentation-editor) {
+    overflow: hidden;
+    min-height: 0;
+
+    .page-header {
+      padding: 10px 20px 6px;
+    }
+
+    .page-title-input {
+      font-size: 20px;
+    }
+  }
+}
+
+.presentation-editor {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 264px;
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--canvas-bg);
+  border-top: 1px solid var(--border);
+  outline: none;
+
+  &.show-timeline {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  > .slide-strip,
+  > .inspector {
+    grid-row: 1 / -1;
+  }
+
+  > .stage-area {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  > .animation-timeline {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  &:not(.show-timeline) > .animation-timeline {
+    display: none;
+  }
+
+  &.hide-inspector {
+    grid-template-columns: 200px minmax(0, 1fr);
+
+    > .inspector {
+      display: none;
+    }
+  }
+}

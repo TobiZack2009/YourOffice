@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1258 tests green across 72 files; the single-file build is ~451 kB.** Update these two
+**1261 tests green across 72 files; the single-file build is ~451 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -47,6 +47,7 @@ src/
   references/    scope, sections, reference commands, detached store, fit rule
   domain/        composition root (installDomain, createWorkspace, full validation rules)
   app/           shell, ribbon, sidebar, editors, popovers, demo seed
+  styles/        the one stylesheet: index.css imports one file per area
   persistence/   storage adapters (IndexedDB, memory), autosave, start-up restore
   boot.js        start-up flow (storage, restore, mount); main.js is the thin vite entry
   main.js        vite entry
@@ -79,7 +80,9 @@ intent into commands; views render those answers. Full rules, with what enforces
 10. Storage, clocks and session backing are injected adapters.
 11. Split a file before adding to it past ~800 lines; a feature is model, commands, renderer,
     controller, tests and a doc paragraph.
-12. Done means: module-named tests, `npm test` and `npm run build` green, area doc and the counts
+12. Styles: one imported stylesheet (`src/styles/index.css`, imports only), one file per area,
+    rules nested under their component class, files under 400 lines.
+13. Done means: module-named tests, `npm test` and `npm run build` green, area doc and the counts
     above updated, a smoke run for UI work, and every exception recorded under Deviations.
 
 ## Docs

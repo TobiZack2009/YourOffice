@@ -2,7 +2,7 @@
  * Vite entry: find the page's root element and boot the app into it.
  */
 
-import "./app/styles.css";
+import "./styles/index.css";
 import { createSession } from "./app/session.js";
 import { boot } from "./boot.js";
 

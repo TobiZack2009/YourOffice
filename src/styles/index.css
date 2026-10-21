@@ -1,0 +1,25 @@
+/* YourOffice — Notion-style workspace with an Office-style contextual ribbon.
+   The accent follows the open page type. This is the only stylesheet the app imports;
+   the order below is the cascade order. */
+
+@import "./base.css";
+@import "./sidebar.css";
+@import "./titlebar.css";
+@import "./ribbon.css";
+@import "./popovers.css";
+@import "./quick-find.css";
+@import "./canvas.css";
+@import "./document.css";
+@import "./sheet.css";
+@import "./presentation/layout.css";
+@import "./presentation/slide-strip.css";
+@import "./presentation/animations.css";
+@import "./presentation/stage.css";
+@import "./presentation/inspector.css";
+@import "./handles.css";
+@import "./references/frames.css";
+@import "./references/inline.css";
+@import "./references/prompts.css";
+@import "./references/expression.css";
+@import "./references/picker.css";
+@import "./slideshow.css";

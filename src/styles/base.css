@@ -1,0 +1,71 @@
+/* Design tokens, reset and the page frame. */
+
+:root {
+  --bg: #ffffff;
+  --canvas-bg: #fafafa;
+  --sidebar-bg: #f7f7f5;
+  --text: #1d1d1f;
+  --text-muted: #6e6e73;
+  --accent: #1d6fdc;
+  --accent-soft: #e6f0ff;
+  --hover: rgba(0, 0, 0, 0.05);
+  --border: #e3e3e6;
+  --code-bg: #f4f4f6;
+  --ribbon-bg: #fbfbfd;
+  --ribbon-divider: #e3e3e6;
+  --danger: #d0021b;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  --radius: 12px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.app {
+  --accent: #1dc6dc;
+  --accent-soft: #fdeee3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app,
+.app {
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.app {
+  flex: 1;
+  min-width: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  opacity: 0;
+}
+
+svg.icon {
+  flex: none;
+  display: block;
+}

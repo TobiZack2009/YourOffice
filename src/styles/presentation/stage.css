@@ -1,0 +1,267 @@
+/* The stage: slide, objects, text, selection box, handles, guides, empty state. */
+
+/* stage */
+.stage-area {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  outline: none;
+
+  &[data-tool="text"],
+  &[data-tool="shape"],
+  &[data-tool="line"] {
+    cursor: crosshair;
+  }
+
+  &.is-editing .slide-object {
+    cursor: default;
+  }
+}
+
+.stage {
+  position: relative;
+  flex: none;
+  background: #fff;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.18);
+  user-select: none;
+
+  &.show-grid::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(0, 0, 0, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.08) 1px, transparent 1px);
+    background-size: var(--grid) var(--grid);
+  }
+
+  .slide-object {
+    cursor: move;
+  }
+}
+
+.slide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+.slide-object {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.slide-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.slide-object-line {
+  pointer-events: none;
+}
+
+.slide-line-hit {
+  pointer-events: stroke;
+  stroke: transparent;
+  stroke-width: 14;
+  cursor: move;
+}
+
+.slide-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+}
+
+.slide-text {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+  outline: none;
+
+  .inline-ref {
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .inline-ref:has(.reference-table, .reference-slide, .reference-slides, .reference-blocks) {
+    display: block;
+    white-space: normal;
+  }
+
+  &[data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: #a0a0a8;
+  }
+
+  &[contenteditable="true"] {
+    cursor: text;
+    overflow: visible;
+    user-select: text;
+  }
+}
+
+/* Reference objects and inline references drawn on a slide */
+.slide-object-reference {
+  overflow: hidden;
+}
+
+.slide-reference {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  font-size: 18px;
+  line-height: 1.3;
+  color: var(--text, #1d1d1f);
+
+  > .reference-slide {
+    max-width: 100%;
+  }
+
+  .reference-blocks {
+    padding: 8px 12px;
+    white-space: normal;
+  }
+}
+
+.slide-reference-handle {
+  position: absolute;
+  width: calc(24px * var(--inv-scale, 1));
+  height: calc(24px * var(--inv-scale, 1));
+  transform: translate(calc(-100% - 4px * var(--inv-scale, 1)), calc(4px * var(--inv-scale, 1)));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: calc(1px * var(--inv-scale, 1)) solid var(--border, #d2d2d7);
+  border-radius: calc(6px * var(--inv-scale, 1));
+  background: #fff;
+  color: var(--text-muted, #6e6e73);
+  cursor: pointer;
+  pointer-events: auto;
+
+  & svg {
+    width: 60%;
+    height: 60%;
+  }
+}
+
+.stage-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.selection-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: calc(1.5px * var(--inv-scale, 1)) solid var(--accent);
+  pointer-events: none;
+
+  &.selection-group {
+    border-style: dashed;
+  }
+}
+
+.handle {
+  position: absolute;
+  width: calc(10px * var(--inv-scale, 1));
+  height: calc(10px * var(--inv-scale, 1));
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  border: calc(1.5px * var(--inv-scale, 1)) solid var(--accent);
+  border-radius: 2px;
+  background: #fff;
+  pointer-events: auto;
+
+  &[data-handle="nw"],
+  &[data-handle="se"] {
+    cursor: nwse-resize;
+  }
+
+  &[data-handle="ne"],
+  &[data-handle="sw"] {
+    cursor: nesw-resize;
+  }
+
+  &[data-handle="n"],
+  &[data-handle="s"] {
+    cursor: ns-resize;
+  }
+
+  &[data-handle="e"],
+  &[data-handle="w"] {
+    cursor: ew-resize;
+  }
+}
+
+.handle-rotate {
+  left: 50%;
+  top: calc(-28px * var(--inv-scale, 1));
+  border-radius: 50%;
+  cursor: grab;
+}
+
+.rotate-stem {
+  position: absolute;
+  left: 50%;
+  top: calc(-28px * var(--inv-scale, 1));
+  height: calc(28px * var(--inv-scale, 1));
+  border-left: calc(1.5px * var(--inv-scale, 1)) solid var(--accent);
+  transform: translateX(-50%);
+}
+
+.snap-guide {
+  position: absolute;
+  background: #ff2d6f;
+  pointer-events: none;
+
+  &[data-axis="x"] {
+    width: calc(1px * var(--inv-scale, 1));
+  }
+
+  &[data-axis="y"] {
+    height: calc(1px * var(--inv-scale, 1));
+  }
+}
+
+.marquee,
+.draw-preview {
+  position: absolute;
+  box-sizing: border-box;
+  border: calc(1px * var(--inv-scale, 1)) solid var(--accent);
+  background: rgba(192, 86, 33, 0.1);
+  pointer-events: none;
+}
+
+.draw-preview {
+  border-style: dashed;
+  background: transparent;
+}
+
+.stage-empty {
+  text-align: center;
+  color: var(--text-muted);
+}

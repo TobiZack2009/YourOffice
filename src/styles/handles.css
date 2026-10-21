@@ -1,0 +1,80 @@
+/* Drag handles and badges shared by blocks, sections, sheets and slides. */
+
+.block-handle,
+.section-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s;
+
+  &:hover {
+    background: var(--hover);
+  }
+}
+
+.block-handle {
+  left: 14px;
+  z-index: 5;
+}
+
+.block-handle.is-visible,
+.block-handle:focus-visible,
+.sheet-handle,
+.slide-thumb-wrap:hover .slide-handle,
+.slide-handle.has-references,
+.slide-handle:focus-visible {
+  opacity: 1;
+}
+
+.sheet-handle {
+  z-index: 4;
+}
+
+.slide-handle {
+  left: 4px;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.handle-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.block-drop-indicator {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 6;
+}
+
+.is-block-dragging {
+  opacity: 0.5;
+}

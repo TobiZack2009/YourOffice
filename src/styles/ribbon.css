@@ -1,0 +1,203 @@
+/* The contextual ribbon: tabs, groups, buttons, fields. */
+
+.ribbon {
+  position: relative;
+  background: var(--ribbon-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.ribbon-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 12px 0;
+}
+
+.ribbon-tab {
+  padding: 6px 14px 7px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  &.is-active {
+    color: var(--accent);
+    font-weight: 600;
+    border-bottom-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  &.is-file {
+    margin-right: 6px;
+  }
+}
+
+.ribbon-panel {
+  display: flex;
+  align-items: stretch;
+  min-height: 88px;
+  padding: 6px 8px 0;
+  background: #fff;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  border-right: 1px solid var(--ribbon-divider);
+
+  &:last-child {
+    border-right: none;
+  }
+}
+
+.ribbon-group-controls {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 2px;
+  max-width: 420px;
+}
+
+.ribbon-group-label {
+  padding: 3px 0 4px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ribbon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+
+  &.size-large {
+    flex-direction: column;
+    gap: 4px;
+    min-width: 52px;
+    height: 58px;
+    padding: 6px 6px 4px;
+  }
+
+  &.size-small {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--hover);
+  }
+
+  &.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+}
+
+.ribbon-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.ribbon-label {
+  line-height: 1.1;
+  text-align: center;
+  font-size: 11px;
+}
+
+.ribbon-button.is-disabled,
+.ribbon-button:disabled,
+.ribbon-select:disabled,
+.ribbon-field-input:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.ribbon-select-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+  padding: 6px 4px 4px;
+  color: var(--accent);
+
+  .ribbon-label {
+    color: var(--text);
+  }
+}
+
+.ribbon-select,
+.ribbon-field-input {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ribbon-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px 4px;
+  font-size: 11px;
+}
+
+.ribbon-field-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+
+  & span:last-child {
+    color: var(--text);
+  }
+}
+
+.ribbon-field-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ribbon-field-input {
+  width: 72px;
+}
+
+.ribbon-color-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.ribbon-color-input {
+  width: 36px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+}

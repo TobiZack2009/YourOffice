@@ -1,0 +1,79 @@
+/* The reference picker. */
+
+/* Reference picker */
+.reference-picker-popover {
+  width: 560px;
+}
+
+.reference-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-body {
+  display: flex;
+  gap: 10px;
+  height: 280px;
+}
+
+.picker-tree {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.picker-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.picker-page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+
+  & span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover,
+  &:focus-visible {
+    background: var(--accent-soft);
+    outline: none;
+  }
+}
+
+.picker-empty,
+.picker-hint {
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}

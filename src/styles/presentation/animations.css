@@ -1,0 +1,303 @@
+/* Animations: the timeline rows and the overlay drawn on the stage. */
+
+/* animation timeline */
+.animation-timeline {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  outline: none;
+}
+
+.timeline-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.timeline-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  text-align: center;
+}
+
+.timeline-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--hover);
+  }
+
+  &[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.timeline-empty {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.animation-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+  }
+
+  &.is-selected {
+    background: var(--accent-soft);
+  }
+
+  &.is-dragging {
+    opacity: 0.4;
+  }
+
+  &.drop-before::before,
+  &.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+
+  &.drop-before::before {
+    top: -1px;
+  }
+
+  &.drop-after::after {
+    bottom: -1px;
+  }
+}
+
+.animation-grip {
+  display: inline-flex;
+  color: var(--text-muted);
+  cursor: grab;
+}
+
+.animation-order {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.animation-trigger {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.animation-object {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.animation-effect {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 120px;
+}
+
+.animation-timing {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.animation-field {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.animation-row:hover .animation-field,
+.animation-field:focus {
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.animation-field:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.animation-ms {
+  width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.animation-trigger-select {
+  width: 118px;
+}
+
+.animation-effect-select {
+  width: 90px;
+}
+
+.animation-direction-select {
+  width: 96px;
+}
+
+.timeline-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+/* animation overlay on the stage */
+.animation-target {
+  position: absolute;
+  box-sizing: border-box;
+  border: calc(2px * var(--inv-scale, 1)) dashed var(--accent);
+  background: var(--accent-soft);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.animation-tag {
+  position: absolute;
+  min-width: calc(20px * var(--inv-scale, 1));
+  height: calc(20px * var(--inv-scale, 1));
+  padding: 0 calc(4px * var(--inv-scale, 1));
+  box-sizing: border-box;
+  border-radius: calc(4px * var(--inv-scale, 1));
+  background: var(--accent);
+  color: #fff;
+  font-size: calc(12px * var(--inv-scale, 1));
+  line-height: calc(20px * var(--inv-scale, 1));
+  text-align: center;
+  pointer-events: none;
+
+  &.is-selected {
+    outline: calc(2px * var(--inv-scale, 1)) solid #fff;
+    box-shadow: 0 0 0 calc(3px * var(--inv-scale, 1)) var(--accent);
+  }
+}
+
+.motion-paths {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.motion-line {
+  stroke: var(--accent);
+  stroke-width: calc(2px * var(--inv-scale, 1));
+  stroke-dasharray: calc(6px * var(--inv-scale, 1)) calc(4px * var(--inv-scale, 1));
+  opacity: 0.6;
+
+  &.is-selected {
+    opacity: 1;
+  }
+}
+
+.path-handle {
+  position: absolute;
+  width: calc(14px * var(--inv-scale, 1));
+  height: calc(14px * var(--inv-scale, 1));
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  border: calc(2px * var(--inv-scale, 1)) solid var(--accent);
+  border-radius: 50%;
+  background: #fff;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.path-handle-to {
+  background: var(--accent);
+}
+
+.presentation-editor.is-previewing .stage-area {
+  cursor: default;
+}
