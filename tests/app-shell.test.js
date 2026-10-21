@@ -793,3 +793,28 @@ describe("mountApp with persistence", () => {
     app.destroy();
   });
 });
+
+describe("images", () => {
+  it("draws a document image from the asset registry and revokes its URL when the app is destroyed", () => {
+    const created = [];
+    const revoked = [];
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = (blob) => { created.push(blob); return `blob:test-${created.length}`; };
+    URL.revokeObjectURL = (url) => revoked.push(url);
+    try {
+      const ws = createWorkspace({ title: "W" });
+      const { pageId } = ws.dispatch("createPage", { type: "document", title: "Doc" });
+      const { assetId } = ws.dispatch("addAsset", { mimeType: "image/png", name: "a.png", data: "iVBORw0KGgo=" });
+      ws.dispatch("insertBlock", { pageId, block: { type: "image", assetId, alt: "a" } });
+      const root = document.createElement("div");
+      document.body.append(root);
+      const app = mountApp(root, ws, { confirm: () => true });
+      expect(query(root, "figure img")?.getAttribute("src")).toBe("blob:test-1");
+      app.destroy();
+      expect(revoked).toEqual(["blob:test-1"]);
+    } finally {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+    }
+  });
+});

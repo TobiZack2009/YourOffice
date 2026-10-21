@@ -3,9 +3,10 @@
  * State shared with the editor arrives through the `ed` kernel; the mutable parts live on `ed.st`.
  */
 
-import { MAX_IMAGE_BYTES, OBJECT_DEFAULTS, createObject } from "../presentation/model.js";
+import { OBJECT_DEFAULTS, createObject } from "../presentation/model.js";
 import { createId } from "../core/ids.js";
 import { round } from "../presentation/geometry.js";
+import { readImageFile } from "./image-file.js";
 import { DEFAULT_IMAGE_BOX, fillCapable, strokeCapable, textCapable } from "./presentation-dom.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
@@ -227,11 +228,12 @@ export function createPresentationObjects(ed) {
   }
 
   /**
-   * Add an image from a data URL, fitted inside the slide and centred.
-   * @param {string} dataUrl
+   * Store an image in the asset registry and add it to the slide, fitted inside it and centred.
+   * Both happen in one transaction, so one undo removes the image.
+   * @param {{ mimeType: string, name: string, data: string }} image
    * @param {{ width?: number, height?: number }} [natural]
    */
-  function insertImage(dataUrl, natural = {}) {
+  function insertImage(image, natural = {}) {
     if (!st.currentSlideId) return;
     const size = getSize();
     const nw = natural.width && natural.width > 0 ? natural.width : DEFAULT_IMAGE_BOX.width;
@@ -239,12 +241,15 @@ export function createPresentationObjects(ed) {
     const fit = Math.min(1, (size.width * 0.6) / nw, (size.height * 0.6) / nh);
     const width = Math.max(8, Math.round(nw * fit));
     const height = Math.max(8, Math.round(nh * fit));
-    insertObject(createObject("image", {
-      src: dataUrl,
-      width,
-      height,
-      x: Math.round((size.width - width) / 2),
-      y: Math.round((size.height - height) / 2)
+    run(() => ed.workspace.transact("Insert image", () => {
+      const { assetId } = /** @type {{ assetId: string }} */ (ed.workspace.dispatch("addAsset", image));
+      insertObject(createObject("image", {
+        assetId,
+        width,
+        height,
+        x: Math.round((size.width - width) / 2),
+        y: Math.round((size.height - height) / 2)
+      }));
     }));
   }
 
@@ -257,24 +262,10 @@ export function createPresentationObjects(ed) {
   imageInput.addEventListener("change", () => {
     const file = imageInput.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      notify("That file is not an image");
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      notify(`Images can be at most ${Math.round(MAX_IMAGE_BYTES / (1024 * 1024))} MB`);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result ?? "");
-      const img = new Image();
-      img.onload = () => insertImage(url, { width: img.naturalWidth, height: img.naturalHeight });
-      img.onerror = () => notify("Could not read that image");
-      img.src = url;
-    };
-    reader.onerror = () => notify("Could not read that image");
-    reader.readAsDataURL(file);
+    readImageFile(file).then(
+      (image) => insertImage(image, { width: image.width, height: image.height }),
+      (error) => notify(error.message)
+    );
   });
 
   return { setClipboard, patchObjects, setGeometry, setFill, setStroke, setTextStyle, setAlign, setObjectLink, arrange, deleteSelected, duplicateSelected, copySelected, cutSelected, canPaste, pasteObjects, setTool, getTool, insertObject, createFromTool, defaultBox, insertImage, pickImage };

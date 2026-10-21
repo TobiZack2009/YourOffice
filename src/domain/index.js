@@ -17,6 +17,8 @@ import { registerSheetCommands } from "../sheet/commands.js";
 import { validateSheetContent } from "../calc/model.js";
 import { registerPresentationCommands } from "../presentation/commands.js";
 import { validatePresentationContent } from "../presentation/model.js";
+import { moveImagesToAssets } from "../presentation/migrate.js";
+import { validateAssetReferences } from "../workspace/assets.js";
 import { registerReferenceCommands } from "../references/commands.js";
 import { validateReferences } from "../references/integrity.js";
 
@@ -30,7 +32,8 @@ export const domainValidation = Object.freeze({
     sheet: validateSheetContent,
     presentation: validatePresentationContent
   }),
-  integrityChecks: Object.freeze([validateReferences])
+  integrityChecks: Object.freeze([validateReferences, validateAssetReferences]),
+  migrations: Object.freeze([{ from: 1, to: 2, up: moveImagesToAssets }])
 });
 
 /** @type {WeakSet<Workspace>} */

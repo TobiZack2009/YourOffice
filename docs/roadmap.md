@@ -16,7 +16,7 @@ Reordered from spec §16 to land testable foundations first. Phases 1-6 are done
 6. **References / sections** (done; limitations in `references.md`): typed locators, reference
    instances, live embeds, expressions with conditionals, detached store, cycle checks.
 7. **Persistence / interchange:** IndexedDB autosave + recovery is done (`persistence.md`).
-   Outstanding: Markdown, CSV, PDF, limited Office formats; image assets move into the asset registry.
+   The asset registry is done (`workspace.md`). Outstanding: Markdown, CSV, PDF, limited Office formats.
 8. **Standalone export:** pristine-shell single-HTML export (editable + read-only enforced at
    the command layer), asset embedding, `<script type="application/json">` payload with
    escaping, Playwright round-trip validation.

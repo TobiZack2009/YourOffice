@@ -30,6 +30,7 @@ import { pageContent, pageExists, pageTitle } from "../workspace/selectors.js";
  * @property {(slideId: string) => void} [onExit] Called once when the presenter leaves
  *   (with the slide that was showing). Not called by `destroy()`.
  * @property {(pageId: string) => void} [navigate] A link to another page was clicked.
+ * @property {(assetId: string) => string | undefined} [resolveAssetUrl] Where image assets are shown from.
  * @property {(url: string) => void} [openUrl] Opens a web link (defaults to a new tab).
  *
  * @typedef {object} SlideshowHandle
@@ -106,7 +107,8 @@ export function createSlideshow(workspace, pageId, options = {}) {
         get book() {
           return (book ??= buildBook(data));
         },
-        resolvePageTitle: (/** @type {string} */ id) => pageTitle(workspace, id)
+        resolvePageTitle: (/** @type {string} */ id) => pageTitle(workspace, id),
+        resolveAssetUrl: options.resolveAssetUrl
       };
       hooks = staticReferenceHooks(/** @type {any} */ (ctx), pageId, 1);
     }

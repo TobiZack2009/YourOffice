@@ -69,7 +69,6 @@ export const ANIM_MAX_OFFSET = 20000;
 
 export const MIN_FONT_SIZE = 4;
 export const MAX_FONT_SIZE = 600;
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
@@ -115,7 +114,7 @@ const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
  * @property {"rect" | "ellipse" | "triangle" | "roundRect" | "arrow"} [shape]
  * @property {boolean} [flipV] Line direction inside its box (false: top-left to bottom-right).
  * @property {TextBody} [text]
- * @property {string} [src] Image data URL.
+ * @property {string} [assetId] Image objects: the asset in the workspace registry ("" until one is chosen).
  * @property {boolean} [autoHeight] Text objects: the stored height is a minimum; the editor grows it to fit.
  * @property {"embed" | "expression"} [kind] Reference objects.
  * @property {string} [sectionId]
@@ -210,7 +209,7 @@ export function createObject(type, fields = {}) {
     object.stroke = copy.stroke ?? { ...OBJECT_DEFAULTS.lineStroke };
     object.flipV = copy.flipV ?? false;
   } else if (type === "image") {
-    object.src = copy.src ?? "";
+    object.assetId = copy.assetId ?? "";
   } else if (type === "reference") {
     const source = /** @type {Record<string, any>} */ (copy);
     object.kind = source.kind ?? "embed";
@@ -393,10 +392,9 @@ export function validateObject(object) {
     errors.push("object.text is required for text objects");
   }
   if (object.type === "image") {
-    if (typeof object.src !== "string") errors.push("object.src must be a string");
-    else if (object.src !== "" && !object.src.startsWith("data:image/")) errors.push("object.src must be an image data URL");
-  } else if (object.src !== undefined) {
-    errors.push("only image objects carry src");
+    if (typeof object.assetId !== "string") errors.push("object.assetId must be a string");
+  } else if (object.assetId !== undefined) {
+    errors.push("only image objects carry assetId");
   }
   return errors;
 }

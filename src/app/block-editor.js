@@ -41,6 +41,7 @@ import { createBlockStructure } from "./block-structure.js";
 import { createBlockLinks } from "./block-links.js";
 import { createBlockReferences } from "./block-references.js";
 import { createBlockContextMenu } from "./block-context-menu.js";
+import { createImageInsert } from "./block-image.js";
 import { closestMark, unwrap, wrapRange } from "./block-marks.js";
 
 export { splitRunsAt };
@@ -71,6 +72,7 @@ const EXEC_COMMAND = { bold: "bold", italic: "italic", underline: "underline", s
  * @param {string} pageId Page, or the container that holds the section.
  * @param {{
  *   resolvePageTitle?: (id: string) => string | undefined,
+ *   resolveAssetUrl?: (assetId: string) => string | undefined,
  *   onActiveChange?: (info: ActiveInfo) => void,
  *   onChange?: () => void,
  *   sectionId?: string,
@@ -121,6 +123,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     workspace: hostWorkspace,
     hostId: pageId,
     resolvePageTitle: options.resolvePageTitle,
+    resolveAssetUrl: options.resolveAssetUrl,
     createEditor: (sectionId, containerId) => {
       /** @type {any} */
       const child = createDocumentEditor(hostWorkspace, containerId, {
@@ -128,6 +131,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
         origin,
         notice,
         resolvePageTitle: options.resolvePageTitle,
+        resolveAssetUrl: options.resolveAssetUrl,
         navigate: options.navigate,
         onActiveChange: () => {
           focusedChild = child;
@@ -142,6 +146,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   const renderOptions = {
     resolvePageTitle: options.resolvePageTitle,
+    resolveAssetUrl: options.resolveAssetUrl,
     renderReference: (/** @type {Block} */ block) => views.render(block),
     renderInlineRef: (/** @type {any} */ ref) => views.renderInline(ref, element.clientWidth)
   };
@@ -737,6 +742,8 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   render();
 
+  const images = createImageInsert({ workspace: hostWorkspace, notice, insertAfterActive });
+
   return {
     element,
     refresh: render,
@@ -755,6 +762,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
     getSelectedUnits: selectedKeys,
     clearSelection: clearBlockSelection,
     openContextMenu: (point) => contextMenu.openContextMenu(point),
+    insertImage: images.insert,
+    insertImageFile: images.insertFile,
+    pickImage: images.pick,
     insertEmbed: (anchor) => references.insertEmbed(anchor),
     insertExpression: (anchor) => references.insertExpression(anchor),
     makeSection: () => references.makeSection(sel() ? references.selectedTopLevel() : activeBlockId && blockOf(activeBlockId) ? [references.topLevelOf(activeBlockId)] : []),

@@ -129,6 +129,21 @@ try {
   const text = await page.locator("body").textContent();
   check("reload restores typing and the rename from IndexedDB", text.includes("PERSISTED") && text.includes("Renamed doc"));
 
+  // Images: insert a picture into the document, see it drawn from the registry, keep it across a reload.
+  const onePixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await page.click('.ribbon-tab[data-tab="insert"]');
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.click('[data-action="insert-image"]')]);
+  await chooser.setFiles({ name: "dot.png", mimeType: "image/png", buffer: onePixel });
+  await page.waitForSelector("[data-block-id] img");
+  check("an inserted image is drawn from an object URL", (await page.locator("[data-block-id] img").first().getAttribute("src")).startsWith("blob:"));
+  check("the image loads", await page.locator("[data-block-id] img").first().evaluate((img) => img.complete && img.naturalWidth === 1));
+  await page.waitForTimeout(2200);
+  await page.reload();
+  await page.waitForSelector(".page-row");
+  await page.click('.page-row:has-text("Renamed doc")');
+  await page.waitForSelector("[data-block-id] img");
+  check("the image survives a reload", await page.locator("[data-block-id] img").first().evaluate((img) => img.complete && img.naturalWidth === 1));
+
   // A hostile import is refused.
   const stored = await page.evaluate(
     () =>

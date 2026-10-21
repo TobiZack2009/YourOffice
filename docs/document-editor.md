@@ -30,7 +30,8 @@
 ## Renderer (`document/render.js`)
 
 Pure model -> DOM: `renderDocument`, `renderBlock`, `renderRuns`. `textContent` only (no HTML
-injection), `data-block-id` for editing glue, page-title/asset-url resolvers via options.
+injection), `data-block-id` for editing glue, page-title/asset-url resolvers via options. An `image` block draws `<img>` from `resolveAssetUrl(assetId)`
+and a labelled placeholder when there is none (no id, or an asset the workspace lacks).
 Lists emit `div.item-children` inside the `li`. Embeds render through the same block renderer
 pointed at the source (or detached) content.
 
@@ -137,7 +138,20 @@ the first match. A page destination is an ordinary link with href `#<pageId>`
 (`options.navigate`) or "Page removed". Cmd/Ctrl+K is Quick Find, so it is deliberately not a
 link shortcut. The presentation editor reuses the form (see `presentation.md`).
 
+## Images
+
+Insert > Image (`block-image.js`) opens a file chooser, reads the file (`image-file.js`: type and
+size checked, base64 bytes plus natural size), and in one transaction stores it with `addAsset` and
+inserts an `image` block after the active block, alt text defaulting to the file name. An embedded
+section editor adds the block to its own page and the asset to the host workspace. The slide editor
+uses the same reader. A per-mount `createAssetUrls` (`asset-urls.js`) turns an asset into a blob
+URL the first time it is drawn, caches it, and revokes all of them when the app is destroyed;
+without `URL.createObjectURL` it falls back to a `data:` URL. Object URLs are never stored.
+
+Not done: pasting or dropping an image from the clipboard, a picker preview, and editing alt text,
+width or alignment from the UI (the model supports all three).
+
 ## Tests
 
 `document-model`, `document-commands`, `document-render`, `document-nesting`, `app-inline`,
-`app-block-editor`, `app-block-fragment`, `app-block-clipboard`, `app-links`, `app-block-references`, `app-inline-references`.
+`app-block-editor`, `app-block-fragment`, `app-block-clipboard`, `app-links`, `app-block-references`, `app-inline-references`, `workspace-assets`, `app-asset-urls`.

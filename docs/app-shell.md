@@ -2,7 +2,7 @@
 
 `src/app/`: `shell.js`, `session.js`, `selection.js`, `keyboard.js`, `gesture.js`, `notice.js`,
 `history-scope.js`, `demo-seed.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
-`icons.js`, `quick-find.js`, `workspace-switcher.js`, `dom.js`.
+`icons.js`, `quick-find.js`, `workspace-switcher.js`, `asset-urls.js`, `image-file.js`, `block-image.js`, `dom.js`.
 
 Styles are in `src/styles/` (see Styles below).
 

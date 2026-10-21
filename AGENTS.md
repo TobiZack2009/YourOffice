@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1309 tests green across 76 files; the single-file build is ~470 kB.** Update these two
+**1338 tests green across 78 files; the single-file build is ~475 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -40,11 +40,11 @@ numbers when they change.
 ```
 src/
   core/          ids, events, error types
-  workspace/     schema, store, built-in commands, import/export
+  workspace/     schema, store, built-in commands, import/export, asset registry
   calc/          formula language and engine, table value model
   sheet/         sheet commands, shifting, fill, render
   document/      block model, commands, renderer
-  presentation/  slide model, commands, geometry, animation/slideshow logic, renderer
+  presentation/  slide model, commands, geometry, animation/slideshow logic, renderer, schema migration
   references/    scope, sections, reference commands, detached store, fit rule
   domain/        composition root (installDomain, createWorkspace, full validation rules)
   app/           shell, ribbon, sidebar, editors, popovers, demo seed

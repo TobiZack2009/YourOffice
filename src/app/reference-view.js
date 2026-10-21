@@ -45,6 +45,7 @@ import {
  * @property {(record: any, anchor: HTMLElement) => void} onHandle The handle was pressed.
  * @property {(record: any, frame: HTMLElement) => void} [onEditExpression] Double-click on an expression result.
  * @property {(pageId: string) => string | undefined} [resolvePageTitle]
+ * @property {(assetId: string) => string | undefined} [resolveAssetUrl]
  * @property {import("./notice.js").Notice} [notice] Where messages go (the default host when absent).
  */
 
@@ -86,7 +87,7 @@ export function createReferenceViews(options) {
   /** @returns {import("./reference-render.js").StaticContext} */
   function context() {
     const { engines, book } = shared();
-    return { data: options.workspace.data, engines, book, resolvePageTitle: options.resolvePageTitle };
+    return { data: options.workspace.data, engines, book, resolvePageTitle: options.resolvePageTitle, resolveAssetUrl: options.resolveAssetUrl };
   }
 
   function begin() {

@@ -13,6 +13,7 @@ import {
   migrateWorkspace
 } from "./schema.js";
 import { registerWorkspaceCommands } from "./commands.js";
+import { registerAssetCommands, usedAssetIds } from "./assets.js";
 import { WHOLE_PAGE, cloneEntities } from "./changes.js";
 import { History } from "./history.js";
 
@@ -117,6 +118,13 @@ export class Workspace {
       settings: {}
     };
 
+    /**
+     * The asset registry (see `assets.js`). Outside `_data` so history snapshots do not clone image
+     * bytes; assets are immutable, so a rollback or undo has nothing to restore.
+     * @type {Record<string, import("./assets.js").Asset>}
+     */
+    this._assets = {};
+
     /** @type {Emitter} */
     this.events = new Emitter();
     /** Undo/redo stacks, revisions and the saved marker (see `history.js`). */
@@ -157,6 +165,7 @@ export class Workspace {
 
     // Only the workspace's own commands; features register theirs through `domain/installDomain`.
     registerWorkspaceCommands(this);
+    registerAssetCommands(this);
   }
 
   /** @returns {number} Revision of the current state; it changes with every commit, undo and redo. */
@@ -222,7 +231,12 @@ export class Workspace {
     if (migrated.data === null) {
       throw new WorkspaceFormatError(migrated.errors.join("; "));
     }
-    workspace._data = migrated.data;
+    const { assets = {}, ...data } = migrated.data;
+    workspace._data = /** @type {WorkspaceDocument} */ (data);
+    workspace._assets = assets;
+    // Assets nothing uses (left behind by undone inserts and deleted content) are not carried over.
+    const used = usedAssetIds(data);
+    for (const id of Object.keys(workspace._assets)) if (!used.has(id)) delete workspace._assets[id];
     return workspace;
   }
 
@@ -247,9 +261,23 @@ export class Workspace {
     return this._data;
   }
 
-  /** @returns {WorkspaceDocument} Deep copy of the serialized state. */
+  /** @returns {WorkspaceDocument} Deep copy of the serialized state, assets included. */
   get serialized() {
-    return structuredClone(this._data);
+    return { ...structuredClone(this._data), assets: structuredClone(this._assets) };
+  }
+
+  /**
+   * An asset by id. Immutable: do not modify it.
+   * @param {string} assetId
+   * @returns {import("./assets.js").Asset | undefined}
+   */
+  getAsset(assetId) {
+    return Object.hasOwn(this._assets, assetId) ? this._assets[assetId] : undefined;
+  }
+
+  /** @returns {string[]} Ids of every asset in the registry. */
+  assetIds() {
+    return Object.keys(this._assets);
   }
 
   /**

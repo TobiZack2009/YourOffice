@@ -80,6 +80,21 @@ export function documentTabs() {
           )
         },
         {
+          id: "media",
+          label: "Media",
+          controls: [
+            button({
+              id: "insert-image",
+              label: "Image",
+              title: "Insert a picture from your computer",
+              icon: "image",
+              attrs: { "data-action": "insert-image" },
+              enabled: hasDoc,
+              action: (ctx) => ctx.docEditor?.pickImage()
+            })
+          ]
+        },
+        {
           id: "links",
           label: "Links",
           controls: [

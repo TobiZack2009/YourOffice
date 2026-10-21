@@ -90,11 +90,12 @@ describe("renderObject", () => {
   });
 
   it("renders images and link data", () => {
-    const o = createObject("image", { src: "data:image/png;base64,AAAA", link: { kind: "url", url: "https://x.test" } });
-    const el = renderObject(o);
+    const o = createObject("image", { assetId: "asset_1", link: { kind: "url", url: "https://x.test" } });
+    const el = renderObject(o, { resolveAssetUrl: (id) => (id === "asset_1" ? "data:image/png;base64,AAAA" : undefined) });
     expect(el.querySelector("img").getAttribute("src")).toBe("data:image/png;base64,AAAA");
     expect(el.dataset.linkKind).toBe("url");
     expect(el.dataset.href).toBe("https://x.test");
     expect(renderObject(createObject("image")).querySelector("img").hasAttribute("src")).toBe(false);
+    expect(renderObject(o).querySelector("img").hasAttribute("src")).toBe(false);
   });
 });

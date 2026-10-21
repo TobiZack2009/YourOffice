@@ -1034,3 +1034,43 @@ describe("keyed rendering", () => {
     editor.destroy();
   });
 });
+
+describe("images", () => {
+  const PNG = { mimeType: "image/png", name: "diagram.png", data: "iVBORw0KGgo=" };
+
+  it("stores the image in the registry and adds a block that refers to it", () => {
+    const { ws, editor, order, block } = setup([{ type: "paragraph", runs: [{ text: "Hi" }] }]);
+    editor.focusBlock(order()[0], "end");
+    const blockId = editor.insertImage(PNG);
+    const image = block(blockId);
+    expect(image).toMatchObject({ type: "image", alt: "diagram" });
+    expect(ws.getAsset(image.assetId)).toMatchObject({ mimeType: "image/png", name: "diagram.png" });
+    expect(order()[1]).toBe(blockId);
+  });
+
+  it("draws the image through the asset resolver and keeps the bytes out of the block", () => {
+    const ws = createWorkspace({ title: "W" });
+    const { pageId } = ws.dispatch("createPage", { type: "document", title: "Doc" });
+    const editor = createDocumentEditor(ws, pageId, { resolveAssetUrl: (id) => `blob:${id}` });
+    document.body.append(editor.element);
+    const blockId = editor.insertImage(PNG);
+    const assetId = ws.getPage(pageId).content.blocks[blockId].assetId;
+    expect(editor.element.querySelector(`[data-block-id="${blockId}"] img`).getAttribute("src")).toBe(`blob:${assetId}`);
+    expect(JSON.stringify(ws.getPage(pageId).content)).not.toContain(PNG.data);
+  });
+
+  it("undoes the block and the insert as one step", () => {
+    const { ws, editor, order } = setup([{ type: "paragraph", runs: [{ text: "Hi" }] }]);
+    editor.insertImage(PNG);
+    expect(order()).toHaveLength(2);
+    ws.undo();
+    expect(order()).toHaveLength(1);
+  });
+
+  it("tells the user when the file is not an image", async () => {
+    const { editor, order } = setup([{ type: "paragraph", runs: [{ text: "Hi" }] }]);
+    await editor.insertImageFile(new File(["x"], "notes.txt", { type: "text/plain" }));
+    expect(order()).toHaveLength(1);
+    expect(document.querySelector(".app-notice").textContent).toMatch(/not a supported image/);
+  });
+});

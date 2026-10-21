@@ -76,4 +76,5 @@ the popover built by `app/workspace-switcher.js`. The manager exists only when s
 ## Not done
 
 - Multi-tab locking or merging (only the conflict notice).
-- Image/asset storage separate from page content.
+- Image bytes are embedded in the stored workspace record (as base64); a separate blob store would
+  avoid rewriting them on every save.

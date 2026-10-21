@@ -21,6 +21,31 @@
 - `pageOrder` is `{ root: [...], [parentId]: [...] }`.
 - `settings` is free-form; validation checks the shape of `favoritePageIds`.
 - `detached` (Phase 6) is an additive field; no version bump. See `references.md`.
+- `assets` (schema v2): the asset registry, below. Migrations are `{ from, to, up }` records; the
+  built-in v1 -> v2 step adds an empty registry and `ValidationOptions.migrations` carries the steps
+  that need feature knowledge (the domain supplies the presentation one). One load applies every step
+  due at the file's version, built-in first.
+
+## Assets (`workspace/assets.js`)
+
+Images are stored once per workspace and pages refer to them by id: a document `image` block and a
+slide `image` object carry `assetId`, never bytes. A record is `{ id, kind: "image", mimeType, name,
+size, storage: { mode: "embedded", data } }` with `data` base64 (png, jpeg, gif, webp, svg, avif, bmp;
+at most 8 MB decoded). Records are immutable.
+
+- The registry is `workspace._assets`, beside `_data`, because history snapshots clone `_data` per
+  transaction and image bytes must not ride along. It is part of `serialized` (`assets`) and of what
+  autosave stores. Read it with `getAsset(id)` and `assetIds()`.
+- `addAsset { mimeType, name, data }` returns `{ assetId }`, and the id of the identical asset when
+  those exact bytes are already stored (compared by size, type and data). It is a hot command. An
+  editor runs it and the command that uses the id in one `transact`, so one undo removes the image.
+- Undo never removes an asset (a redo needs it). Assets nothing uses are dropped when a workspace
+  is loaded, so an orphan costs space only until the next reload.
+- Import validates every record (key, type, base64, size) and fails when an image names an asset
+  the file does not hold (`validateAssetReferences`, an integrity check). Renderers are more
+  forgiving: an unknown id draws a placeholder.
+- `forEachImage` and `usedAssetIds` find image nodes in pages and in detached content by the one
+  convention `{ type: "image", assetId }`.
 
 ## Store (`workspace/store.js`)
 
@@ -98,4 +123,4 @@ the dirty dot follows `workspace.dirty` and Cmd/Ctrl+S calls `markSaved`.
 ## Tests
 
 `ids`, `events`, `schema`, `store`, `format`, `workspace-schema` additions,
-`workspace-selectors`, `workspace-changes`, `workspace-history`.
+`workspace-selectors`, `workspace-changes`, `workspace-history`, `workspace-assets`.

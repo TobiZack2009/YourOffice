@@ -27,6 +27,7 @@ export const DEFAULT_SLIDE_WIDTH = 480;
  * @property {import("../references/table-engine.js").TableEngines} [engines] Shared across a render pass.
  * @property {import("../calc/recalc.js").RecalcEngine} [book] Shared across a render pass.
  * @property {(pageId: string) => string | undefined} [resolvePageTitle]
+ * @property {(assetId: string) => string | undefined} [resolveAssetUrl]
  * @property {number} [depth]
  */
 
@@ -115,10 +116,11 @@ export function renderSlideSection(ctx, found, width = DEFAULT_SLIDE_WIDTH) {
  * @param {StaticContext} ctx
  * @param {string} containerId The page the slide lives in.
  * @param {number} depth
- * @returns {{ renderReference: (object: any) => HTMLElement, renderInlineRef: (ref: any) => HTMLElement }}
+ * @returns {{ renderReference: (object: any) => HTMLElement, renderInlineRef: (ref: any) => HTMLElement, resolveAssetUrl?: (assetId: string) => string | undefined }}
  */
 export function staticReferenceHooks(ctx, containerId, depth) {
   return {
+    resolveAssetUrl: ctx.resolveAssetUrl,
     renderReference: (object) => renderReferenceBlock(ctx, containerId, object, depth),
     renderInlineRef: (ref) => h("span", {}, [renderReferenceBlock(ctx, containerId, ref, depth)])
   };
@@ -136,6 +138,7 @@ export function renderBlocksSection(ctx, found) {
   const wrap = h("div", { class: "reference-blocks" });
   const options = {
     resolvePageTitle: ctx.resolvePageTitle,
+    resolveAssetUrl: ctx.resolveAssetUrl,
     blocks: content.blocks,
     renderReference: (/** @type {any} */ block) => renderReferenceBlock(ctx, found.containerId, block, depth + 1)
   };

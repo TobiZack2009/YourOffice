@@ -13,7 +13,8 @@ Spec §7.
   `animationOrder`. Identity (`slide_...`, `obj_...`, `anim_...`) is separate from the orders.
 - Objects: `text | shape | line | image | reference`, with x/y/width/height/rotation,
   fill/stroke, `shape` kind, `flipV` for lines, a `text` body (`runs`, fontSize, color, align,
-  valign), `link`, and `src` (data URL; moves to the asset registry in Phase 7). `reference`
+  valign), `link`, and for images `assetId` (a key into the workspace asset registry, `workspace.md`; empty
+  until an image is chosen; schema v1 files carried a `src` data URL, which loading moves into the registry). `reference`
   objects embed a section or expression (see `references.md`); text objects with inline refs
   carry `autoHeight`.
 - Animation: `{ id, objectId, effect: appear | fade-in | slide-in | motion, trigger: click |
@@ -91,7 +92,7 @@ forwarded through the kernel, so a module takes what it needs at creation.
 ## Ribbon
 
 Home (clipboard, slides, text, arrange, history), Insert (text box, shape gallery, line,
-image via file picker to data URL, Reference group), Design (size presets + width/height with
+image via file picker into the asset registry, Reference group), Design (size presets + width/height with
 Scale content / Keep as is, background colour, Theme seam), Transitions (style, direction,
 duration, apply to all), Animations, Slide Show, View (inspector, snap guides, grid snap).
 `kind: "color"` controls use a native colour input.
@@ -170,8 +171,7 @@ duration, apply to all), Animations, Slide Show, View (inspector, snap guides, g
 
 ## Not done (editor)
 
-Themes (the Design tab's Theme is a disabled seam), resize/rotate of multi-selections, image
-assets in the registry (Phase 7), dragging a multi-slide section as a group.
+Themes (the Design tab's Theme is a disabled seam), resize/rotate of multi-selections, dragging a multi-slide section as a group. Images: no paste or drop of an image from the clipboard, and no replace-image action.
 
 ## Tests
 

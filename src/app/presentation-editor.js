@@ -62,6 +62,7 @@ import { createPresentationInput } from "./presentation-input.js";
  * @property {() => void} [onChange] Called after the editor re-rendered from a model change.
  * @property {(pageId: string) => void} [navigate] Go to another page (used by reference lists).
  * @property {import("./notice.js").Notice} [notice] Where refused commands are reported.
+ * @property {(assetId: string) => string | undefined} [resolveAssetUrl] Where image assets are shown from.
  * @property {() => void} [onSelectionChange] Called when selection, tool, view or edit state changes.
  * @property {string | null} [initialSlideId] Slide to open on (falls back to the first).
  * @property {(slideId: string | null) => void} [onSlideChange]
@@ -208,10 +209,12 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
         get book() {
           return (book ??= buildBook(data));
         },
-        resolvePageTitle: (/** @type {string} */ id) => pageTitle(workspace, id)
+        resolvePageTitle: (/** @type {string} */ id) => pageTitle(workspace, id),
+        resolveAssetUrl: options.resolveAssetUrl
       };
       const hooks = staticReferenceHooks(/** @type {any} */ (ctx), pageId, 1);
       st.hookCache = {
+        resolveAssetUrl: options.resolveAssetUrl,
         renderReference: (object) => {
           st.drewReferences = true;
           return hooks.renderReference(object);

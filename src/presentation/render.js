@@ -29,6 +29,8 @@ export const TEXT_PLACEHOLDER = "Click to add text";
  *   `reference` object (an embed or expression); without it a plain placeholder is drawn.
  * @property {(ref: any) => HTMLElement | null} [renderInlineRef] Draws the body of an inline
  *   reference inside a text body.
+ * @property {(assetId: string) => string | undefined} [resolveAssetUrl] The address an image asset is
+ *   shown from; without it (or for an unknown asset) an image object draws nothing.
  */
 
 /**
@@ -113,7 +115,8 @@ export function renderObject(object, options = {}) {
     img.className = "slide-image";
     img.setAttribute("alt", object.name ?? "");
     img.setAttribute("draggable", "false");
-    if (object.src) img.setAttribute("src", object.src);
+    const url = object.assetId ? options.resolveAssetUrl?.(object.assetId) : undefined;
+    if (url) img.setAttribute("src", url);
     element.appendChild(img);
   } else if (object.type === "reference") {
     const body = options.renderReference?.(object) ?? doc.createElement("div");

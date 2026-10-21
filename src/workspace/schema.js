@@ -6,12 +6,14 @@
  * and tests all exercise the same code path.
  */
 
+import { validateAssets } from "./assets.js";
+
 /** @typedef {"document" | "sheet" | "presentation"} PageType */
 
 /** @type {"YourOffice-workspace"} */
 export const WORKSPACE_FORMAT = "YourOffice-workspace";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** @type {PageType[]} Initial page types. */
 export const PAGE_TYPES = ["document", "sheet", "presentation"];
@@ -43,6 +45,8 @@ const ISO_8601_UTC =
  *    root plus an ordered child list per parent page id.
  * @property {Record<string, unknown>} settings
  * @property {Record<string, unknown>} [detached] Content that lost its place but is still read (see references/detached.js).
+ * @property {Record<string, import("./assets.js").Asset>} [assets] The asset registry. Present in the serialized
+ *   form only; a live workspace keeps it beside its data (see `assets.js`).
  */
 
 /**
@@ -106,6 +110,9 @@ function checkIdList(list, exists, what, errors) {
  *   One content validator per page type, run on every page that has content.
  * @property {ReadonlyArray<(data: any) => string[]>} [integrityChecks]
  *   Cross-page checks (sections, references), run once the rest of the document is sound.
+ * @property {ReadonlyArray<Migration>} [migrations]
+ *   Steps for content the workspace layer knows nothing about. They run in the same pass as the
+ *   built-in step with the same `from`.
  */
 
 /**
@@ -243,6 +250,8 @@ export function validateWorkspace(data, options = {}) {
     }
   }
 
+  if (data.assets !== undefined) errors.push(...validateAssets(data.assets));
+
   const settings = /** @type {Record<string, unknown> | undefined} */ (data.settings);
   if (settings !== undefined && !isPlainObject(settings)) {
     errors.push("settings must be an object when present");
@@ -268,8 +277,11 @@ export function validateWorkspace(data, options = {}) {
  * @property {(data: Record<string, unknown>) => Record<string, unknown>} up
  */
 
-/** Registered migrations, oldest first. Empty until schema v2 exists. */
-export const migrations = /** @type {Migration[]} */ ([]);
+/** Registered migrations, oldest first. */
+export const migrations = /** @type {Migration[]} */ ([
+  // v2: image bytes live in the asset registry.
+  { from: 1, to: 2, up: (data) => ({ ...data, assets: data.assets ?? {} }) }
+]);
 
 /**
  * Bring a workspace JSON document up to the current schema version.
@@ -287,13 +299,16 @@ export function migrateWorkspace(data, options = {}) {
   let current = /** @type {Record<string, unknown>} */ ({ ...data });
   let version = typeof current.schemaVersion === "number" ? current.schemaVersion : 0;
   let steps = 0;
-  for (const migration of migrations) {
-    if (version === migration.from) {
+  for (let advanced = true; advanced; ) {
+    advanced = false;
+    const due = [...migrations, ...(options.migrations ?? [])].filter((migration) => migration.from === version);
+    for (const migration of due) {
       current = migration.up(current);
       current.schemaVersion = migration.to;
-      version = migration.to;
       steps += 1;
+      advanced = true;
     }
+    if (advanced) version = due[0].to;
   }
   if (version !== SCHEMA_VERSION) {
     return {

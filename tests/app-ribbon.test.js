@@ -86,6 +86,14 @@ describe("getTabs", () => {
     expect(ids(controls)).toContain("reference-expression");
   });
 
+  it("offers Image in the document Insert tab, which opens the editor's file picker", () => {
+    const image = allControls("document").find((control) => control.id === "insert-image");
+    const pickImage = vi.fn();
+    expect(image).toBeTruthy();
+    image.action({ docEditor: { pickImage } }, document.body);
+    expect(pickImage).toHaveBeenCalled();
+  });
+
   it("keeps the sheet embed seam disabled with a reason", () => {
     const seam = allControls("sheet").find((control) => control.id === "embed-reference");
     expect(seam?.enabled?.(/** @type {any} */ ({}))).toBe(false);

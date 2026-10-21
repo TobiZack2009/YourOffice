@@ -550,16 +550,35 @@ describe("lifecycle", () => {
 });
 
 describe("images", () => {
-  it("inserts a data-URL image centred and fitted inside the slide", () => {
-    const { editor, slide, object } = setup();
-    editor.insertImage("data:image/png;base64,AAAA", { width: 4000, height: 2000 });
+  it("stores the image once in the registry and fits it inside the slide, centred", () => {
+    const { editor, ws, slide, object } = setup();
+    editor.insertImage({ mimeType: "image/png", name: "wide.png", data: "AAAA" }, { width: 4000, height: 2000 });
     const image = object(slide().objectOrder.at(-1));
     expect(image.type).toBe("image");
-    expect(image.src).toBe("data:image/png;base64,AAAA");
+    expect(ws.getAsset(image.assetId)).toMatchObject({ mimeType: "image/png", name: "wide.png" });
     expect(image.width).toBeLessThanOrEqual(1280);
     expect(image.height).toBeLessThanOrEqual(720);
     expect(image.width / image.height).toBeCloseTo(2, 1);
     expect(editor.getSelection()).toEqual([image.id]);
+  });
+
+  it("undoes the object and the insert as one step", () => {
+    const { editor, ws, slide } = setup();
+    const before = slide().objectOrder.length;
+    editor.insertImage({ mimeType: "image/png", name: "a.png", data: "AAAA" });
+    expect(slide().objectOrder).toHaveLength(before + 1);
+    ws.undo();
+    expect(slide().objectOrder).toHaveLength(before);
+  });
+
+  it("reuses the asset when the same image is inserted twice", () => {
+    const { editor, ws, slide, object } = setup();
+    const image = { mimeType: "image/png", name: "a.png", data: "AAAA" };
+    editor.insertImage(image);
+    editor.insertImage(image);
+    const [first, second] = slide().objectOrder.slice(-2).map(object);
+    expect(second.assetId).toBe(first.assetId);
+    expect(ws.assetIds()).toHaveLength(1);
   });
 });
 

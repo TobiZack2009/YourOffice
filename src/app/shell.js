@@ -15,6 +15,7 @@ import { createPresentationEditor } from "./presentation-editor.js";
 import { createRibbon } from "./ribbon.js";
 import { createQuickFind } from "./quick-find.js";
 import { createSlideshow } from "./slideshow.js";
+import { createAssetUrls } from "./asset-urls.js";
 import { icon } from "./icons.js";
 import { usesModelHistory } from "./history-scope.js";
 import { createKeyboard } from "./keyboard.js";
@@ -100,6 +101,8 @@ export function mountApp(root, workspace, options = {}) {
   const session = options.session ?? createSession();
   /** This app's own notice host: two mounted apps never share a message. */
   const notice = createNotice();
+  const assetUrls = createAssetUrls(workspace);
+  const resolveAssetUrl = (/** @type {string} */ assetId) => assetUrls.url(assetId);
   /** The open page is session state: `selectedPageId()` reads it, `openPage` writes it. */
   const selectedPageId = () => session.get().selectedPageId;
   /** @param {string | null} pageId */
@@ -326,6 +329,7 @@ export function mountApp(root, workspace, options = {}) {
     editor.stopPreview();
     const show = createSlideshow(workspace, pageId, {
       startSlideId: from === "current" ? editor.getSlideId() : null,
+      resolveAssetUrl,
       navigate: (target) => selectSidebar(target),
       onExit: (slideId) => {
         state.slideshow = null;
@@ -423,6 +427,7 @@ export function mountApp(root, workspace, options = {}) {
       const editor = createDocumentEditor(workspace, page.id, {
         notice,
         resolvePageTitle: (id) => pageTitle(workspace, id),
+        resolveAssetUrl,
         navigate: (id) => selectSidebar(id),
         onActiveChange: () => updateChromeLater()
       });
@@ -450,6 +455,7 @@ export function mountApp(root, workspace, options = {}) {
       let built = false;
       const presentationEditor = createPresentationEditor(workspace, page.id, {
         notice,
+        resolveAssetUrl,
         navigate: (id) => selectSidebar(id),
         onChange: () => updateChromeLater(),
         onSelectionChange: () => scheduleRibbonUpdate(),
@@ -720,6 +726,7 @@ export function mountApp(root, workspace, options = {}) {
       state.sheetEditor = null;
       state.presentationEditor?.destroy();
       state.presentationEditor = null;
+      assetUrls.destroy();
       clear(root);
     },
     /** @param {string} pageId */

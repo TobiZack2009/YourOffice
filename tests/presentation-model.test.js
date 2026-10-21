@@ -35,7 +35,8 @@ describe("createObject", () => {
     expect(line.height).toBe(0);
     expect(line.flipV).toBe(false);
 
-    expect(createObject("image", { src: "data:image/png;base64,AAAA" }).src).toContain("data:image/png");
+    expect(createObject("image", { assetId: "asset_1" }).assetId).toBe("asset_1");
+    expect(createObject("image").assetId).toBe("");
   });
 
   it("deep-copies its input", () => {
@@ -72,7 +73,9 @@ describe("validateObject", () => {
     expect(validateObject(createObject("text", { text: { runs: [{ text: "" }] } }))).not.toEqual([]);
     expect(validateObject({ ...createObject("shape"), link: { kind: "url" } })).not.toEqual([]);
     expect(validateObject({ ...createObject("shape"), link: { kind: "url", url: "https://x.test" } })).toEqual([]);
-    expect(validateObject(createObject("image", { src: "javascript:alert(1)" }))).not.toEqual([]);
+    expect(validateObject({ ...createObject("image"), assetId: 3 })).not.toEqual([]);
+    expect(validateObject({ ...createObject("shape"), assetId: "asset_1" })).not.toEqual([]);
+    expect(validateObject(createObject("image", { assetId: "asset_1" }))).toEqual([]);
     expect(validateObject({ ...createObject("line"), text: { runs: [] } })).not.toEqual([]);
   });
 });
