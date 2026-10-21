@@ -9,7 +9,7 @@
 
 import { planSlideReorder } from "../presentation/geometry.js";
 import { ANIMATION_DEFAULTS, ANIM_MAX_MS } from "../presentation/model.js";
-import { h, clear } from "./dom.js";
+import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { runsToPlainText } from "./inline.js";
 
@@ -200,12 +200,24 @@ export function createAnimationTimeline(api) {
     return { id: row.dataset.animationId, field: active.dataset.field };
   }
 
+  /** @type {Map<string, { signature: string, row: HTMLElement }>} Rows drawn so far, by animation id. */
+  const rows = new Map();
+
+  /** Forget a row so the next pass draws it again (its fields may show text the model did not take). */
+  function invalidate(/** @type {string} */ id) {
+    rows.get(id)?.row.remove();
+    rows.delete(id);
+  }
+
   /**
    * @param {string} id
    * @param {Record<string, unknown>} patch
    */
   function update(id, patch) {
-    if (api.onUpdate(id, patch) === false) render();
+    if (api.onUpdate(id, patch) === false) {
+      invalidate(id);
+      render();
+    }
   }
 
   function select() {
@@ -229,152 +241,204 @@ export function createAnimationTimeline(api) {
     }
   }
 
+  /** @type {HTMLButtonElement} */
+  const toggle = /** @type {any} */ (h("button", {
+    class: "timeline-preview",
+    type: "button",
+    "data-action": "timeline-preview"
+  }));
+  toggle.addEventListener("click", () => api.onTogglePreview());
+  const count = h("span", { class: "timeline-count", "data-role": "timeline-count" });
+  const header = h("header", { class: "timeline-header" }, [h("span", { class: "timeline-title", text: "Timeline" }), count, toggle]);
+  const empty = h("p", {
+    class: "timeline-empty",
+    "data-role": "timeline-empty",
+    text: "No animations on this slide. Select an object, then pick an effect."
+  });
+  const list = h("div", { class: "timeline-list", role: "list" });
+  element.append(header);
+  let toggleLook = "";
+
+  /**
+   * Everything a row shows. Two passes with the same signature draw the same row, so the first
+   * row element is kept (and with it focus, an open dropdown, a half-typed number).
+   * @param {import("../presentation/model.js").Animation} animation
+   * @param {import("../presentation/model.js").SlideObject | undefined} object
+   * @param {number} index
+   * @param {number} total
+   * @param {boolean} previewing
+   */
+  const rowSignature = (animation, object, index, total, previewing) =>
+    JSON.stringify([animation, objectLabel(object), index, index === total - 1, previewing]);
+
   function build() {
     const slide = api.getSlide();
-    const order = slide?.animationOrder ?? [];
+    const order = (slide?.animationOrder ?? []).filter((id) => slide?.animations[id]);
     const previewing = api.isPreviewing();
-    const selected = api.getSelectedId();
-    const scrollTop = element.scrollTop;
     const focus = focusedField();
-    clear(element);
 
-    const toggle = h("button", {
-      class: "timeline-preview",
-      type: "button",
-      "data-action": "timeline-preview",
-      "aria-pressed": previewing ? "true" : "false",
-      disabled: !previewing && order.length === 0
-    }, [icon(previewing ? "stop" : "play", { size: 14 }), h("span", { text: previewing ? "Stop" : "Preview" })]);
-    toggle.addEventListener("click", () => api.onTogglePreview());
-
-    element.append(h("header", { class: "timeline-header" }, [
-      h("span", { class: "timeline-title", text: "Timeline" }),
-      h("span", { class: "timeline-count", "data-role": "timeline-count", text: String(order.length) }),
-      toggle
-    ]));
+    const look = previewing ? "stop" : "play";
+    if (look !== toggleLook) {
+      toggleLook = look;
+      toggle.replaceChildren(icon(look, { size: 14 }), h("span", { text: previewing ? "Stop" : "Preview" }));
+    }
+    toggle.setAttribute("aria-pressed", previewing ? "true" : "false");
+    toggle.disabled = !previewing && order.length === 0;
+    count.textContent = String(order.length);
 
     if (!slide || order.length === 0) {
-      element.append(h("p", {
-        class: "timeline-empty",
-        "data-role": "timeline-empty",
-        text: "No animations on this slide. Select an object, then pick an effect."
-      }));
+      for (const id of [...rows.keys()]) invalidate(id);
+      list.replaceChildren();
+      if (list.parentNode === element) list.remove();
+      if (!empty.parentNode) element.append(empty);
       return;
     }
+    if (empty.parentNode) empty.remove();
+    if (!list.parentNode) element.append(list);
 
-    const list = h("div", { class: "timeline-list", role: "list" });
+    /** @type {HTMLElement[]} */
+    const wanted = [];
     order.forEach((id, index) => {
       const animation = slide.animations[id];
-      if (!animation) return;
       const object = slide.objects[animation.objectId];
-
-      const up = h("button", {
-        class: "timeline-button",
-        type: "button",
-        "data-action": "animation-up",
-        title: "Move earlier",
-        "aria-label": "Move earlier",
-        disabled: index === 0
-      }, [icon("move-up", { size: 14 })]);
-      const down = h("button", {
-        class: "timeline-button",
-        type: "button",
-        "data-action": "animation-down",
-        title: "Move later",
-        "aria-label": "Move later",
-        disabled: index === order.length - 1
-      }, [icon("move-down", { size: 14 })]);
-      const remove = h("button", {
-        class: "timeline-button",
-        type: "button",
-        "data-action": "animation-delete",
-        title: "Remove animation",
-        "aria-label": "Remove animation"
-      }, [icon("trash", { size: 14 })]);
-
-      const row = h("div", {
-        class: `animation-row${id === selected ? " is-selected" : ""}`,
-        role: "listitem",
-        draggable: previewing ? null : "true",
-        "data-animation-id": id,
-        "data-effect": animation.effect,
-        "data-trigger": animation.trigger,
-        "aria-current": id === selected ? "true" : "false"
-      }, [
-        h("span", { class: "animation-grip", "aria-hidden": "true" }, [icon("grip", { size: 14 })]),
-        h("span", { class: "animation-order", text: String(index + 1) }),
-        h("span", { class: "animation-trigger" }, [
-          icon(TRIGGER_ICONS[animation.trigger], { size: 14 }),
-          inlineSelect("trigger", "Start", Object.entries(TRIGGER_LABELS), animation.trigger, (value) => update(id, { trigger: value }))
-        ]),
-        h("span", { class: "animation-object", text: objectLabel(object) }),
-        h("span", { class: "animation-effect" }, [
-          inlineSelect("effect", "Effect", Object.entries(EFFECT_LABELS), animation.effect, (value) => update(id, effectPatch(animation, value))),
-          animation.effect === "slide-in"
-            ? inlineSelect("direction", "Direction", Object.entries(DIRECTION_LABELS), animation.direction ?? "left", (value) => update(id, { direction: value }))
-            : null
-        ]),
-        h("span", { class: "animation-timing" }, [
-          inlineMs("delay", "Delay (ms)", animation.delay, (value) => update(id, { delay: value }), render),
-          inlineMs("duration", "Duration (ms)", animation.duration, (value) => update(id, { duration: value }), render)
-        ]),
-        up,
-        down,
-        remove
-      ]);
-
-      row.addEventListener("click", (event) => {
-        if (/** @type {Element} */ (event.target).closest("button, input, select")) return;
-        api.onSelect(id);
-      });
-      // Using a field in a row also selects that row.
-      row.addEventListener("focusin", () => {
-        if (id !== api.getSelectedId()) api.onSelect(id);
-      });
-      up.addEventListener("click", () => api.onMove(id, index - 1));
-      down.addEventListener("click", () => api.onMove(id, index + 1));
-      remove.addEventListener("click", () => api.onDelete(id));
-
-      row.addEventListener("dragstart", (event) => {
-        dragId = id;
-        row.classList.add("is-dragging");
-        /** @type {DragEvent} */ (event).dataTransfer?.setData("text/plain", id);
-      });
-      row.addEventListener("dragend", () => {
-        dragId = null;
-        row.classList.remove("is-dragging");
-        clearDropMarks();
-      });
-      row.addEventListener("dragover", (event) => {
-        if (!dragId) return;
-        event.preventDefault();
-        clearDropMarks();
-        const target = dropTarget(id, /** @type {MouseEvent} */ (event), row);
-        if (planSlideReorder(slide.animationOrder, dragId, target)) {
-          row.classList.add(target.type === "after" ? "drop-after" : "drop-before");
-        }
-      });
-      row.addEventListener("drop", (event) => {
-        if (!dragId) return;
-        event.preventDefault();
-        const dragged = dragId;
-        const target = dropTarget(id, /** @type {MouseEvent} */ (event), row);
-        dragId = null;
-        clearDropMarks();
-        const plan = planSlideReorder(slide.animationOrder, dragged, target);
-        if (plan) api.onMove(dragged, plan.index);
-      });
-
-      list.append(row);
+      const signature = rowSignature(animation, object, index, order.length, previewing);
+      const cached = rows.get(id);
+      if (cached && cached.signature === signature) {
+        wanted.push(cached.row);
+        return;
+      }
+      cached?.row.remove();
+      const row = buildRow(id, animation, object, index, order.length, previewing);
+      rows.set(id, { signature, row });
+      wanted.push(row);
     });
-    element.append(list);
-    element.scrollTop = scrollTop;
-    if (focus) {
+    for (const id of [...rows.keys()]) {
+      if (order.includes(id)) continue;
+      invalidate(id);
+    }
+    wanted.forEach((row, index) => {
+      if (list.children[index] !== row) list.insertBefore(row, list.children[index] ?? null);
+    });
+    select();
+    if (focus && !element.contains(document.activeElement)) {
       const target = /** @type {HTMLElement | null} */ (
         list.querySelector(`[data-animation-id="${focus.id}"] [data-field="${focus.field}"]`)
       );
       target?.focus();
     }
+  }
+
+  /**
+   * @param {string} id
+   * @param {import("../presentation/model.js").Animation} animation
+   * @param {import("../presentation/model.js").SlideObject | undefined} object
+   * @param {number} index
+   * @param {number} total
+   * @param {boolean} previewing
+   * @returns {HTMLElement}
+   */
+  function buildRow(id, animation, object, index, total, previewing) {
+    const revert = () => {
+      invalidate(id);
+      render();
+    };
+    const up = h("button", {
+      class: "timeline-button",
+      type: "button",
+      "data-action": "animation-up",
+      title: "Move earlier",
+      "aria-label": "Move earlier",
+      disabled: index === 0
+    }, [icon("move-up", { size: 14 })]);
+    const down = h("button", {
+      class: "timeline-button",
+      type: "button",
+      "data-action": "animation-down",
+      title: "Move later",
+      "aria-label": "Move later",
+      disabled: index === total - 1
+    }, [icon("move-down", { size: 14 })]);
+    const remove = h("button", {
+      class: "timeline-button",
+      type: "button",
+      "data-action": "animation-delete",
+      title: "Remove animation",
+      "aria-label": "Remove animation"
+    }, [icon("trash", { size: 14 })]);
+
+    const row = h("div", {
+      class: "animation-row",
+      role: "listitem",
+      draggable: previewing ? null : "true",
+      "data-animation-id": id,
+      "data-effect": animation.effect,
+      "data-trigger": animation.trigger
+    }, [
+      h("span", { class: "animation-grip", "aria-hidden": "true" }, [icon("grip", { size: 14 })]),
+      h("span", { class: "animation-order", text: String(index + 1) }),
+      h("span", { class: "animation-trigger" }, [
+        icon(TRIGGER_ICONS[animation.trigger], { size: 14 }),
+        inlineSelect("trigger", "Start", Object.entries(TRIGGER_LABELS), animation.trigger, (value) => update(id, { trigger: value }))
+      ]),
+      h("span", { class: "animation-object", text: objectLabel(object) }),
+      h("span", { class: "animation-effect" }, [
+        inlineSelect("effect", "Effect", Object.entries(EFFECT_LABELS), animation.effect, (value) => update(id, effectPatch(animation, value))),
+        animation.effect === "slide-in"
+          ? inlineSelect("direction", "Direction", Object.entries(DIRECTION_LABELS), animation.direction ?? "left", (value) => update(id, { direction: value }))
+          : null
+      ]),
+      h("span", { class: "animation-timing" }, [
+        inlineMs("delay", "Delay (ms)", animation.delay, (value) => update(id, { delay: value }), revert),
+        inlineMs("duration", "Duration (ms)", animation.duration, (value) => update(id, { duration: value }), revert)
+      ]),
+      up,
+      down,
+      remove
+    ]);
+
+    row.addEventListener("click", (event) => {
+      if (/** @type {Element} */ (event.target).closest("button, input, select")) return;
+      api.onSelect(id);
+    });
+    // Using a field in a row also selects that row.
+    row.addEventListener("focusin", () => {
+      if (id !== api.getSelectedId()) api.onSelect(id);
+    });
+    up.addEventListener("click", () => api.onMove(id, index - 1));
+    down.addEventListener("click", () => api.onMove(id, index + 1));
+    remove.addEventListener("click", () => api.onDelete(id));
+
+    const order = () => api.getSlide()?.animationOrder ?? [];
+    row.addEventListener("dragstart", (event) => {
+      dragId = id;
+      row.classList.add("is-dragging");
+      /** @type {DragEvent} */ (event).dataTransfer?.setData("text/plain", id);
+    });
+    row.addEventListener("dragend", () => {
+      dragId = null;
+      row.classList.remove("is-dragging");
+      clearDropMarks();
+    });
+    row.addEventListener("dragover", (event) => {
+      if (!dragId) return;
+      event.preventDefault();
+      clearDropMarks();
+      const target = dropTarget(id, /** @type {MouseEvent} */ (event), row);
+      if (planSlideReorder(order(), dragId, target)) {
+        row.classList.add(target.type === "after" ? "drop-after" : "drop-before");
+      }
+    });
+    row.addEventListener("drop", (event) => {
+      if (!dragId) return;
+      event.preventDefault();
+      const dragged = dragId;
+      const target = dropTarget(id, /** @type {MouseEvent} */ (event), row);
+      dragId = null;
+      clearDropMarks();
+      const plan = planSlideReorder(order(), dragged, target);
+      if (plan) api.onMove(dragged, plan.index);
+    });
+    return row;
   }
 
   element.addEventListener("keydown", (event) => {

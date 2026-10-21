@@ -366,6 +366,53 @@ describe("timeline panel", () => {
     timeline.element.querySelector(".animation-row").click();
     expect(onSelect).toHaveBeenCalledWith(animation.id);
   });
+
+  describe("keyed rows", () => {
+    const twoAnimations = () => {
+      const ctx = setup();
+      ctx.editor.selectObjects([ctx.a]);
+      ctx.editor.addAnimation("fade-in");
+      ctx.editor.selectObjects([ctx.b]);
+      ctx.editor.addAnimation("slide-in");
+      return ctx;
+    };
+
+    it("keeps untouched rows as the same elements when another animation changes", () => {
+      const { editor, slide } = twoAnimations();
+      const [first, second] = rows(editor);
+      const secondId = slide().animationOrder[1];
+      const el = second.querySelector('[data-field="delay"]') ?? second.querySelector('[data-field="duration"]');
+      el.value = "700";
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(slide().animations[secondId]).toMatchObject({});
+      const after = rows(editor);
+      expect(after[0]).toBe(first);
+      expect(after).toHaveLength(2);
+    });
+
+    it("moves selection between rows without replacing them", () => {
+      const { editor } = twoAnimations();
+      const before = rows(editor);
+      before[0].click();
+      const after = rows(editor);
+      expect(after[0]).toBe(before[0]);
+      expect(after[1]).toBe(before[1]);
+      expect(after[0].classList.contains("is-selected")).toBe(true);
+      expect(after[1].classList.contains("is-selected")).toBe(false);
+    });
+
+    it("drops only the removed row", () => {
+      const { editor, a } = twoAnimations();
+      editor.selectObjects([a]);
+      editor.addAnimation("appear");
+      const [first] = rows(editor);
+      editor.removeAnimation();
+      const after = rows(editor);
+      expect(after).toHaveLength(2);
+      // The row that becomes the last one is redrawn (its "move later" button changes).
+      expect(after[0]).toBe(first);
+    });
+  });
 });
 
 describe("stage overlay", () => {

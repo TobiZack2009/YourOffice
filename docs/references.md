@@ -112,6 +112,7 @@ stacked (`.reference-slides`) and never flows inline.
 - Cycle errors carry no path detail; cell-formula to section cycles rely on the evaluator depth
   guard.
 - The shared engine rebuilds the whole workspace per refresh.
+- Table, slide and expression bodies inside a reference view are redrawn on every host pass; only nested document editors are cached by section and container.
 - Arrow navigation in a document host skips embed blocks.
 - An inline embed's inline/break choice reads `clientWidth` at render time (0 when unmounted,
   so tables and slides break until re-rendered).

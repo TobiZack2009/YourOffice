@@ -122,7 +122,7 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
-- The reference views, inspector and timeline rebuild on every change that touches them (rule 7).
+- The reference views redraw their table, slide and expression bodies on every host pass; only nested editors are cached (rule 7). The inspector and the animation timeline are keyed.
 - Class names are global. Styles are split per area and nested, but not scoped, so two areas can
   still collide on a class name (rule 12).
 - `npm run typecheck` reports 127 errors (mostly JSDoc shapes for DOM helpers) and is not part of

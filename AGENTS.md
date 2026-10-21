@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1261 tests green across 72 files; the single-file build is ~451 kB.** Update these two
+**1264 tests green across 72 files; the single-file build is ~451 kB.** Update these two
 numbers when they change.
 
 ## Verification

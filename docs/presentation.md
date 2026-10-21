@@ -105,9 +105,11 @@ duration, apply to all), Animations, Slide Show, View (inspector, snap guides, g
   Animations ribbon tab is active (`View.timeline`, set by the shell from
   `ribbon.getActiveTab()` and `createRibbon(..., { onTabChange })`). Rows edit in place (Start,
   Effect, Direction, Delay/Duration ms); `effectPatch` carries the new effect's default duration
-  only if the old default was untouched; a refused edit reverts the row. Focus is restored after
-  the re-render each edit causes, `select()` re-marks the selected row without a rebuild so
-  open dropdowns survive, and Backspace/Delete in a field never deletes the animation. Rows
+  only if the old default was untouched; a refused edit reverts the row. Rows are keyed by
+  animation id with a signature (the animation, its object's label, position, whether it is
+  last, and the preview state): a change redraws only the rows whose signature changed, the
+  rest keep their element, focus and open dropdowns. `select()` re-marks the selected row, and
+  Backspace/Delete in a field never deletes the animation. Rows
   reorder by drag (`planSlideReorder`) and up/down buttons.
 - **Stage overlay.** Numbered tags, and a dashed line with draggable endpoints for the selected
   motion animation (commits one `updateAnimation` on mouseup). The strip shows an
