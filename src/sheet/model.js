@@ -434,6 +434,33 @@ export function ensureSheetContent(page) {
 }
 
 /**
+ * Read a page's sheet content without touching the model: the live content when it is complete,
+ * otherwise a fresh or repaired copy (never stored). Callers must not mutate it. Malformed
+ * content throws `corruptContent`.
+ * @param {unknown} content The page's `content`.
+ * @param {string} [pageId]
+ * @returns {SheetContent}
+ */
+export function readSheetContent(content, pageId = "page") {
+  const live = /** @type {SheetContent | undefined} */ (content ?? undefined);
+  if (
+    live &&
+    isPlainObject(live.tables) &&
+    Array.isArray(live.tableOrder) &&
+    Object.values(live.tables).every(
+      (table) =>
+        isPlainObject(table.cells) &&
+        isPlainObject(table.rowOverrides) &&
+        isPlainObject(table.columnOverrides) &&
+        Array.isArray(table.merges)
+    )
+  ) {
+    return live;
+  }
+  return ensureSheetContent(/** @type {any} */ ({ id: pageId, content: live ? structuredClone(live) : live }));
+}
+
+/**
  * @param {Table} table
  * @param {number} col
  * @param {number} row

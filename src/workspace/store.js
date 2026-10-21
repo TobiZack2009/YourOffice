@@ -262,6 +262,16 @@ export class Workspace {
     return page ? structuredClone(page) : undefined;
   }
 
+  /**
+   * The live content of a page, for rendering. Not a copy: callers must not mutate it, and it is
+   * replaced wholesale by undo and redo. Undefined for an unknown page or one with no content yet.
+   * @param {string} pageId
+   * @returns {any}
+   */
+  contentOf(pageId) {
+    return this._data.pages[pageId]?.content;
+  }
+
   /** @returns {PageEnvelope[]} All page envelopes. */
   getPages() {
     return Object.values(this._data.pages).map((page) => structuredClone(page));

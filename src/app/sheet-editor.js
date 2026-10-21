@@ -10,8 +10,9 @@
 
 
 import { defaultNotice } from "./notice.js";
+import { pageContent, pageExists } from "../workspace/selectors.js";
 import { explain, isFormulaError } from "../sheet/errors.js";
-import { ensureSheetContent, getCell, positionToA1 } from "../sheet/model.js";
+import { getCell, positionToA1, readSheetContent } from "../sheet/model.js";
 import { renderSheet, updateSheet } from "../sheet/render.js";
 import { TableEngines, changeAffectsBook } from "../sheet/table-engine.js";
 import { h } from "./dom.js";
@@ -129,8 +130,9 @@ export function createSheetEditor(workspace, pageId, options = {}) {
 
   /** @returns {import("../sheet/model.js").SheetContent} */
   function content() {
-    const page = workspace.getPage(pageId);
-    return page ? ensureSheetContent(page) : { tables: {}, tableOrder: [] };
+    return pageExists(workspace, pageId)
+      ? readSheetContent(pageContent(workspace, pageId), pageId)
+      : { tables: {}, tableOrder: [] };
   }
 
   function tableOf(tableId) {

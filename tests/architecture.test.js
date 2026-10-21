@@ -112,16 +112,9 @@ describe("architecture", () => {
   });
 
   it("app code reads page snapshots only where it is allowed to (the list may shrink, never grow)", () => {
-    // `getPage`/`getPages` deep-copy. Render paths read through `workspace/selectors.js`; these
-    // editors still take a snapshot because `ensure*Content` repairs the copy in place.
-    const allowed = new Map([
-      ["app/block-editor.js", 2],
-      ["app/nested-store.js", 1], // defines the store-shaped `getPage`; reads host.data, takes no snapshot
-      ["app/sheet-editor.js", 1],
-      ["app/presentation-editor.js", 1],
-      ["app/slideshow.js", 1],
-      ["app/demo-seed.js", 1]
-    ]);
+    // `getPage`/`getPages` deep-copy. App code reads through `workspace/selectors.js`; the only
+    // `getPage(` left is the nested store's own definition of the store-shaped method.
+    const allowed = new Map([["app/nested-store.js", 1]]);
     const found = new Map();
     for (const file of files.filter((f) => areaOf(f) === "app")) {
       const count = (stripComments(readFileSync(file, "utf8")).match(/\bgetPages?\(/g) ?? []).length;

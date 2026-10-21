@@ -14,7 +14,7 @@
 
 import { hasTransition, lastStep, nextPosition, previousPosition, settledAt, stepEntries, stepLength, transitionBetween, transitionKeyframes } from "../presentation/slideshow.js";
 import { fitScale } from "../presentation/geometry.js";
-import { ensurePresentationContent } from "../presentation/model.js";
+import { readPresentationContent } from "../presentation/model.js";
 import { renderSlide } from "../presentation/render.js";
 import { buildBook } from "../sheet/table-engine.js";
 import { playAnimation } from "./animation-preview.js";
@@ -22,7 +22,7 @@ import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { pageIdOfLink } from "./link-form.js";
 import { enginesFor, staticReferenceHooks } from "./reference-render.js";
-import { pageTitle } from "../workspace/selectors.js";
+import { pageContent, pageExists, pageTitle } from "../workspace/selectors.js";
 
 /**
  * @typedef {object} SlideshowOptions
@@ -78,9 +78,8 @@ const KEYS = {
  * @returns {SlideshowHandle | null} null when the presentation has no slides.
  */
 export function createSlideshow(workspace, pageId, options = {}) {
-  const page = workspace.getPage(pageId);
-  if (!page) return null;
-  const content = ensurePresentationContent(page);
+  if (!pageExists(workspace, pageId)) return null;
+  const content = readPresentationContent(pageContent(workspace, pageId), pageId);
   const order = content.slideOrder.filter((id) => content.slides[id]);
   if (order.length === 0) return null;
   const size = content.size;

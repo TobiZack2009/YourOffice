@@ -14,11 +14,12 @@
 
 import { createId } from "../core/ids.js";
 import { entitiesOf } from "../workspace/changes.js";
+import { pageContent, pageExists } from "../workspace/selectors.js";
 import {
   canIndentBlock,
   canIndentItem,
   canOutdentBlock,
-  ensureDocumentContent
+  readDocumentContent
 } from "../document/model.js";
 import { h } from "./dom.js";
 import { defaultNotice } from "./notice.js";
@@ -138,9 +139,9 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
 
   /** @returns {import("../document/model.js").DocumentContent} */
   function content() {
-    const page = workspace.getPage(pageId);
-    return page
-      ? ensureDocumentContent(page)
+    const raw = pageContent(workspace, pageId);
+    return raw !== undefined || pageExists(workspace, pageId)
+      ? readDocumentContent(raw, pageId)
       : { blockOrder: [], blocks: {} };
   }
 

@@ -4,6 +4,7 @@
  */
 
 import { createWorkspace } from "../domain/index.js";
+import { pageContent } from "../workspace/selectors.js";
 
 /** @typedef {import("../workspace/store.js").Workspace} Workspace */
 
@@ -91,7 +92,7 @@ export function seedDemo(workspace) {
     const { pageId: deckId } = workspace.dispatch("createPage", { type: "presentation", title: "Kickoff deck" });
     const { slideId: first } = workspace.dispatch("createSlide", { pageId: deckId, layout: "title" });
     const { slideId: second } = workspace.dispatch("createSlide", { pageId: deckId, layout: "titleContent" });
-    const content = /** @type {any} */ (workspace.getPage(deckId)?.content);
+    const content = /** @type {any} */ (pageContent(workspace, deckId));
     const [titleId, subtitleId] = content.slides[first].objectOrder;
     workspace.dispatch("setObjectRuns", { pageId: deckId, slideId: first, objectId: titleId, runs: [{ text: "YourOffice" }] });
     workspace.dispatch("setObjectRuns", {

@@ -21,14 +21,14 @@ import { createAnimationTimeline } from "./animation-timeline.js";
 import { createGestureScope } from "./gesture.js";
 import { createInspector } from "./inspector.js";
 import { createPopoverHost } from "./popover.js";
-import { createPresentationContent, ensurePresentationContent } from "../presentation/model.js";
+import { createPresentationContent, readPresentationContent } from "../presentation/model.js";
 import { createSlideStrip } from "./slide-strip.js";
 import { defaultNotice } from "./notice.js";
 import { enginesFor, staticReferenceHooks } from "./reference-render.js";
 import { findSectionByLocator, slideLocator } from "../references/sections.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
-import { pageList, pageTitle } from "../workspace/selectors.js";
+import { pageContent, pageExists, pageList, pageTitle } from "../workspace/selectors.js";
 import { planSlideReorder, rotatedBounds, unionBounds } from "../presentation/geometry.js";
 import { promptName, referenceCount, sectionMenuItems, showMenu as showAnchoredMenu, showReferenceList } from "./handles.js";
 import { createPresentationStage } from "./presentation-stage.js";
@@ -137,8 +137,9 @@ export function createPresentationEditor(workspace, pageId, options = {}) {
 
   function getContent() {
     if (!st.cached) {
-      const page = workspace.getPage(pageId);
-      st.cached = page ? ensurePresentationContent(page) : createPresentationContent();
+      st.cached = pageExists(workspace, pageId)
+        ? readPresentationContent(pageContent(workspace, pageId), pageId)
+        : createPresentationContent();
     }
     return st.cached;
   }

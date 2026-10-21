@@ -532,3 +532,17 @@ export function ensureDocumentContent(page) {
   }
   return content;
 }
+
+/**
+ * Read a page's document content without touching the model: the live content when it is
+ * well formed, otherwise a fresh or repaired copy (never stored). Callers must not mutate it.
+ * Malformed content throws `corruptContent`.
+ * @param {unknown} content The page's `content`.
+ * @param {string} [pageId]
+ * @returns {DocumentContent}
+ */
+export function readDocumentContent(content, pageId = "page") {
+  const live = /** @type {DocumentContent | undefined} */ (content ?? undefined);
+  if (live && Array.isArray(live.blockOrder) && isPlainObject(live.blocks)) return live;
+  return ensureDocumentContent(/** @type {any} */ ({ id: pageId, content: live }));
+}

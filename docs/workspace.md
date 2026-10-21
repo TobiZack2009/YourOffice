@@ -73,7 +73,10 @@ the live data, so stepping through history clones nothing.
   `workspace/changes.js` (`touchesPage`, `entitiesOf`).
 - `workspace/selectors.js` answers render-path questions without cloning: `pageExists`,
   `pageTitle`, `pageType`, `pageInfo`, `pageContent` (live, read-only), `pageList`, `breadcrumb`,
-  `pageTree`. `getPage`/`getPages` remain as explicit snapshot APIs.
+  `pageTree`. `getPage`/`getPages` remain as explicit snapshot APIs. `Workspace.contentOf(id)` is the live
+  content behind `pageContent`; editors pass it to `readDocumentContent`, `readSheetContent` or
+  `readPresentationContent`, which return it as is when well formed and a repaired copy otherwise,
+  never modifying the model.
 
 ## Built-in commands (`workspace/commands.js`)
 

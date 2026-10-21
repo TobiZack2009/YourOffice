@@ -39,9 +39,15 @@ export function createNestedStore(host, sectionId) {
     getPage(/** @type {string} */ id) {
       const container = containerOf(host.data, id);
       if (!container) return undefined;
+      return { ...container, content: this.contentOf(id) };
+    },
+    /** The section's run of blocks as the document (a shallow view; the blocks are the live ones). */
+    contentOf(/** @type {string} */ id) {
+      const container = containerOf(host.data, id);
+      if (!container) return undefined;
       const found = findSection(host.data, sectionId);
       const blockOrder = found && found.containerId === id ? sectionRunIds(container.content, found.section.locator) : [];
-      return { ...container, content: { ...container.content, blockOrder } };
+      return { ...container.content, blockOrder };
     },
     transact: (/** @type {string} */ label, /** @type {() => any} */ fn) => host.transact(label, fn),
     dispatch(/** @type {string} */ type, /** @type {any} */ payload, /** @type {any} */ dispatchOptions) {

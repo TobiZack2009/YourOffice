@@ -611,3 +611,34 @@ export function ensurePresentationContent(page) {
   }
   return content;
 }
+
+/**
+ * Read a page's presentation content without touching the model: the live content when it is
+ * complete, otherwise a fresh or repaired copy (never stored). Callers must not mutate it.
+ * Malformed content throws `corruptContent`.
+ * @param {unknown} content The page's `content`.
+ * @param {string} [pageId]
+ * @returns {PresentationContent}
+ */
+export function readPresentationContent(content, pageId = "page") {
+  const live = /** @type {PresentationContent | undefined} */ (content ?? undefined);
+  if (
+    live &&
+    isPlainObject(live.slides) &&
+    Array.isArray(live.slideOrder) &&
+    isPlainObject(live.size) &&
+    validateSize(live.size).length === 0 &&
+    Object.values(live.slides).every(
+      (slide) =>
+        isPlainObject(slide.objects) &&
+        Array.isArray(slide.objectOrder) &&
+        isPlainObject(slide.background) &&
+        isPlainObject(slide.transition) &&
+        isPlainObject(slide.animations) &&
+        Array.isArray(slide.animationOrder)
+    )
+  ) {
+    return live;
+  }
+  return ensurePresentationContent(/** @type {any} */ ({ id: pageId, content: live ? structuredClone(live) : live }));
+}

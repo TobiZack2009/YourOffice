@@ -63,7 +63,7 @@ export function pageInfo(workspace, pageId) {
  * @returns {any}
  */
 export function pageContent(workspace, pageId) {
-  return typeof pageId === "string" ? workspace.data.pages[pageId]?.content : undefined;
+  return typeof pageId === "string" ? workspace.contentOf(pageId) : undefined;
 }
 
 /**
