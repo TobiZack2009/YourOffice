@@ -144,7 +144,6 @@ describe("architecture", () => {
     // Ceilings, not targets: lower them as the files are split, never raise them.
     const ceilings = new Map([
       ["app/block-editor.js", 820],
-      ["app/sheet-editor.js", 1550],
       ["app/ribbon-tabs.js", 1550],
       ["sheet/commands.js", 820]
     ]);

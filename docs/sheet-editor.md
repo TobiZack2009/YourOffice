@@ -51,7 +51,17 @@ in the cell holding the active range's end (a merged anchor counts for its whole
 
 ## Editor (`app/sheet-editor.js`)
 
-`createSheetEditor(workspace, pageId, options)`.
+`createSheetEditor(workspace, pageId, options)`. `sheet-editor.js` is the kernel: the chrome (cell
+address, formula bar, in-cell input, canvas), one `st` object for the mutable state (`selection`,
+`gesture`, `inputDirty`, `cellEditing`, `suppressBlur`, `clipboard`, `justDragged`), `refresh`, the
+change subscription and the returned handle. The behaviour lives in modules that each take the
+kernel (`ed`) and return their functions, which are added to it as they are built: `sheet-selection.js`,
+`sheet-cell-edit.js` (in-cell editor and formula bar), `sheet-clipboard.js` (fill, copy, paste,
+shortcuts), `sheet-structure.js` (rows, columns, cells, merges, sizes, move and fill ranges),
+`sheet-menus.js` (section handle, context menu), `sheet-gestures.js` (pointer drags) and
+`sheet-input.js` (double click, context menu and keyboard). A module destructures what earlier
+modules offered and calls `ed.name(...)` for what a later one offers. `sheet-cell-input.js` holds
+`parseCellInput` and `rawCellText` (re-exported from `sheet-editor.js`).
 
 - **Selection** is `{tableId, anchor, focus, others[]}`: drag or shift-click for a range,
   Ctrl/Cmd+click (and drag) adds a range, all within one table. `getSelection()` returns the

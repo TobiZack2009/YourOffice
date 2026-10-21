@@ -117,15 +117,14 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
-- `sheet-editor.js` and `ribbon-tabs.js` exceed the size
-  guideline (rule 11). The clipboard, gesture and menu code should move into per-editor modules as
-  each editor is next touched.
+- `ribbon-tabs.js` exceeds the size guideline (rule 11); its tab definitions should move into
+  per-area modules.
 - `block-editor.js` keeps a hand list, `INLINE_COMMITS` (rule 6), to recognise typing commits.
 - `block-editor`, `sheet-editor`, `presentation-editor`, `slideshow` and `demo-seed` still call
   `getPage` (rule 5); the allowlist in the architecture test holds the counts.
 - The reference views, inspector and timeline rebuild on every change that touches them (rule 7).
 - `styles.css` is one unscoped file; styles are not split per area.
-- `npm run typecheck` reports 129 errors (mostly JSDoc shapes for DOM helpers) and is not part of
+- `npm run typecheck` reports 127 errors (mostly JSDoc shapes for DOM helpers) and is not part of
   the definition of done until it is clean.
 
 ## Key types

@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1258 tests green across 72 files; the single-file build is ~445 kB.** Update these two
+**1258 tests green across 72 files; the single-file build is ~450 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -30,7 +30,7 @@ numbers when they change.
 - UI work: `npm run build && npm run smoke` drives the built file in real Chrome
   (`scripts/smoke.mjs`, playwright-core, `channel: "chrome"`); it is not part of `npm test`.
   Extend it when a UI change adds behaviour jsdom cannot check (focus, selection, IndexedDB).
-- `npm run typecheck` (`tsc` + `checkJs`) is advisory: it still reports 129 errors. Do not add new ones.
+- `npm run typecheck` (`tsc` + `checkJs`) is advisory: it still reports 127 errors. Do not add new ones.
 - `tests/architecture.test.js` enforces the import layering, DOM-free model layers, the `getPage`
   allowlist, no `persistence` imports from `app`, and file size ceilings. If it fails, fix the code;
   change the test only with a matching entry under Deviations in `docs/architecture.md`.
