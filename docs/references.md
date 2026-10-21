@@ -94,6 +94,14 @@ stacked (`.reference-slides`) and never flows inline.
 - **`expression-editor.js`**: popover with live result, plain-language error, a list of the
   referenced names with number markers and `is-ref-N` underline colours, and Insert/Apply
   disabled while invalid.
+- **`reference-view.js`** (document host): one frame per reference record id (block-level embed,
+  block-level expression and inline reference). The frame element, its handle and its body are kept
+  between host passes and patched in place (state classes, `data-*`, handle icon and label); the
+  handle and double-click read the frame's current record. A nested document editor is cached by
+  section and container. A static body (table, slide, expression value, missing note) is drawn
+  each pass but replaces the shown one only when it is not `isEqualNode` to it, so an unchanged
+  reference keeps its nodes. A record id drawn twice in one pass (a copy) gets an uncached frame;
+  frames of ids not drawn in a pass are dropped.
 - **`notice.js`**: one `CommandError` surface shared by all three editors.
 - Insert tab: Reference group (Embed, Expression) for documents and presentations; the sheet
   one stays a disabled seam. Presentation specifics (reference objects, `autoHeight`
@@ -112,7 +120,7 @@ stacked (`.reference-slides`) and never flows inline.
 - Cycle errors carry no path detail; cell-formula to section cycles rely on the evaluator depth
   guard.
 - The shared engine rebuilds the whole workspace per refresh.
-- Table, slide and expression bodies inside a reference view are redrawn on every host pass; only nested document editors are cached by section and container.
+- A host that draws references re-examines all of them on every change to any page: bodies are rebuilt and compared, not skipped, because a reference can depend on other pages through formulas and nested embeds and no dependency set is tracked.
 - Arrow navigation in a document host skips embed blocks.
 - An inline embed's inline/break choice reads `clientWidth` at render time (0 when unmounted,
   so tables and slides break until re-rendered).
@@ -123,5 +131,5 @@ stacked (`.reference-slides`) and never flows inline.
 
 `references-scope`, `references-rewrite`, `references-catalog`, `references-commands`,
 `references-fit`, `references-multi-slide`, `cross-table`, `app-references`,
-`app-block-references`, `app-inline-references`, `app-sheet-references`,
+`app-block-references`, `app-reference-view` (frame node identity), `app-inline-references`, `app-sheet-references`,
 `app-slide-references`, `app-presentation-references`.

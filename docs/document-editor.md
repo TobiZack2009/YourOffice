@@ -61,8 +61,8 @@ for editors embedded in list items and sections).
   keeps its element, and blocks are reconciled in place. A block the user owns -- composing
   (`compositionstart..end`), or focused and already showing what the model says -- is never
   replaced. An inline commit marks the blocks it touched as stale (the DOM, not the model they
-  were drawn from, is the truth), so undoing typing redraws them. Page-link, section-embed and inline-reference blocks are redrawn on every pass
-  because they read other pages.
+  were drawn from, is the truth), so undoing typing redraws them. Page-link blocks are redrawn on every pass because they read other pages. Section-embed and
+  inline-reference blocks keep their frame element (`reference-view.js`) and swap a body only when it differs.
 - Typing commits on `input` via `setBlockRuns` / `updateBlock`. The store `change` handler
   skips re-rendering for inline-only commits, which keeps the caret stable.
 - Marks use `document.execCommand` when available, else a manual Range wrap/unwrap (jsdom).

@@ -8,9 +8,12 @@
  *   - embed of slide   the slide drawn static at the display width
  *   - expression       the value, read-only (scalar chip, blocks, grid, slide, error chip)
  *
- * The host editor owns this cache. A nested editor is kept between renders, so a
- * re-render of the host does not lose it; it is rebuilt only when the block now
- * points somewhere else. `begin` / `render` / `end` bracket one host render.
+ * The host editor owns this cache. Every reference is keyed by its record id: its frame
+ * element is kept between renders and patched in place (state classes, handle, body). A nested
+ * editor is kept too, and is rebuilt only when the block now points somewhere else. A static
+ * body (table, slide, expression value) is drawn fresh each pass but swapped in only when it
+ * differs from what is shown (`isEqualNode`), so an unchanged reference keeps its nodes.
+ * `begin` / `render` / `end` bracket one host render.
  */
 
 import { renderRuns } from "../document/render.js";
@@ -20,7 +23,7 @@ import { findSection, sectionKind, sectionRunIds } from "../references/sections.
 import { HEADER_WIDTH, columnWidthOf } from "../calc/model.js";
 import { isHandle } from "../calc/values.js";
 import { buildBook } from "../references/table-engine.js";
-import { clear, h } from "./dom.js";
+import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { defaultNotice } from "./notice.js";
 import {
@@ -46,6 +49,16 @@ import {
  */
 
 /**
+ * @typedef {object} Frame One drawn reference: its element, handle and body.
+ * @property {"embed" | "expression" | "inline"} kind
+ * @property {any} record The current record (the block or run reference); it changes under the frame.
+ * @property {HTMLElement} el
+ * @property {HTMLElement} body
+ * @property {HTMLElement} handle
+ * @property {"link" | "function" | "removed" | null} look
+ */
+
+/**
  * @param {ReferenceViewsOptions} options
  */
 export function createReferenceViews(options) {
@@ -56,6 +69,8 @@ export function createReferenceViews(options) {
   let used = new Set();
   /** @type {Map<string, () => void>} Expression bodies that can be refreshed in place. */
   const updaters = new Map();
+  /** @type {Map<string, Frame>} Drawn reference frames by record id. */
+  const frames = new Map();
   /** @type {{ engines: any, book: any } | null} */
   let pass = null;
 
@@ -86,34 +101,98 @@ export function createReferenceViews(options) {
       view.editor.destroy();
       views.delete(id);
     }
+    for (const id of frames.keys()) if (!used.has(id)) frames.delete(id);
     pass = null;
   }
 
   /**
+   * The cached frame of a record, or a new one. A record id drawn twice in one pass (a copy)
+   * gets its own uncached frame so the first keeps its element.
    * @param {any} record
-   * @param {"link" | "function" | "removed"} look
+   * @param {Frame["kind"]} kind
+   * @param {() => Frame} build
+   * @returns {Frame}
+   */
+  function acquire(record, kind, build) {
+    const duplicate = used.has(record.id);
+    used.add(record.id);
+    let frame = duplicate ? undefined : frames.get(record.id);
+    if (frame && frame.kind !== kind) {
+      frames.delete(record.id);
+      frame = undefined;
+    }
+    if (!frame) {
+      frame = build();
+      if (!duplicate) frames.set(record.id, frame);
+    }
+    frame.record = record;
+    return frame;
+  }
+
+  /**
+   * Show `fresh` in `body` unless an equal node is already there.
+   * @param {HTMLElement} body
+   * @param {Node} fresh
+   */
+  function show(body, fresh) {
+    const current = body.firstChild;
+    if (current === fresh && body.childNodes.length === 1) return;
+    if (current && body.childNodes.length === 1 && current.isEqualNode(fresh)) return;
+    body.replaceChildren(fresh);
+  }
+
+  /**
+   * The handle button of a frame. It reads the frame's current record when pressed.
+   * @param {Frame} frame
    * @returns {HTMLElement}
    */
-  function handleButton(record, look) {
-    const name = look === "function" ? "expression" : look === "removed" ? "unlink" : "link";
-    const label =
-      look === "function" ? "Expression options" : look === "removed" ? "Source removed: reference options" : "Reference options";
+  function handleButton(frame) {
     const button = h("button", {
       class: "reference-handle",
       type: "button",
       contenteditable: "false",
-      "data-role": "reference-handle",
-      "aria-label": label,
-      title: label
+      "data-role": "reference-handle"
     });
-    button.append(icon(name, { size: 14 }));
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      options.onHandle(record, button);
+      options.onHandle(frame.record, button);
     });
     return button;
+  }
+
+  /**
+   * @param {Frame} frame
+   * @param {"link" | "function" | "removed"} look
+   */
+  function setLook(frame, look) {
+    if (frame.look === look) return;
+    frame.look = look;
+    const name = look === "function" ? "expression" : look === "removed" ? "unlink" : "link";
+    const label =
+      look === "function" ? "Expression options" : look === "removed" ? "Source removed: reference options" : "Reference options";
+    frame.handle.setAttribute("aria-label", label);
+    frame.handle.setAttribute("title", label);
+    frame.handle.replaceChildren(icon(name, { size: 14 }));
+  }
+
+  /**
+   * A frame with a handle and a body.
+   * @param {Frame["kind"]} kind
+   * @param {any} record
+   * @param {string} tag
+   * @param {Record<string, string>} props
+   * @returns {Frame}
+   */
+  function buildFrame(kind, record, tag, props) {
+    const outer = h(tag, props);
+    const body = h(tag, { class: "reference-body" });
+    /** @type {Frame} */
+    const frame = { kind, record, el: outer, body, handle: /** @type {any} */ (null), look: null };
+    frame.handle = handleButton(frame);
+    outer.append(frame.handle, body);
+    return frame;
   }
 
   /**
@@ -122,7 +201,6 @@ export function createReferenceViews(options) {
    * @returns {HTMLElement}
    */
   function render(record) {
-    used.add(record.id);
     return record.kind === "expression" ? renderExpression(record) : renderEmbed(record);
   }
 
@@ -132,24 +210,27 @@ export function createReferenceViews(options) {
    */
   function renderEmbed(record) {
     const data = options.workspace.data;
+    const frame = acquire(record, "embed", () =>
+      buildFrame("embed", record, "div", {
+        class: "reference is-embed",
+        contenteditable: "false",
+        "data-reference-id": record.id,
+        "data-kind": "embed"
+      })
+    );
     const found = record.sectionId ? findSection(data, record.sectionId) : null;
     const state = !found ? "missing" : found.detached ? "removed" : "live";
-    const frame = h("div", {
-      class: `reference is-embed is-${state}`,
-      contenteditable: "false",
-      "data-reference-id": record.id,
-      "data-kind": "embed",
-      "data-state": state
-    });
-    const body = h("div", { class: "reference-body" });
-    frame.append(handleButton(record, state === "live" ? "link" : "removed"), body);
+    for (const name of ["live", "missing", "removed"]) frame.el.classList.toggle(`is-${name}`, name === state);
+    frame.el.setAttribute("data-state", state);
+    setLook(frame, state === "live" ? "link" : "removed");
 
     if (!found) {
-      body.append(missing("The source was removed."));
-      return frame;
+      frame.el.removeAttribute("data-section-kind");
+      show(frame.body, missing("The source was removed."));
+      return frame.el;
     }
     const kind = sectionKind(found);
-    frame.setAttribute("data-section-kind", kind);
+    frame.el.setAttribute("data-section-kind", kind);
     if (kind === "blocks") {
       const signature = `${record.sectionId}|${found.containerId}`;
       let view = views.get(record.id);
@@ -164,13 +245,13 @@ export function createReferenceViews(options) {
       } else {
         view.editor.refresh();
       }
-      body.append(view.editor.element);
+      show(frame.body, view.editor.element);
     } else if (kind === "table") {
-      body.append(renderTableSection(context(), found));
+      show(frame.body, renderTableSection(context(), found));
     } else {
-      body.append(renderSlideSection(context(), found, record.display?.width));
+      show(frame.body, renderSlideSection(context(), found, record.display?.width));
     }
-    return frame;
+    return frame.el;
   }
 
   /**
@@ -178,33 +259,34 @@ export function createReferenceViews(options) {
    * @returns {HTMLElement}
    */
   function renderExpression(record) {
-    const frame = h("div", {
-      class: "reference is-expression",
-      contenteditable: "false",
-      "data-reference-id": record.id,
-      "data-kind": "expression"
+    const frame = acquire(record, "expression", () => {
+      const built = buildFrame("expression", record, "div", {
+        class: "reference is-expression",
+        contenteditable: "false",
+        "data-reference-id": record.id,
+        "data-kind": "expression"
+      });
+      built.el.addEventListener("dblclick", (event) => {
+        if (/** @type {HTMLElement} */ (event.target).closest(".reference-handle")) return;
+        options.onEditExpression?.(built.record, built.el);
+      });
+      return built;
     });
-    const body = h("div", { class: "reference-body" });
-    frame.append(handleButton(record, "function"), body);
+    setLook(frame, "function");
     const fill = () => {
-      clear(body);
-      const result = evaluateExpression(options.workspace.data, options.hostId, record.expression ?? "", {
+      const result = evaluateExpression(options.workspace.data, options.hostId, frame.record.expression ?? "", {
         book: shared().book
       });
-      frame.setAttribute("data-result", result.type);
+      frame.el.setAttribute("data-result", result.type);
       const shown = renderValue(context(), result.value);
       if (shown.classList.contains("is-error")) {
         shown.addEventListener("click", () => notice.show(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
       }
-      body.append(shown);
+      show(frame.body, shown);
     };
     fill();
     updaters.set(record.id, fill);
-    frame.addEventListener("dblclick", (event) => {
-      if (/** @type {HTMLElement} */ (event.target).closest(".reference-handle")) return;
-      options.onEditExpression?.(record, frame);
-    });
-    return frame;
+    return frame.el;
   }
 
   /**
@@ -250,15 +332,24 @@ export function createReferenceViews(options) {
    * @returns {HTMLElement}
    */
   function renderInline(record, containerWidth = 0) {
-    used.add(record.id);
     const data = options.workspace.data;
-    const outer = h("span", { class: `reference is-${record.kind}`, "data-kind": record.kind });
-    const body = h("span", { class: "reference-body" });
-    const handle = handleButton(record, record.kind === "expression" ? "function" : "link");
-    outer.append(handle, body);
+    const frame = acquire(record, "inline", () => {
+      const built = buildFrame("inline", record, "span", {
+        class: `reference is-${record.kind}`,
+        "data-kind": record.kind
+      });
+      if (record.kind === "expression") {
+        built.el.addEventListener("dblclick", (event) => {
+          if (/** @type {HTMLElement} */ (event.target).closest(".reference-handle")) return;
+          options.onEditExpression?.(built.record, built.el);
+        });
+      }
+      return built;
+    });
+    const outer = frame.el;
+    const body = frame.body;
 
     const fill = () => {
-      clear(body);
       /** @type {any} */
       let found = null;
       let shape;
@@ -282,32 +373,29 @@ export function createReferenceViews(options) {
       outer.setAttribute("data-state", state);
       outer.setAttribute("data-shape", shape.kind);
       outer.classList.toggle("is-removed", state === "removed");
-      handle.replaceChildren(icon(state === "removed" ? "unlink" : record.kind === "expression" ? "expression" : "link", { size: 14 }));
+      setLook(frame, state === "removed" ? "removed" : record.kind === "expression" ? "function" : "link");
 
+      /** @type {HTMLElement} */
+      let shown;
       if (record.kind === "expression" && !found) {
-        const shown = renderValue(context(), result.value);
+        shown = renderValue(context(), result.value);
         if (shown.classList.contains("is-error")) {
-          shown.addEventListener("click", () => notice.show(shown.getAttribute("data-explanation") ?? "", { kind: "info" }));
+          const chip = shown;
+          chip.addEventListener("click", () => notice.show(chip.getAttribute("data-explanation") ?? "", { kind: "info" }));
         }
-        body.append(shown);
       } else if (!found) {
-        body.append(missing("The source was removed."));
+        shown = missing("The source was removed.");
       } else if (fit === "inline" && shape.kind === "blocks") {
-        body.append(inlineText(found));
+        shown = inlineText(found);
       } else if (record.kind === "expression") {
-        body.append(renderValue(context(), result.value));
+        shown = renderValue(context(), result.value);
       } else {
-        body.append(renderSectionById(context(), record.sectionId, record.display));
+        shown = renderSectionById(context(), record.sectionId, record.display);
       }
+      show(body, shown);
     };
     fill();
     updaters.set(record.id, fill);
-    if (record.kind === "expression") {
-      outer.addEventListener("dblclick", (event) => {
-        if (/** @type {HTMLElement} */ (event.target).closest(".reference-handle")) return;
-        options.onEditExpression?.(record, outer);
-      });
-    }
     return outer;
   }
 
@@ -331,6 +419,7 @@ export function createReferenceViews(options) {
     destroy() {
       for (const view of views.values()) view.editor.destroy();
       views.clear();
+      frames.clear();
       updaters.clear();
     },
     renderSectionById: (/** @type {string} */ sectionId) => renderSectionById(context(), sectionId)

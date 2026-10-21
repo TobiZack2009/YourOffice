@@ -125,7 +125,7 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
 Known departures from the rules. Remove an entry when it is fixed; add one rather than hiding a
 breach.
 
-- The reference views redraw their table, slide and expression bodies on every host pass; only nested editors are cached (rule 7). The inspector and the animation timeline are keyed.
+- Reference frames are keyed and patched in place, but a host that draws references still rebuilds and compares every body on any page change (no dependency set per reference), and reference objects on slides and slide-strip thumbnails that draw references are still redrawn each pass (rule 7).
 - Class names are global and unprefixed. The architecture test makes every class belong to one
   stylesheet, so a second area cannot silently redefine it, but a descendant selector in one area can
   still match a same-named element from another (rule 12).
