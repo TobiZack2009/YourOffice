@@ -44,6 +44,9 @@ function localImports(file) {
   return out;
 }
 
+/** Drop block and line comments so prose in docs never trips a code check. */
+const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
 const areaOf = (path) => {
   const parts = relative(SRC, path).split("/");
   return parts.length === 1 ? "main" : parts[0];
@@ -88,5 +91,69 @@ describe("architecture", () => {
         expect(["workspace", "core"], `${relative(SRC, file)} imports ${to}`).toContain(to);
       }
     }
+  });
+  it("model layers do not touch the DOM, the clock of the page or browser storage", () => {
+    const forbidden = [
+      /\bglobalThis\b/,
+      /\b(localStorage|sessionStorage|indexedDB|requestAnimationFrame)\b/,
+      /\bnavigator\./,
+      /\bdocument\.(create|query|body|get|add|activeElement|defaultView)/,
+      /\bwindow\.(local|session|document|location|add|request|set|get)/,
+      /\bnew (Mutation|Resize|Intersection)Observer\b/,
+      /\bHTML\w*Element\b(?!.*@)/
+    ];
+    const offenders = [];
+    const modelAreas = ["core", "workspace", "sheet", "document", "presentation", "references", "domain"];
+    for (const file of files.filter((f) => modelAreas.includes(areaOf(f)) && !/render[\w-]*\.js$/.test(f))) {
+      const code = stripComments(readFileSync(file, "utf8"));
+      for (const pattern of forbidden) if (pattern.test(code)) offenders.push(`${relative(SRC, file)} matches ${pattern}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("app code reads page snapshots only where it is allowed to (the list may shrink, never grow)", () => {
+    // `getPage`/`getPages` deep-copy. Render paths read through `workspace/selectors.js`; these
+    // editors still take a snapshot because `ensure*Content` repairs the copy in place.
+    const allowed = new Map([
+      ["app/block-editor.js", 2],
+      ["app/sheet-editor.js", 1],
+      ["app/presentation-editor.js", 1],
+      ["app/slideshow.js", 1],
+      ["app/demo-seed.js", 1]
+    ]);
+    const found = new Map();
+    for (const file of files.filter((f) => areaOf(f) === "app")) {
+      const count = (stripComments(readFileSync(file, "utf8")).match(/\bgetPages?\(/g) ?? []).length;
+      if (count > 0) found.set(relative(SRC, file), count);
+    }
+    for (const [file, count] of found) {
+      expect(count, `${file} reads page snapshots`).toBeLessThanOrEqual(allowed.get(file) ?? 0);
+    }
+  });
+
+  it("persistence and the entry points are the only places that know about each other", () => {
+    for (const file of files.filter((f) => areaOf(f) === "app")) {
+      for (const specifier of localImports(file)) {
+        expect(areaOf(normalize(join(dirname(file), specifier))), `${relative(SRC, file)} imports persistence`).not.toBe("persistence");
+      }
+    }
+  });
+
+  it("files stay under 800 lines; the oversized editors may not grow while they wait to be split", () => {
+    // Ceilings, not targets: lower them as the files are split, never raise them.
+    const ceilings = new Map([
+      ["app/block-editor.js", 2800],
+      ["app/presentation-editor.js", 2550],
+      ["app/sheet-editor.js", 1550],
+      ["app/ribbon-tabs.js", 1550],
+      ["sheet/commands.js", 820]
+    ]);
+    const over = [];
+    for (const file of files) {
+      const name = relative(SRC, file);
+      const lines = readFileSync(file, "utf8").split("\n").length;
+      if (lines > (ceilings.get(name) ?? 800)) over.push(`${name} has ${lines} lines`);
+    }
+    expect(over).toEqual([]);
   });
 });

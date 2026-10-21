@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc -p .",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

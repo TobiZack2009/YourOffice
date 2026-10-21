@@ -2,7 +2,7 @@
 
 `src/persistence/` keeps the workspace between visits. It depends on `core`, `workspace` and
 `domain` only; the shell receives autosave as an injected object (`options.persistence`) and
-`main.js` wires the two together.
+`boot.js` wires the two together.
 
 ## Storage (`storage.js`)
 
@@ -16,7 +16,7 @@ writes of that workspace, so a second tab can see the stored copy moved on. Two 
 
 `openStorage()` tries IndexedDB up front (a `list()` call) and falls back to memory, returning
 the reason, when the API is missing or refuses (private mode, some `file://` contexts). The
-fallback is not `durable`: `main.js` then skips autosave, tells the user nothing will be kept
+fallback is not `durable`: `boot.js` then skips autosave, tells the user nothing will be kept
 between visits, keeps the old "dirty until exported" behaviour and warns on unload while dirty.
 
 ## Autosave (`autosave.js`)
@@ -41,11 +41,13 @@ In the shell the dirty dot means "changes not yet stored" when persistence is gi
 flushes and shows "Saved" (or the failure), and a failing store raises a notice once. File >
 Export is unchanged: it downloads JSON and calls `markSaved()`.
 
-## Start-up (`restore.js`, `main.js`)
+## Start-up (`restore.js`, `boot.js`)
 
-`main.js` reads the id of the last workspace from a `localStorage` pointer
+`boot.js` reads the id of the last workspace from a `localStorage` pointer
 (`yourOffice.lastWorkspace`), loads that record and rebuilds it with `workspaceFromJSON` (the
-full validation rules).
+full validation rules). `boot(options)` takes the root, session, pointer store and storage opener as
+parameters so `tests/boot.test.js` can run the whole start-up in jsdom; `main.js` only supplies the
+real `#app`, `localStorage` and IndexedDB.
 
 - Success: the workspace is mounted as already persisted, at the record's revision.
 - Nothing stored: `app/demo-seed.js` builds the welcome workspace (document, budget sheet,

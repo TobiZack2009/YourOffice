@@ -21,8 +21,9 @@ Principles, module layout, key types and the decisions that depart from the spec
 - **No eval.** The formula engine and expressions are parsed to ASTs.
 - **Separate dependency graphs.** Data deps (formulas, references) vs rendering deps
   (views to rerender), spec §9.
-- **No static tooling.** No ESLint, no `checkJs`, no TypeScript, no framework. JSDoc is
-  documentation only. Tests plus the Vite build are the verification path.
+- **Light tooling.** No ESLint, no framework, no TypeScript source. `npm run typecheck` runs `tsc`
+  with `checkJs` over the JSDoc, non-strict. It is advisory until it is clean (see Deviations).
+  Tests, the Vite build and the architecture tests are the verification path.
 
 ## Module layout
 
@@ -37,8 +38,9 @@ src/
   domain/        composition root: installs every feature on a workspace, owns the full validation rules
   app/           shell UI, ribbon, sidebar, editors, popovers, glue, demo seed
   persistence/   storage adapters, autosave, restore (see persistence.md)
-  main.js        vite entry, mounts the shell
-index.html       dev/build shell; vite-plugin-singlefile bundles it into one HTML
+  boot.js        start-up flow: open storage, restore or seed, mount, wire autosave (all injectable)
+  main.js        vite entry: finds #app, supplies localStorage, calls boot
+index.html      dev/build shell; vite-plugin-singlefile bundles it into one HTML
 tests/           vitest suites, named after the module they cover
 ```
 
@@ -61,6 +63,70 @@ Cross-cutting behaviour hangs off command registration, not hand lists:
 (cannot add, move or remove structure others depend on, so hooks skip their checks) or
 `selfManaged` (does its own section bookkeeping). The reference hook reads `commandMeta(type)`.
 Page create/rename/move respell formulas that name pages from that same hook.
+
+## Rules
+
+The governing sentence: **the model says what is true; the session says what the user is doing;
+controllers translate intent into commands; views render those answers.** The rules below follow
+from it. "Enforced" names what fails when a rule is broken; unenforced rules are review items.
+
+1. **Dependency direction.** `core` <- `workspace` <- `sheet | document | presentation` <-
+   `references` <- `domain` <- `app`, with `persistence` beside `app`. Lower layers never import
+   upward. Enforced: `tests/architecture.test.js`.
+2. **The model says what is true.** State that must survive a reload or an undo lives in the
+   workspace and changes only through commands. A command validates its payload, returns the ids it
+   creates, and records what it touched (`touchPage(tx, page, entityId)`). Commands and model code
+   never read the DOM, storage, the clock or `Math.random` for anything that ends up in the model.
+   Enforced: model layers (everything but `render*.js`) may not reference `document`, `window`,
+   `localStorage` and the like.
+3. **The session says what the user is doing.** Open page, selection, zoom, tool, folds, ribbon tab
+   and clipboard go in `app/session.js`, never in the workspace and never in module-level
+   variables.
+4. **Views render, controllers translate.** `render*.js` files are functions from model to DOM and
+   never dispatch. Editors turn input events into `dispatch(type, payload, { origin })` and read
+   the DOM only at that input boundary (caret, drag position).
+5. **Read through selectors.** `workspace/selectors.js` is the read API for the UI.
+   `getPage`/`getPages` clone and are snapshot APIs for export, tests and the few editors that need
+   a private copy. Enforced: per-file call counts in `src/app` may not grow.
+6. **One change flow.** `dispatch` -> a `change` event (`pages`, `entities`, `registry`, `origin`)
+   -> each editor patches itself. Nothing re-renders directly after a dispatch. Cross-cutting
+   behaviour (`hot`, `selfManaged`, `registry`) is registration metadata, not a hand list.
+7. **Keyed rendering.** View caches are keyed by id and carry a signature. A view that reads other
+   pages (references, expressions) has a null signature and is redrawn every pass. An element the
+   user owns (focused and equal to the model, or composing) is never replaced. An inline commit
+   marks its blocks stale so undo redraws them. Every new keyed view ships a node-identity test.
+8. **Lifecycle.** Document listeners and timers go through a gesture scope or a `destroy`. UI
+   services (notice, popover host, keyboard dispatcher) are per-mount instances, never singletons.
+   Shortcuts go through `app/keyboard.js`. Model undo/redo runs only inside `data-history="model"`
+   surfaces; every other editable keeps native text undo.
+9. **Untrusted data is checked at the boundary.** Import, `setPageContent` and export run the full
+   validators. URLs pass `isSafeUrl` in the validator and again in the renderer.
+10. **Infrastructure stays behind adapters.** Storage, clock and the session backing are injected.
+    `app/` never imports `persistence/`; only `boot.js` wires them. Enforced.
+11. **Size.** A file over about 800 lines is split before a feature is added to it. A feature is a
+    model change, commands, a renderer, a controller, tests and a doc paragraph, each in its own
+    module where it fits. Enforced: line ceilings per file (the oversized editors are pinned at their
+    current size and may only shrink).
+12. **Definition of done.** Tests named after the module; `npm test` and `npm run build` green; the
+    area doc and the `AGENTS.md` counts updated; for UI changes, `npm run build && npm run smoke`
+    against real Chrome; any exception to these rules recorded under Deviations.
+
+## Deviations
+
+Known departures from the rules. Remove an entry when it is fixed; add one rather than hiding a
+breach.
+
+- `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
+- `block-editor.js`, `presentation-editor.js`, `sheet-editor.js` and `ribbon-tabs.js` exceed the size
+  guideline (rule 11). The clipboard, gesture and menu code should move into per-editor modules as
+  each editor is next touched.
+- `block-editor.js` keeps a hand list, `INLINE_COMMITS` (rule 6), to recognise typing commits.
+- `block-editor`, `sheet-editor`, `presentation-editor`, `slideshow` and `demo-seed` still call
+  `getPage` (rule 5); the allowlist in the architecture test holds the counts.
+- The reference views, inspector and timeline rebuild on every change that touches them (rule 7).
+- `styles.css` is one unscoped file; styles are not split per area.
+- `npm run typecheck` reports 165 errors (mostly JSDoc shapes for DOM helpers) and is not part of
+  the definition of done until it is clean.
 
 ## Key types
 

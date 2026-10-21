@@ -30,7 +30,7 @@ The page editor is the whole canvas (no max-width card): `.app` fills `#app`, an
 page selection, builds one editor per page, maps sidebar actions to workspace commands
 (create seeds a starter paragraph). What must survive a remount lives in the session (below),
 not in shell globals; only the active slide show is shell state. `options.onImport` lets
-`main.js` remount with an imported workspace, and `options.session` supplies the session
+`boot.js` remount with an imported workspace, and `options.session` supplies the session
 (`main.js` passes a `localStorage`-backed one). The returned handle includes `getSlideshow` and
 `startSlideshow`.
 
@@ -52,7 +52,7 @@ thumbnail per slide id (patching number, `data-index`, current/selected). A thum
 references is redrawn on every pass because it reads other pages. The inspector already syncs
 values into existing inputs, and the animation timeline keeps its own focus handling.
 
-`options.persistence` (an autosave handle, injected by `main.js`) changes what the dirty dot
+`options.persistence` (an autosave handle, injected by `boot.js`) changes what the dirty dot
 means (changes not yet stored), makes Cmd+S flush with a "Saved" notice, and surfaces a failed
 write once. The returned handle has `notify(message)` for start-up messages.
 

@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1249 tests green across 71 files; the single-file build is ~430 kB.** Update these two
+**1258 tests green across 72 files; the single-file build is ~430 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -27,8 +27,13 @@ numbers when they change.
 - `npm test` (Vitest, jsdom). Most suites are environment-agnostic. Tests are named after the
   module they cover.
 - `npm run build` (Vite + `vite-plugin-singlefile` inlines JS and CSS into one HTML).
-- UI work gets a throwaway Chrome smoke script (playwright-core, `channel: "chrome"`, against
-  `dist/index.html`); these are not part of `npm test`.
+- UI work: `npm run build && npm run smoke` drives the built file in real Chrome
+  (`scripts/smoke.mjs`, playwright-core, `channel: "chrome"`); it is not part of `npm test`.
+  Extend it when a UI change adds behaviour jsdom cannot check (focus, selection, IndexedDB).
+- `npm run typecheck` (`tsc` + `checkJs`) is advisory: it still reports 165 errors. Do not add new ones.
+- `tests/architecture.test.js` enforces the import layering, DOM-free model layers, the `getPage`
+  allowlist, no `persistence` imports from `app`, and file size ceilings. If it fails, fix the code;
+  change the test only with a matching entry under Deviations in `docs/architecture.md`.
 
 ## Source map
 
@@ -43,10 +48,39 @@ src/
   domain/        composition root (installDomain, createWorkspace, full validation rules)
   app/           shell, ribbon, sidebar, editors, popovers, demo seed
   persistence/   storage adapters (IndexedDB, memory), autosave, start-up restore
+  boot.js        start-up flow (storage, restore, mount); main.js is the thin vite entry
   main.js        vite entry
 docs/            spec and the docs below
 tests/           vitest suites
 ```
+
+## Architecture rules
+
+The model says what is true; the session says what the user is doing; controllers translate
+intent into commands; views render those answers. Full rules, with what enforces each, are in
+`docs/architecture.md`. The short form:
+
+1. Dependencies point down: `core <- workspace <- sheet|document|presentation <- references <-
+   domain <- app`; `persistence` sits beside `app` and only `boot.js` wires it in.
+2. Durable state lives in the workspace and changes only through commands. Commands validate, return
+   the ids they create, and record the entities they touch. Model code never touches the DOM.
+3. User state (selection, open page, zoom, folds, clipboard) lives in `app/session.js`, not in the
+   workspace or module globals.
+4. `render*.js` never dispatch. Editors turn events into `dispatch(type, payload, { origin })`.
+5. Read through `workspace/selectors.js`; `getPage`/`getPages` are snapshot APIs.
+6. One change flow: dispatch, `change` event, each editor patches itself. Never re-render by hand
+   after a dispatch. Command behaviour flags are registration metadata, not hand lists.
+7. Keyed rendering: caches keyed by id with a signature; never replace an element the user is
+   editing; each keyed view gets a node-identity test.
+8. Listeners and timers belong to a gesture scope or `destroy`; UI services are per-mount
+   instances; shortcuts go through `app/keyboard.js`; model undo only inside `data-history="model"`.
+9. Untrusted data passes the full validators at import, `setPageContent` and export; URLs pass
+   `isSafeUrl` in both validator and renderer.
+10. Storage, clocks and session backing are injected adapters.
+11. Split a file before adding to it past ~800 lines; a feature is model, commands, renderer,
+    controller, tests and a doc paragraph.
+12. Done means: module-named tests, `npm test` and `npm run build` green, area doc and the counts
+    above updated, a smoke run for UI work, and every exception recorded under Deviations.
 
 ## Docs
 
