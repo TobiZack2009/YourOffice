@@ -37,7 +37,7 @@ import { History } from "./history.js";
  *   optionally, the entities inside it that changed. With no entities the whole page counts as changed.
  */
 
-/** @typedef {{ hot: boolean, selfManaged: boolean, registry: boolean }} CommandMeta */
+/** @typedef {{ hot: boolean, selfManaged: boolean, registry: boolean, inline: boolean }} CommandMeta */
 
 /**
  * @typedef {object} DispatchOptions
@@ -402,6 +402,8 @@ export class Workspace {
    *   so cross-cutting hooks skip their expensive checks. `selfManaged`: the handler does its own
    *   bookkeeping for that structure, so hooks do not capture for it. `registry`: it changes the
    *   page registry (tree, titles, favourites, workspace title), so change events say so.
+   *   `inline`: the editor that issues it (typing) already shows the result, so that editor need
+   *   not redraw for a commit made up only of such commands.
    */
   registerCommand(type, handler, meta = {}) {
     if (this._commands.has(type)) {
@@ -411,7 +413,8 @@ export class Workspace {
     this._commandMeta.set(type, {
       hot: meta.hot === true,
       selfManaged: meta.selfManaged === true,
-      registry: meta.registry === true
+      registry: meta.registry === true,
+      inline: meta.inline === true
     });
   }
 
@@ -421,7 +424,7 @@ export class Workspace {
    * @returns {CommandMeta}
    */
   commandMeta(type) {
-    return this._commandMeta.get(type) ?? { hot: false, selfManaged: false, registry: false };
+    return this._commandMeta.get(type) ?? { hot: false, selfManaged: false, registry: false, inline: false };
   }
 
   /**

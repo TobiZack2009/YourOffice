@@ -25,7 +25,7 @@
 ## Store (`workspace/store.js`)
 
 A bare `Workspace` registers only the workspace commands; features are installed by
-`domain/installDomain`. `registerCommand(type, handler, { hot, selfManaged })` stores facts that
+`domain/installDomain`. `registerCommand(type, handler, { hot, selfManaged, registry, inline })` stores facts that
 hooks read through `commandMeta(type)`. `configureValidation({ contentValidators,
 integrityChecks })` sets the rules used by `setPageContent`, import and export (the domain
 supplies the full set; a bare store checks the envelope only).

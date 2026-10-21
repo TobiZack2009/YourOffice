@@ -48,9 +48,11 @@ describe("installDomain", () => {
     expect(ws.commandMeta("renameWorkspace").hot).toBe(true);
     expect(ws.commandMeta("deletePage").selfManaged).toBe(true);
     expect(ws.commandMeta("resizeSection").selfManaged).toBe(true);
-    expect(ws.commandMeta("createPage")).toEqual({ hot: false, selfManaged: false, registry: true });
+    expect(ws.commandMeta("createPage")).toEqual({ hot: false, selfManaged: false, registry: true, inline: false });
     expect(ws.commandMeta("setBlockRuns").registry).toBe(false);
-    expect(ws.commandMeta("noSuchCommand")).toEqual({ hot: false, selfManaged: false, registry: false });
+    expect(ws.commandMeta("setBlockRuns").inline).toBe(true);
+    expect(ws.commandMeta("insertBlock").inline).toBe(false);
+    expect(ws.commandMeta("noSuchCommand")).toEqual({ hot: false, selfManaged: false, registry: false, inline: false });
   });
 });
 

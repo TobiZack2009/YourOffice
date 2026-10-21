@@ -59,9 +59,10 @@ exception: `sheet` and `references` depend on each other (formula retargeting an
 lookup are shared); the test pins exactly which sheet files may import `references`.
 
 Cross-cutting behaviour hangs off command registration, not hand lists:
-`registerCommand(type, handler, { hot, selfManaged, registry })` records whether a command is `hot`
-(cannot add, move or remove structure others depend on, so hooks skip their checks) or
-`selfManaged` (does its own section bookkeeping). The reference hook reads `commandMeta(type)`.
+`registerCommand(type, handler, { hot, selfManaged, registry, inline })` records whether a command is `hot`
+(cannot add, move or remove structure others depend on, so hooks skip their checks),
+`selfManaged` (does its own section bookkeeping) or `inline` (the typing editor already shows the
+result, so a commit made only of such commands is not redrawn). The reference hook reads `commandMeta(type)`.
 Page create/rename/move respell formulas that name pages from that same hook.
 
 ## Rules
@@ -90,7 +91,7 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
    a private copy. Enforced: per-file call counts in `src/app` may not grow.
 6. **One change flow.** `dispatch` -> a `change` event (`pages`, `entities`, `registry`, `origin`)
    -> each editor patches itself. Nothing re-renders directly after a dispatch. Cross-cutting
-   behaviour (`hot`, `selfManaged`, `registry`) is registration metadata, not a hand list.
+   behaviour (`hot`, `selfManaged`, `registry`, `inline`) is registration metadata, not a hand list.
 7. **Keyed rendering.** View caches are keyed by id and carry a signature. A view that reads other
    pages (references, expressions) has a null signature and is redrawn every pass. An element the
    user owns (focused and equal to the model, or composing) is never replaced. An inline commit
@@ -117,7 +118,6 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
-- `block-editor.js` keeps a hand list, `INLINE_COMMITS` (rule 6), to recognise typing commits.
 - `block-editor`, `sheet-editor`, `presentation-editor`, `slideshow` and `demo-seed` still call
   `getPage` (rule 5); the allowlist in the architecture test holds the counts.
 - The reference views, inspector and timeline rebuild on every change that touches them (rule 7).

@@ -688,7 +688,10 @@ export const documentCommands = {
   }
 };
 
-/** Commands that cannot add or remove structure others depend on; hooks skip their heavy checks for them. */
+/**
+ * Commands that cannot add or remove structure others depend on (hooks skip their heavy checks
+ * for them) and that the typing editor has already drawn itself (it does not redraw for them).
+ */
 const DOCUMENT_HOT = new Set(["setBlockRuns", "updateBlock"]);
 
 /**
@@ -697,6 +700,6 @@ const DOCUMENT_HOT = new Set(["setBlockRuns", "updateBlock"]);
  */
 export function registerDocumentCommands(store) {
   for (const [type, handler] of Object.entries(documentCommands)) {
-    store.registerCommand(type, handler, { hot: DOCUMENT_HOT.has(type) });
+    store.registerCommand(type, handler, { hot: DOCUMENT_HOT.has(type), inline: DOCUMENT_HOT.has(type) });
   }
 }

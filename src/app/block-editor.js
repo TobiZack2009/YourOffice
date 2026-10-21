@@ -46,9 +46,6 @@ export { splitRunsAt };
 /** @typedef {import("../document/model.js").Block} Block */
 /** @typedef {import("../document/model.js").InlineRun} InlineRun */
 
-/** Commits made of these alone are typing: the DOM already shows them, so the editor keeps its caret. */
-const INLINE_COMMITS = new Set(["setBlockRuns", "updateBlock"]);
-
 const MARK_TAG = { bold: "strong", italic: "em", underline: "u", strike: "s", code: "code" };
 const EXEC_COMMAND = { bold: "bold", italic: "italic", underline: "underline", strike: "strikeThrough" };
 
@@ -745,7 +742,7 @@ export function createDocumentEditor(hostWorkspace, pageId, options = {}) {
       payload.kind === "commit" &&
       payload.origin === origin &&
       payload.commands.length > 0 &&
-      payload.commands.every((command) => INLINE_COMMITS.has(command))
+      payload.commands.every((command) => workspace.commandMeta(command).inline)
     ) {
       // The DOM, not the model signature a block was drawn from, is the truth now: an undo that
       // brings the model back to that signature must still redraw the block.
