@@ -55,6 +55,9 @@ function fileStem(title) {
   return stem || "workspace";
 }
 
+/** @param {unknown} error @returns {string} */
+const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
+
 /**
  * Mount the full application UI.
  * @param {HTMLElement} root
@@ -64,12 +67,23 @@ function fileStem(title) {
  *   download?: (filename: string, text: string) => void,
  *   onImport?: (workspace: Workspace) => void,
  *   onImportError?: (error: Error) => void,
+ *   workspaces?: WorkspaceManager,
  *   session?: import("./session.js").Session,
  *   persistence?: ShellPersistence
  * }} [options] `persistence`: autosave (see `persistence/autosave.js`); when given, the dirty dot
  *   means "not yet stored" and Cmd+S writes now. `session`: what the user is doing (open page, zoom, folds, selections); a fresh
  *   in-memory one by default, so a caller that wants it kept across loads passes a persisted one.
  */
+/**
+ * What the shell needs to list, open, create and delete stored workspaces; absent when nothing
+ * is kept between visits. Opening or creating one replaces this app (the caller mounts again).
+ * @typedef {object} WorkspaceManager
+ * @property {() => Promise<import("./ribbon-shared.js").WorkspaceEntry[]>} list
+ * @property {(id: string) => Promise<void>} open
+ * @property {(title: string) => Promise<void>} create
+ * @property {(id: string) => Promise<void>} remove
+ */
+
 /**
  * What the shell needs from autosave; passed in so `app/` does not import `persistence/`.
  * @typedef {object} ShellPersistence
@@ -175,6 +189,25 @@ export function mountApp(root, workspace, options = {}) {
     renameWorkspace(title) {
       workspace.dispatch("renameWorkspace", { title });
       updateChrome();
+    },
+    hasWorkspaces: () => Boolean(options.workspaces),
+    listWorkspaces: async () => (await options.workspaces?.list()) ?? [],
+    openWorkspace(id) {
+      void options.workspaces?.open(id).catch((error) => notice.show(`Could not open that workspace: ${errorMessage(error)}`));
+    },
+    createWorkspace(title) {
+      void options.workspaces?.create(title).catch((error) => notice.show(`Could not create a workspace: ${errorMessage(error)}`));
+    },
+    async deleteWorkspace(entry) {
+      const ask = options.confirm ?? ((message) => (typeof window !== "undefined" && window.confirm ? window.confirm(message) : true));
+      if (!ask(`Delete the workspace “${entry.title}”? This cannot be undone.`)) return false;
+      try {
+        await options.workspaces?.remove(entry.id);
+        return true;
+      } catch (error) {
+        notice.show(`Could not delete that workspace: ${errorMessage(error)}`);
+        return false;
+      }
     },
     getZoom: () => session.get().zoom,
     setZoom(percent) {

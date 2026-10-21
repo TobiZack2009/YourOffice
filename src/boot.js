@@ -6,10 +6,11 @@
 
 import { mountApp } from "./app/shell.js";
 import { createSession } from "./app/session.js";
-import { createDemoWorkspace } from "./app/demo-seed.js";
+import { createBlankWorkspace, createDemoWorkspace } from "./app/demo-seed.js";
 import { openStorage as defaultOpenStorage } from "./persistence/storage.js";
 import { createAutosave, attachPageLifecycle } from "./persistence/autosave.js";
 import { restoreWorkspace, storagePointer } from "./persistence/restore.js";
+import { listWorkspaces, loadWorkspace } from "./persistence/workspaces.js";
 
 /** @typedef {import("./workspace/store.js").Workspace} Workspace */
 
@@ -92,6 +93,7 @@ export async function boot(options) {
     app = mountApp(root, workspace, {
       session,
       persistence: autosave ?? undefined,
+      workspaces: storage.durable ? manager : undefined,
       onImport: (imported) =>
         void storage
           .load(imported.id)
@@ -103,6 +105,43 @@ export async function boot(options) {
 
   /** @type {Workspace | null} */
   let current = null;
+
+  /**
+   * Leave the open workspace for another: what is open is stored first, and a failure to do so
+   * keeps the user where they are.
+   * @param {() => Promise<{ workspace: Workspace, persisted: boolean, revision: number }>} next
+   */
+  async function switchTo(next) {
+    if (autosave && !(await autosave.flush())) {
+      throw new Error(`The open workspace could not be saved first (${autosave.error?.message ?? "storage unavailable"}).`);
+    }
+    const target = await next();
+    mount(target.workspace, target);
+    if (!target.persisted) void autosave?.flush();
+  }
+
+  /** What the shell may do with stored workspaces; absent when nothing is kept between visits. */
+  const manager = {
+    list: async () => {
+      await autosave?.flush(); // a workspace not yet written would otherwise be missing from its own list
+      return listWorkspaces(storage, current?.id ?? null);
+    },
+    /** @param {string} title */
+    create: (title) =>
+      switchTo(async () => ({ workspace: createBlankWorkspace(title || "New workspace"), persisted: false, revision: 0 })),
+    /** @param {string} id */
+    open: (id) =>
+      switchTo(async () => {
+        const { workspace, revision } = await loadWorkspace(storage, id);
+        return { workspace, persisted: true, revision };
+      }),
+    /** @param {string} id */
+    async remove(id) {
+      if (id === current?.id) throw new Error("The open workspace cannot be deleted; open another one first.");
+      await storage.remove(id);
+    }
+  };
+
   const opened = restored.workspace
     ? mount(restored.workspace, { persisted: true, revision: restored.revision })
     : mount(createDemoWorkspace(), { persisted: false, revision: 0 });

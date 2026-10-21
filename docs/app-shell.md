@@ -2,7 +2,7 @@
 
 `src/app/`: `shell.js`, `session.js`, `selection.js`, `keyboard.js`, `gesture.js`, `notice.js`,
 `history-scope.js`, `demo-seed.js`, `ribbon.js`, `ribbon-tabs.js`, `sidebar.js`, `popover.js`,
-`icons.js`, `quick-find.js`, `dom.js`.
+`icons.js`, `quick-find.js`, `workspace-switcher.js`, `dom.js`.
 
 Styles are in `src/styles/` (see Styles below).
 
@@ -93,7 +93,8 @@ selection into `selections[pageId]` and puts it back into the new editor; the do
 selection is restored only for the same page, and a presentation selection only when it was
 taken on the slide being reopened, so a redo that brings a slide back reopens that slide.
 
-- **File tab**: rename workspace, mark saved, export/import JSON.
+- **File tab**: rename workspace, switch/create/delete stored workspaces (`workspace-switcher.js`, see
+  `docs/persistence.md`), mark saved, export/import JSON.
 - **View tab**: canvas zoom as a `--zoom` CSS variable, show/hide sidebar. Both are shell UI
   state, not model.
 - **Global keys** (`keyboard.js`): one document `keydown` listener (`createKeyboard`) looks a

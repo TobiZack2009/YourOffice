@@ -18,6 +18,15 @@ import { NO_LINK, buildLinkForm, linkPages } from "./link-form.js";
  */
 
 /**
+ * @typedef {object} WorkspaceEntry A stored workspace, as the switcher lists it.
+ * @property {string} id
+ * @property {string} title
+ * @property {number} savedAt
+ * @property {boolean} active
+ * @property {boolean} recovery
+ */
+
+/**
  * The slice of the shell the ribbon is allowed to call.
  * @typedef {object} ShellApi
  * @property {() => void} undo
@@ -26,6 +35,11 @@ import { NO_LINK, buildLinkForm, linkPages } from "./link-form.js";
  * @property {() => void} exportJSON
  * @property {() => void} pickImport
  * @property {(title: string) => void} renameWorkspace
+ * @property {() => boolean} hasWorkspaces Whether stored workspaces can be listed and switched.
+ * @property {() => Promise<WorkspaceEntry[]>} listWorkspaces
+ * @property {(id: string) => void} openWorkspace
+ * @property {(title: string) => void} createWorkspace
+ * @property {(entry: WorkspaceEntry) => Promise<boolean>} deleteWorkspace Asks first; true when it was deleted.
  * @property {() => number} getZoom
  * @property {(percent: number) => void} setZoom
  * @property {() => boolean} isSidebarCollapsed

@@ -151,6 +151,26 @@ try {
   await page.waitForTimeout(500);
   check("a javascript: link import is rejected", Boolean(dialog && dialog.includes("Import failed")), String(dialog));
 
+  // Several workspaces: create one, come back to the first, survive a reload.
+  const openSwitcher = async () => {
+    await page.click('.ribbon-tab[data-tab="file"]');
+    await page.click('[data-action="workspaces"]');
+    await page.waitForSelector(".workspace-row");
+  };
+  await openSwitcher();
+  await page.fill('[data-role="new-workspace-name"]', "Scratch");
+  await page.click('[data-action="create-workspace"]');
+  await page.waitForFunction(() => document.querySelectorAll(".page-row").length === 1);
+  check("a new workspace opens blank", (await page.locator(".page-row").count()) === 1);
+  await openSwitcher();
+  check("both workspaces are listed", (await page.locator(".workspace-row").count()) === 2);
+  await page.click('[data-action="open-workspace"]:not([disabled])');
+  await page.waitForFunction(() => document.querySelectorAll(".page-row").length === 3);
+  check("opening the first workspace brings its pages back", (await page.locator(".page-row").count()) === 3);
+  await page.reload();
+  await page.waitForSelector(".page-row");
+  check("a reload reopens the workspace last used", (await page.locator(".page-row").count()) === 3);
+
   check("no console errors", errors.length === 0, errors.join(" | "));
 } finally {
   await browser.close();

@@ -22,6 +22,7 @@
  */
 
 import { documentTabs } from "./ribbon-tabs-document.js";
+import { workspaceSwitcher } from "./workspace-switcher.js";
 import { button, hasPres, textPopover } from "./ribbon-shared.js";
 import { sheetTabs } from "./ribbon-tabs-sheet.js";
 import { presentationTabs } from "./ribbon-tabs-presentation.js";
@@ -61,6 +62,17 @@ function fileTab() {
                 },
                 close
               )
+          }),
+          button({
+            id: "workspaces",
+            kind: "menu",
+            label: "Workspaces",
+            title: "Switch to, create or delete a stored workspace",
+            icon: "file",
+            enabled: (ctx) => ctx.shell.hasWorkspaces(),
+            disabledReason: "Workspaces are only kept where this page can store them",
+            attrs: { "data-action": "workspaces" },
+            content: (ctx, close) => workspaceSwitcher(ctx.shell, close)
           })
         ]
       },

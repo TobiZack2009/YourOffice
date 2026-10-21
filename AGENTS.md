@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1300 tests green across 75 files; the single-file build is ~465 kB.** Update these two
+**1309 tests green across 76 files; the single-file build is ~470 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -49,7 +49,7 @@ src/
   domain/        composition root (installDomain, createWorkspace, full validation rules)
   app/           shell, ribbon, sidebar, editors, popovers, demo seed
   styles/        the one stylesheet: index.css imports one file per area
-  persistence/   storage adapters (IndexedDB, memory), autosave, start-up restore
+  persistence/   storage adapters (IndexedDB, memory), autosave, start-up restore, workspace list/load
   boot.js        start-up flow (storage, restore, mount); main.js is the thin vite entry
   main.js        vite entry
 docs/            spec and the docs below

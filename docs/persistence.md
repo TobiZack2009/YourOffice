@@ -57,8 +57,23 @@ real `#app`, `localStorage` and IndexedDB.
   so the original is not overwritten).
 - File > Import mounts the imported workspace as unsaved; autosave then stores it under its id.
 
+## Several workspaces (`workspaces.js`, File > Workspaces)
+
+`listWorkspaces(storage, activeId)` turns the stored records into `{ id, title, savedAt, active,
+recovery }` (real workspaces first, newest on top; recovery copies last) and `loadWorkspace(storage,
+id)` rebuilds one through the full validation rules. `boot.js` wraps them, with create and remove,
+in a manager that it hands to the shell as `options.workspaces`; the shell offers it as
+`shell.listWorkspaces / openWorkspace / createWorkspace / deleteWorkspace` and the File tab shows
+the popover built by `app/workspace-switcher.js`. The manager exists only when storage is durable.
+
+- Listing first flushes autosave, so the open workspace is always in its own list.
+- Opening or creating flushes the open workspace first; if that fails the user stays where they
+  are and sees a notice. The new workspace is then mounted (new autosave, pointer moved).
+- A new workspace is one empty document page, written straight away.
+- Delete asks first; the open workspace cannot be deleted. Recovery copies can be deleted but not
+  opened.
+
 ## Not done
 
 - Multi-tab locking or merging (only the conflict notice).
-- A UI to list, open or delete stored workspaces and recovery copies.
 - Image/asset storage separate from page content.

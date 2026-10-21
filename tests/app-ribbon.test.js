@@ -121,7 +121,7 @@ describe("createRibbon", () => {
       selectedColumnWidth: vi.fn(() => null),
       selectedTableName: vi.fn(() => null)
     };
-    const ctx = { workspace, page: undefined, docEditor: /** @type {any} */ (null), sheetEditor: /** @type {any} */ (null), shell: /** @type {any} */ ({}) };
+    const ctx = { workspace, page: undefined, docEditor: /** @type {any} */ (null), sheetEditor: /** @type {any} */ (null), shell: /** @type {any} */ ({ hasWorkspaces: () => false }) };
     const ribbon = createRibbon(() => ctx);
     document.body.append(ribbon.element);
     return { ribbon, ctx, docEditor, sheetEditor };

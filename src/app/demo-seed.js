@@ -19,6 +19,18 @@ export function createDemoWorkspace(options = {}) {
   return workspace;
 }
 
+/**
+ * An empty workspace with one blank document, for "New workspace".
+ * @param {string} title
+ * @returns {Workspace}
+ */
+export function createBlankWorkspace(title) {
+  const workspace = createWorkspace({ title });
+  workspace.dispatch("createPage", { type: "document", title: "Untitled" });
+  workspace.markSaved();
+  return workspace;
+}
+
 /** @param {Workspace} workspace */
 export function seedDemo(workspace) {
   workspace.transact("seed welcome document", () => {
