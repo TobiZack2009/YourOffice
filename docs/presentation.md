@@ -52,6 +52,15 @@ Three panes: `slide-strip.js` (thumbnails, hover "+", drag reorder, right-click 
 layout submenu, strip keyboard), the scaled stage, and `inspector.js` (selection-driven
 sections; slide background, transition and size when nothing is selected).
 
+`presentation-editor.js` builds the kernel (`ed`): the mutable state on one object (`ed.st`:
+current slide, selection, tool, text edit, gesture, ...), the shared operations, and the strip,
+inspector and timeline. The behaviour lives in modules that each take the kernel and return their
+functions: `presentation-stage.js` (stage and overlay drawing), `-slides.js`, `-objects.js`,
+`-animations.js`, `-text.js` (in-place text editing), `-gestures.js` (pointer gestures),
+`-input.js` (double click, context menu, keys), `-references.js` (embeds and expressions).
+`presentation-dom.js` holds the constants and DOM helpers. Functions one module offers another are
+forwarded through the kernel, so a module takes what it needs at creation.
+
 - A `gesture` union (`move | resize | rotate | marquee | draw | path`) previews on the live
   DOM and commits one command on mouseup; geometry lands on whole logical px. Pointer
   conversion uses `rect.width / size.width || 1`, so jsdom (zero rects) works.

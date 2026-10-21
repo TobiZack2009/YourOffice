@@ -105,7 +105,7 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
     `app/` never imports `persistence/`; only `boot.js` wires them. Enforced.
 11. **Size.** A file over about 800 lines is split before a feature is added to it. A feature is a
     model change, commands, a renderer, a controller, tests and a doc paragraph, each in its own
-    module where it fits. Enforced: line ceilings per file (the remaining oversized editors are pinned at
+    module where it fits. Enforced: line ceilings per file (the remaining oversized files are pinned at
     their current size and may only shrink).
 12. **Definition of done.** Tests named after the module; `npm test` and `npm run build` green; the
     area doc and the `AGENTS.md` counts updated; for UI changes, `npm run build && npm run smoke`
@@ -117,7 +117,7 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - `sheet` and `references` import each other (rule 1); the test pins which sheet files may.
-- `presentation-editor.js`, `sheet-editor.js` and `ribbon-tabs.js` exceed the size
+- `sheet-editor.js` and `ribbon-tabs.js` exceed the size
   guideline (rule 11). The clipboard, gesture and menu code should move into per-editor modules as
   each editor is next touched.
 - `block-editor.js` keeps a hand list, `INLINE_COMMITS` (rule 6), to recognise typing commits.
