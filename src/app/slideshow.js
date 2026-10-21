@@ -21,7 +21,7 @@ import { playAnimation } from "./animation-preview.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";
 import { pageIdOfLink } from "./link-form.js";
-import { enginesFor, staticReferenceHooks } from "./reference-render.js";
+import { enginesFor, staticReferenceHooks } from "../export/static-render.js";
 import { pageContent, pageExists, pageTitle } from "../workspace/selectors.js";
 
 /**

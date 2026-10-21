@@ -12,7 +12,7 @@ import {
   renderTableSection,
   renderValue,
   enginesFor
-} from "../src/app/reference-render.js";
+} from "../src/export/static-render.js";
 import { openReferencePicker, renderPreview } from "../src/app/reference-picker.js";
 import { checkExpression, openExpressionEditor, wordBeforeCaret } from "../src/app/expression-editor.js";
 import { findSection } from "../src/references/sections.js";

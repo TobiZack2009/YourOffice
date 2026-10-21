@@ -19,7 +19,8 @@ const ALLOWED = {
   sheet: ["core", "workspace", "calc", "references"],
   references: ["core", "workspace", "calc", "document", "presentation"],
   domain: ["core", "workspace", "calc", "document", "presentation", "sheet", "references"],
-  app: ["core", "workspace", "calc", "document", "presentation", "sheet", "references", "domain"],
+  export: ["core", "workspace", "calc", "document", "presentation", "sheet", "references"],
+  app: ["core", "workspace", "calc", "document", "presentation", "sheet", "references", "domain", "export"],
   persistence: ["core", "workspace", "domain"],
   styles: [],
   main: ["core", "workspace", "domain", "app", "persistence", "styles"]
@@ -90,7 +91,7 @@ describe("architecture", () => {
       /\bHTML\w*Element\b(?!.*@)/
     ];
     const offenders = [];
-    const modelAreas = ["core", "calc", "workspace", "sheet", "document", "presentation", "references", "domain"];
+    const modelAreas = ["core", "calc", "workspace", "sheet", "document", "presentation", "references", "domain", "export"];
     for (const file of files.filter((f) => modelAreas.includes(areaOf(f)) && !/render[\w-]*\.js$/.test(f))) {
       const code = stripComments(readFileSync(file, "utf8"));
       for (const pattern of forbidden) if (pattern.test(code)) offenders.push(`${relative(SRC, file)} matches ${pattern}`);

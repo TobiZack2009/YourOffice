@@ -34,7 +34,7 @@ import {
   renderSlideSection,
   renderTableSection,
   renderValue
-} from "./reference-render.js";
+} from "../export/static-render.js";
 
 /**
  * @typedef {object} ReferenceViewsOptions
@@ -84,7 +84,7 @@ export function createReferenceViews(options) {
     return pass;
   }
 
-  /** @returns {import("./reference-render.js").StaticContext} */
+  /** @returns {import("../export/static-render.js").StaticContext} */
   function context() {
     const { engines, book } = shared();
     return { data: options.workspace.data, engines, book, resolvePageTitle: options.resolvePageTitle, resolveAssetUrl: options.resolveAssetUrl };

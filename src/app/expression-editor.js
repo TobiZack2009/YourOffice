@@ -13,7 +13,7 @@ import { evaluateExpression } from "../references/expression.js";
 import { suggestNames } from "../references/catalog.js";
 import { explain, isFormulaError } from "../calc/errors.js";
 import { clear, h } from "./dom.js";
-import { enginesFor, renderValue } from "./reference-render.js";
+import { enginesFor, renderValue } from "../export/static-render.js";
 
 const PALETTE_SIZE = 6;
 const MAX_SUGGESTIONS = 8;

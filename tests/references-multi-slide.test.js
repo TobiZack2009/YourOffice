@@ -12,7 +12,7 @@ import {
 import { shapeOfSection, fitOf } from "../src/references/fit.js";
 import { buildCatalog, ensureSection } from "../src/references/catalog.js";
 import { copySectionContent } from "../src/references/detached.js";
-import { renderSectionById } from "../src/app/reference-render.js";
+import { renderSectionById } from "../src/export/static-render.js";
 
 /** Deck: s1 s2 s3 s4 (each with a text box naming it). Notes: an empty document. */
 function setup() {

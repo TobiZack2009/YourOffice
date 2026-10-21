@@ -17,9 +17,10 @@ The product/technical spec is `docs/app.txt` (source of truth for requirements).
 
 Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, presentation
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
-done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
+done, as are the asset registry and the export core (HTML, Markdown, CSV, zip, slides as SVG; not yet wired into the
+UI). Import, PNG/PDF and the export UI remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1338 tests green across 78 files; the single-file build is ~475 kB.** Update these two
+**1434 tests green across 86 files; the single-file build is ~476 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -49,6 +50,7 @@ src/
   domain/        composition root (installDomain, createWorkspace, full validation rules)
   app/           shell, ribbon, sidebar, editors, popovers, demo seed
   styles/        the one stylesheet: index.css imports one file per area
+  export/        export plan, HTML / Markdown / CSV / zip, slide SVG, static rendering of embeds
   persistence/   storage adapters (IndexedDB, memory), autosave, start-up restore, workspace list/load
   boot.js        start-up flow (storage, restore, mount); main.js is the thin vite entry
   main.js        vite entry
@@ -63,7 +65,8 @@ intent into commands; views render those answers. Full rules, with what enforces
 `docs/architecture.md`. The short form:
 
 1. Dependencies point down: `core <- workspace <- calc|document|presentation <- references <-
-   sheet <- domain <- app`; `persistence` sits beside `app` and only `boot.js` wires it in.
+   sheet <- domain <- app`; `export` sits above `sheet` (the DOM is injected; `app` may import it);
+   `persistence` sits beside `app` and only `boot.js` wires it in.
 2. Durable state lives in the workspace and changes only through commands. Commands validate, return
    the ids they create, and record the entities they touch. Model code never touches the DOM.
 3. User state (selection, open page, zoom, folds, clipboard) lives in `app/session.js`, not in the
@@ -100,6 +103,7 @@ intent into commands; views render those answers. Full rules, with what enforces
 | `docs/presentation.md` | Slides, editor, animations, slide show |
 | `docs/references.md` | Sections, embeds, expressions, scope, detached store, limitations |
 | `docs/app-shell.md` | Shell, ribbon, sidebar, popovers, icons |
+| `docs/export.md` | Export request, plan, HTML / Markdown / CSV / zip, slide SVG |
 | `docs/persistence.md` | IndexedDB storage, autosave, recovery, start-up |
 | `docs/roadmap.md` | Phases and open items |
 

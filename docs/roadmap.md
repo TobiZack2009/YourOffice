@@ -7,7 +7,7 @@ Reordered from spec §16 to land testable foundations first. Phases 1-6 are done
 2. **Formula engine** (done): tokenizer, parser, evaluator, dependency graph, incremental
    recalc, cycle detection, A1/absolute/mixed refs, Excel error values. See `formulas.md`.
 3. **Document editor** (done): ordered and nested blocks, rich text runs, links, pure
-   renderer. Block export outstanding. See `document-editor.md`.
+   renderer. See `document-editor.md`.
 4. **Sheet editor** (done, polish outstanding): Numbers-style canvas, independent tables,
    sparse storage, range selection, fill/copy/move, merge, table drag. Outstanding:
    incremental engine updates, cross-table visual polish. See `sheet-editor.md`.
@@ -16,8 +16,10 @@ Reordered from spec §16 to land testable foundations first. Phases 1-6 are done
 6. **References / sections** (done; limitations in `references.md`): typed locators, reference
    instances, live embeds, expressions with conditionals, detached store, cycle checks.
 7. **Persistence / interchange:** IndexedDB autosave + recovery is done (`persistence.md`).
-   The asset registry is done (`workspace.md`). Outstanding: Markdown, CSV, PDF, limited Office formats.
-8. **Standalone export:** pristine-shell single-HTML export (editable + read-only enforced at
+   The asset registry is done (`workspace.md`). The export core is done: HTML, Markdown, CSV and
+   zip, with slides as SVG (`export.md`). Outstanding: export UI (right-click and File menu,
+   settings), import (HTML, Markdown, CSV, JSON), PNG and PDF, limited Office formats.
+8. **Standalone export** (with URL sharing of an embedded workspace): pristine-shell single-HTML export (editable + read-only enforced at
    the command layer), asset embedding, `<script type="application/json">` payload with
    escaping, Playwright round-trip validation.
 

@@ -4,7 +4,9 @@
  * expression shows; live (editable) embeds of text are built by `reference-view.js`
  * on top of the same pieces.
  *
- * Pure DOM output from workspace data: nothing here mutates the model.
+ * Pure DOM output from workspace data: nothing here mutates the model. The DOM
+ * implementation comes from `ctx.document` (the global one when absent), so the exporter can
+ * draw into a detached document.
  */
 
 import { renderBlock } from "../document/render.js";
@@ -16,9 +18,37 @@ import { renderTable } from "../sheet/render.js";
 import { TableEngines } from "../references/table-engine.js";
 import { evaluateExpression } from "../references/expression.js";
 import { findSection, locatorSlideIds, sectionKind, sectionRunIds, sectionSlideIds } from "../references/sections.js";
-import { h } from "./dom.js";
 
 const MAX_DEPTH = 6;
+
+/**
+ * An element builder over a given document (the global one when absent): `class`, `text`, and
+ * any other attribute; children are nodes or strings.
+ * @param {Document | undefined} [doc]
+ */
+export function elementFactory(doc) {
+  const d = doc ?? document;
+  /**
+   * @param {string} tag
+   * @param {Record<string, unknown>} [props]
+   * @param {Array<Node | string | null | undefined | false>} [children]
+   * @returns {any}
+   */
+  return (tag, props = {}, children = []) => {
+    const element = d.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (value === undefined || value === null || value === false) continue;
+      if (key === "class") element.className = String(value);
+      else if (key === "text") element.textContent = String(value);
+      else element.setAttribute(key, value === true ? "" : String(value));
+    }
+    for (const child of children) {
+      if (child === null || child === undefined || child === false) continue;
+      element.append(typeof child === "string" ? d.createTextNode(child) : child);
+    }
+    return element;
+  };
+}
 export const DEFAULT_SLIDE_WIDTH = 480;
 
 /**
@@ -29,6 +59,7 @@ export const DEFAULT_SLIDE_WIDTH = 480;
  * @property {(pageId: string) => string | undefined} [resolvePageTitle]
  * @property {(assetId: string) => string | undefined} [resolveAssetUrl]
  * @property {number} [depth]
+ * @property {Document} [document] DOM implementation (defaults to the global one).
  */
 
 /**
@@ -69,10 +100,11 @@ function clipToRange(wrapper, range) {
  * @returns {HTMLElement}
  */
 export function renderTableSection(ctx, found) {
+  const h = elementFactory(ctx.document);
   const table = found.container.content.tables?.[found.section.locator.tableId];
-  if (!table) return missing("The table is gone.");
+  if (!table) return missing("The table is gone.", ctx.document);
   const engines = ctx.engines ?? enginesFor(ctx.data);
-  const wrapper = renderTable(table, { engines, interactive: false });
+  const wrapper = renderTable(table, { engines, interactive: false, document: ctx.document });
   wrapper.classList.add("is-embedded");
   wrapper.style.left = "";
   wrapper.style.top = "";
@@ -88,15 +120,18 @@ export function renderTableSection(ctx, found) {
  * @returns {HTMLElement}
  */
 export function renderSlideSection(ctx, found, width = DEFAULT_SLIDE_WIDTH) {
+  const h = elementFactory(ctx.document);
   const content = found.container.content;
   const ids = sectionSlideIds(content, found.section.locator);
-  if (ids.length === 0) return missing(locatorSlideIds(found.section.locator).length > 1 ? "The slides are gone." : "The slide is gone.");
+  if (ids.length === 0) {
+    return missing(locatorSlideIds(found.section.locator).length > 1 ? "The slides are gone." : "The slide is gone.", ctx.document);
+  }
   const size = content.size ?? { width: 1280, height: 720 };
   const scale = width / size.width;
   const depth = ctx.depth ?? 0;
   const drawn = ids.map((slideId) => {
     const slide = content.slides[slideId];
-    const inner = renderSlide(slide, { size, scale, ...staticReferenceHooks(ctx, found.containerId, depth + 1) });
+    const inner = renderSlide(slide, { size, scale, document: ctx.document, ...staticReferenceHooks(ctx, found.containerId, depth + 1) });
     return h(
       "div",
       {
@@ -119,6 +154,7 @@ export function renderSlideSection(ctx, found, width = DEFAULT_SLIDE_WIDTH) {
  * @returns {{ renderReference: (object: any) => HTMLElement, renderInlineRef: (ref: any) => HTMLElement, resolveAssetUrl?: (assetId: string) => string | undefined }}
  */
 export function staticReferenceHooks(ctx, containerId, depth) {
+  const h = elementFactory(ctx.document);
   return {
     resolveAssetUrl: ctx.resolveAssetUrl,
     renderReference: (object) => renderReferenceBlock(ctx, containerId, object, depth),
@@ -133,10 +169,12 @@ export function staticReferenceHooks(ctx, containerId, depth) {
  * @returns {HTMLElement}
  */
 export function renderBlocksSection(ctx, found) {
+  const h = elementFactory(ctx.document);
   const depth = ctx.depth ?? 0;
   const content = found.container.content;
   const wrap = h("div", { class: "reference-blocks" });
   const options = {
+    document: ctx.document,
     resolvePageTitle: ctx.resolvePageTitle,
     resolveAssetUrl: ctx.resolveAssetUrl,
     blocks: content.blocks,
@@ -160,7 +198,7 @@ export function renderBlocksSection(ctx, found) {
  * @returns {HTMLElement}
  */
 export function renderReferenceBlock(ctx, containerId, block, depth) {
-  if (depth > MAX_DEPTH) return missing("Too many levels of embedded content.");
+  if (depth > MAX_DEPTH) return missing("Too many levels of embedded content.", ctx.document);
   const inner = { ...ctx, depth };
   if (block.kind === "expression") {
     const result = evaluateExpression(ctx.data, containerId, block.expression ?? "", ctx.book ? { book: ctx.book } : {});
@@ -178,7 +216,7 @@ export function renderReferenceBlock(ctx, containerId, block, depth) {
  */
 export function renderSectionById(ctx, sectionId, display) {
   const found = sectionId ? findSection(ctx.data, sectionId) : null;
-  if (!found) return missing("The source was removed.");
+  if (!found) return missing("The source was removed.", ctx.document);
   const kind = sectionKind(found);
   if (kind === "table") return renderTableSection(ctx, found);
   if (kind === "slide") return renderSlideSection(ctx, found, display?.width);
@@ -187,18 +225,21 @@ export function renderSectionById(ctx, sectionId, display) {
 
 /**
  * @param {string} message
+ * @param {Document} [doc]
  * @returns {HTMLElement}
  */
-export function missing(message) {
-  return h("div", { class: "reference-missing", text: message });
+export function missing(message, doc) {
+  return elementFactory(doc)("div", { class: "reference-missing", text: message });
 }
 
 /**
  * A range value drawn as a plain grid.
  * @param {any[]} range
+ * @param {Document} [doc]
  * @returns {HTMLElement}
  */
-function renderRange(range) {
+function renderRange(range, doc) {
+  const h = elementFactory(doc);
   const { rows, cols } = rangeDims(range);
   const body = h("tbody");
   for (let r = 0; r < rows; r++) {
@@ -212,11 +253,12 @@ function renderRange(range) {
 /**
  * An error as a chip that carries its explanation.
  * @param {any} error
+ * @param {Document} [doc]
  * @returns {HTMLElement}
  */
-export function renderErrorChip(error) {
+export function renderErrorChip(error, doc) {
   const info = explain(error);
-  return h("span", {
+  return elementFactory(doc)("span", {
     class: "reference-chip is-error",
     title: info.text,
     "aria-label": `${info.code}: ${info.text}`,
@@ -233,9 +275,10 @@ export function renderErrorChip(error) {
  * @returns {HTMLElement}
  */
 export function renderValue(ctx, value) {
-  if (isFormulaError(value)) return renderErrorChip(value);
+  const h = elementFactory(ctx.document);
+  if (isFormulaError(value)) return renderErrorChip(value, ctx.document);
   if (value === null || value === undefined || value === "") return h("span", { class: "reference-empty" });
   if (isHandle(value)) return renderSectionById({ ...ctx, depth: (ctx.depth ?? 0) + 1 }, value.sectionId);
-  if (isRange(value)) return renderRange(value);
+  if (isRange(value)) return renderRange(value, ctx.document);
   return h("span", { class: "reference-chip", text: displayValue(value) });
 }

@@ -24,7 +24,7 @@ import { createPopoverHost } from "./popover.js";
 import { createPresentationContent, readPresentationContent } from "../presentation/model.js";
 import { createSlideStrip } from "./slide-strip.js";
 import { defaultNotice } from "./notice.js";
-import { enginesFor, staticReferenceHooks } from "./reference-render.js";
+import { enginesFor, staticReferenceHooks } from "../export/static-render.js";
 import { findSectionByLocator, slideLocator } from "../references/sections.js";
 import { h } from "./dom.js";
 import { icon } from "./icons.js";

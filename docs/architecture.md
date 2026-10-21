@@ -38,6 +38,7 @@ src/
   references/    scope, sections, reference commands, detached store, fit rule, cross-table rewrites
   domain/        composition root: installs every feature on a workspace, owns the full validation rules
   app/           shell UI, ribbon, sidebar, editors, popovers, glue, demo seed
+  export/        export plan, HTML / Markdown / CSV / zip, slide SVG, static rendering (see export.md)
   persistence/   storage adapters, autosave, restore (see persistence.md)
   boot.js        start-up flow: open storage, restore or seed, mount, wire autosave (all injectable)
   main.js        vite entry: finds #app, supplies localStorage, calls boot
@@ -46,7 +47,7 @@ tests/           vitest suites, named after the module they cover
 ```
 
 Layering: `core` <- `workspace` <- `calc | document | presentation` <- `references` <- `sheet`
-<- `domain` <- `app` <- `main`; `persistence` sits beside `app` (it needs only `core`, `workspace`, `domain`) and
+<- `domain` <- `app` <- `main`; `export` sits between `sheet` and `app` (it reads the model through `workspace`, `document`, `presentation`, `sheet` and `references` and takes the DOM as an injected `document`); `persistence` sits beside `app` (it needs only `core`, `workspace`, `domain`) and
 is wired to it by `main`. `workspace` and `core` import nothing from the features. A bare `Workspace`
 registers only the workspace commands and checks only the envelope; `domain/index.js` is the one
 place that wires the rest: `installDomain(workspace)` (idempotent) registers the document, sheet,
@@ -74,13 +75,13 @@ controllers translate intent into commands; views render those answers.** The ru
 from it. "Enforced" names what fails when a rule is broken; unenforced rules are review items.
 
 1. **Dependency direction.** `core` <- `workspace` <- `calc | document | presentation` <-
-   `references` <- `sheet` <- `domain` <- `app`, with `persistence` beside `app`. Lower layers never import
+   `references` <- `sheet` <- `domain` <- `app`, with `persistence` and `export` beside `domain`/`app`. Lower layers never import
    upward. Enforced: `tests/architecture.test.js`.
 2. **The model says what is true.** State that must survive a reload or an undo lives in the
    workspace and changes only through commands. A command validates its payload, returns the ids it
    creates, and records what it touched (`touchPage(tx, page, entityId)`). Commands and model code
    never read the DOM, storage, the clock or `Math.random` for anything that ends up in the model.
-   Enforced: model layers (everything but `render*.js`) may not reference `document`, `window`,
+   Enforced: model layers (everything but `render*.js`, which includes `export/*-render.js`) may not reference `document`, `window`,
    `localStorage` and the like.
 3. **The session says what the user is doing.** Open page, selection, zoom, tool, folds, ribbon tab
    and clipboard go in `app/session.js`, never in the workspace and never in module-level

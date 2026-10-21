@@ -13,7 +13,7 @@ import { containerOf } from "../references/containers.js";
 import { findSection } from "../references/sections.js";
 import { clear, h } from "./dom.js";
 import { icon } from "./icons.js";
-import { enginesFor, missing, renderBlocksSection, renderSlideSection, renderTableSection } from "./reference-render.js";
+import { enginesFor, missing, renderBlocksSection, renderSlideSection, renderTableSection } from "../export/static-render.js";
 
 const KIND_ICON = { section: "section", table: "table", slide: "slide", block: "paragraph" };
 
