@@ -19,7 +19,7 @@ Phases 1-6 are done (workspace, formula engine, document editor, sheet editor, p
 with animations and slide show, sections/embeds/expression references). Phase 7's IndexedDB autosave and recovery is
 done; the interchange formats (Markdown, CSV, PDF) remain, then Phase 8 (standalone export). See `docs/roadmap.md`.
 
-**1263 tests green across 72 files; the single-file build is ~451 kB.** Update these two
+**1264 tests green across 72 files; the single-file build is ~452 kB.** Update these two
 numbers when they change.
 
 ## Verification
@@ -82,7 +82,8 @@ intent into commands; views render those answers. Full rules, with what enforces
 11. Split a file before adding to it past ~800 lines; a feature is model, commands, renderer,
     controller, tests and a doc paragraph.
 12. Styles: one imported stylesheet (`src/styles/index.css`, imports only), one file per area,
-    rules nested under their component class, files under 400 lines.
+    rules nested under their component class, a class styled at the top level of one file only,
+    files under 400 lines.
 13. Done means: module-named tests, `npm test`, `npm run build` and `npm run typecheck` green, area doc and the counts
     above updated, a smoke run for UI work, and every exception recorded under Deviations.
 

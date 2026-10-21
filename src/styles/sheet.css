@@ -208,11 +208,6 @@
   cursor: crosshair;
 }
 
-.popover.context-menu {
-  padding: 6px;
-  min-width: 220px;
-}
-
 /* The in-cell editor sits on top of the cell being edited. */
 .sheet-cell-editor {
   position: absolute;

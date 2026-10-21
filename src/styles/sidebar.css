@@ -8,10 +8,10 @@
   border-right: 1px solid var(--border);
   overflow-y: auto;
   font-size: 13px;
-}
 
-.app.sidebar-collapsed .sidebar {
-  display: none;
+  .app.sidebar-collapsed & {
+    display: none;
+  }
 }
 
 .sidebar-content {
@@ -42,8 +42,7 @@
 }
 
 .workspace-title-input,
-.rename-input,
-.page-title-input {
+.rename-input {
   font: inherit;
   color: inherit;
   width: 100%;

@@ -188,6 +188,9 @@ and starts with a comment saying which:
 Rules are nested (native CSS nesting) under their component class: states and modifiers as
 `&:hover` / `&.is-selected`, descendants as `.child` or `& tag`. Class names stay global and
 unprefixed, so a rule keeps its specificity wherever it is nested; nesting groups rules, it does not
-scope them. New styles go into the file of the area that owns the element; a new area gets a new
+scope them. A class is styled at the top level of exactly one file; another area that needs to
+restyle it nests the rule inside its own component class (`.canvas { .page-title-input {...} }`,
+`.sidebar { .app.sidebar-collapsed & {...} }`). New styles go into the file of the area that owns the element; a new area gets a new
 file and an `@import` line. The architecture test checks that `index.css` is the only import,
-that every file is imported once, and that no file passes 400 lines.
+that every file is imported once, that no class has top-level rules in two files, and that no
+file passes 400 lines.

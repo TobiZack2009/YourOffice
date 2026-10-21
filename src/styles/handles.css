@@ -30,7 +30,6 @@
 .block-handle.is-visible,
 .block-handle:focus-visible,
 .sheet-handle,
-.slide-thumb-wrap:hover .slide-handle,
 .slide-handle.has-references,
 .slide-handle:focus-visible {
   opacity: 1;
@@ -47,6 +46,10 @@
   height: 20px;
   cursor: pointer;
   z-index: 2;
+
+  .slide-thumb-wrap:hover & {
+    opacity: 1;
+  }
 }
 
 .handle-badge {

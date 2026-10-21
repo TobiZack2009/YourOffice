@@ -113,7 +113,8 @@ from it. "Enforced" names what fails when a rule is broken; unenforced rules are
     their current size and may only shrink).
 12. **Styles follow the areas.** One stylesheet is imported (`styles/index.css`, imports only); each
     file styles one area; rules are nested under their component class; a file stays under 400
-    lines. Enforced. Style an element in the file of the area that owns it.
+    lines; a class is styled at the top level of one file only (other areas style it from inside
+    their own component class). Enforced. Style an element in the file of the area that owns it.
 13. **Definition of done.** Tests named after the module; `npm test`, `npm run build` and
     `npm run typecheck` green; the
     area doc and the `AGENTS.md` counts updated; for UI changes, `npm run build && npm run smoke`
@@ -125,8 +126,9 @@ Known departures from the rules. Remove an entry when it is fixed; add one rathe
 breach.
 
 - The reference views redraw their table, slide and expression bodies on every host pass; only nested editors are cached (rule 7). The inspector and the animation timeline are keyed.
-- Class names are global. Styles are split per area and nested, but not scoped, so two areas can
-  still collide on a class name (rule 12).
+- Class names are global and unprefixed. The architecture test makes every class belong to one
+  stylesheet, so a second area cannot silently redefine it, but a descendant selector in one area can
+  still match a same-named element from another (rule 12).
 
 ## Key types
 

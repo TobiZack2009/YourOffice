@@ -297,7 +297,3 @@
 .path-handle-to {
   background: var(--accent);
 }
-
-.presentation-editor.is-previewing .stage-area {
-  cursor: default;
-}

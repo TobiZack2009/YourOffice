@@ -1,20 +1,5 @@
 /* The presentation editor grid and the slide strip / stage / inspector / timeline areas. */
 
-.canvas {
-  &:has(.presentation-editor) {
-    overflow: hidden;
-    min-height: 0;
-
-    .page-header {
-      padding: 10px 20px 6px;
-    }
-
-    .page-title-input {
-      font-size: 20px;
-    }
-  }
-}
-
 .presentation-editor {
   flex: 1;
   min-height: 0;
@@ -46,6 +31,10 @@
 
   &:not(.show-timeline) > .animation-timeline {
     display: none;
+  }
+
+  &.is-previewing .stage-area {
+    cursor: default;
   }
 
   &.hide-inspector {

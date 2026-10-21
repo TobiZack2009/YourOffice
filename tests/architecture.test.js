@@ -164,6 +164,43 @@ describe("architecture", () => {
       for (const file of all.filter((f) => f !== index)) expect(importsOf(file), `${relative(SRC, file)} imports`).toEqual([]);
     });
 
+    /** Classes in the first compound of each top-level selector: the ones a file defines (owns). */
+    const ownedClasses = (file) => {
+      const text = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      const owned = new Set();
+      let depth = 0;
+      let selector = "";
+      for (const ch of text) {
+        if (ch === "{") {
+          if (depth === 0 && !selector.trim().startsWith("@")) {
+            for (const part of selector.split(",")) {
+              const first = part.trim().split(/[\s>+~]/)[0];
+              for (const m of first.matchAll(/\.([A-Za-z_][\w-]*)/g)) owned.add(m[1]);
+            }
+          }
+          depth += 1;
+          selector = "";
+        } else if (ch === "}") {
+          depth -= 1;
+          selector = "";
+        } else if (ch === ";") {
+          selector = "";
+        } else if (depth === 0) {
+          selector += ch;
+        }
+      }
+      return owned;
+    };
+
+    it("a class is styled at the top level of one stylesheet only; other areas style it from inside their own", () => {
+      const owners = new Map();
+      for (const file of all.filter((f) => !f.endsWith("index.css"))) {
+        for (const name of ownedClasses(file)) owners.set(name, [...(owners.get(name) ?? []), relative(STYLES, file)]);
+      }
+      const shared = [...owners].filter(([, files]) => files.length > 1).map(([name, files]) => `.${name}: ${files.join(", ")}`);
+      expect(shared).toEqual([]);
+    });
+
     it("stylesheets stay under 400 lines", () => {
       const over = all.filter((f) => readFileSync(f, "utf8").split("\n").length > 400).map((f) => relative(SRC, f));
       expect(over).toEqual([]);
